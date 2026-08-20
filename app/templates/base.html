@@ -1,0 +1,52 @@
+{% from "_icons.html" import icon %}
+{% from "_page_header.html" import render_page_header %}
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}CCF Event Dashboard{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v='20260820-quality-modal') }}">
+</head>
+<body>
+    <aside class="sidebar">
+        <a class="brand" href="{{ url_for('dashboard.events') }}" aria-label="CCF Event Dashboard events">
+            <span class="brand-mark"><img src="{{ url_for('static', filename='CCF-Logo-2017-01.png') }}" alt="" aria-hidden="true"></span>
+            <span class="brand-copy"><strong>Dashboard</strong><small>Event insights</small></span>
+        </a>
+
+        {% if event %}
+            <div class="workspace-label">
+                <span>Selected event</span>
+                <strong title="{{ event['name'] }}">{{ event['name'] }}</strong>
+                <small>{{ 'Active dataset' if active_batch else 'Upload required' }}</small>
+            </div>
+            <nav aria-label="Event workspace navigation">
+                <a class="nav-link {% if request.endpoint == 'dashboard.event_overview' %}active{% endif %}" href="{{ url_for('dashboard.event_overview', event_id=event['id']) }}">{{ icon('overview') }}<span>Overview</span></a>
+                <a class="nav-link {% if request.endpoint in ('dashboard.event_satellites', 'dashboard.event_satellite_registrants') %}active{% endif %}" href="{{ url_for('dashboard.event_satellites', event_id=event['id']) }}">{{ icon('satellites') }}<span>Satellites</span></a>
+                <a class="nav-link {% if request.endpoint == 'dashboard.event_quality' %}active{% endif %}" href="{{ url_for('dashboard.event_quality', event_id=event['id']) }}">{{ icon('quality') }}<span>Data Quality</span></a>
+                <a class="nav-link {% if request.endpoint == 'dashboard.event_imports' %}active{% endif %}" href="{{ url_for('dashboard.event_imports', event_id=event['id']) }}">{{ icon('imports') }}<span>Imports</span></a>
+            </nav>
+            <div class="sidebar-spacer"></div>
+            <a class="nav-link back-link" href="{{ url_for('dashboard.events') }}">{{ icon('back') }}<span>Back to Events</span></a>
+        {% else %}
+            <nav aria-label="Application navigation">
+                <a class="nav-link active" href="{{ url_for('dashboard.events') }}">{{ icon('events') }}<span>Events</span></a>
+            </nav>
+            <div class="sidebar-spacer"></div>
+            <div class="sidebar-note"><span class="status-dot"></span><p><strong>Event management</strong><small>Create an event to begin.</small></p></div>
+        {% endif %}
+    </aside>
+
+    <main class="app-main">
+        {% block page_header %}{{ render_page_header('Events', event, active_batch) }}{% endblock %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}<div class="flash-stack">{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </main>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

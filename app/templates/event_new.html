@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% from "_page_header.html" import render_page_header %}
+{% block title %}Create Event · CCF Event Dashboard{% endblock %}
+{% block page_header %}{{ render_page_header('Create Event', event, active_batch) }}{% endblock %}
+{% block content %}
+<section class="create-event-wrap">
+    <div class="create-event-card panel">
+        <span class="form-icon">{{ icon('events', 25) }}</span>
+        <p class="eyebrow">New event</p>
+        <h2>Name your event</h2>
+        <p>That is all you need for now. CSV source details will be detected when you import the required exports.</p>
+        <form action="{{ url_for('dashboard.create_event') }}" method="post">
+            <label for="event-name">Event Name</label>
+            <input id="event-name" name="name" maxlength="160" value="{{ entered_name or '' }}" placeholder="e.g. Welcome Retreat 2026" required autofocus>
+            <div class="form-actions">
+                <a class="button secondary" href="{{ url_for('dashboard.events') }}">Cancel</a>
+                <button class="button primary" type="submit">Create Event {{ icon('arrow', 17) }}</button>
+            </div>
+        </form>
+    </div>
+</section>
+{% endblock %}

@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% from "_page_header.html" import render_page_header %}
+
+{% block title %}Satellite Registrants · CCF Event Dashboard{% endblock %}
+
+{% block page_header %}
+{{ render_page_header(
+    'Satellite Registrants',
+    event,
+    active_batch,
+    ('Participant roster for this ' ~ satellite.scope|capitalize ~ ' Satellite.') if satellite else 'Satellite participant roster.',
+    subtitle=satellite.satellite_name if satellite else event['name'],
+    variant='workspace',
+    header_class='satellite-header'
+) }}
+{% endblock %}
+
+{% block content %}
+{% if not active_batch %}
+    {% include "_empty.html" %}
+{% else %}
+    <p class="participant-back">
+        <a class="button secondary" href="{{ url_for('dashboard.event_satellites', event_id=event['id']) }}#satellite-table">← Back to Satellite Analytics</a>
+    </p>
+
+    <section class="participant-summary-grid" aria-label="Satellite participant summary">
+        <article class="participant-summary-card">
+            <p>Satellite Registrants</p>
+            <strong>{{ satellite.registrants|number }}</strong>
+            <span>Ticket-linked registrants</span>
+        </article>
+        <article class="participant-summary-card">
+            <p>Checked In</p>
+            <strong>{{ satellite.checked_in|number }}</strong>
+            <span>With a valid check-in timestamp</span>
+        </article>
+        <article class="participant-summary-card">
+            <p>Attendance Rate</p>
+            <strong>{{ satellite.attendance_rate|percent }}</strong>
+            <span>Checked in ÷ registrants</span>
+        </article>
+    </section>
+
+    <section class="participant-list-panel panel" id="participant-list">
+        <header class="participant-list-heading">
+            <div>
+                <h2>{{ satellite.satellite_name }}</h2>
+                <p>{{ satellite.scope_label }} · Names only; contact information is not displayed.</p>
+            </div>
+            <label class="page-size">
+                <span>Rows</span>
+                <select onchange="window.location.href=this.value">
+                    {% for size in (25, 50, 100) %}
+                        <option value="{{ url_for('dashboard.event_satellite_registrants', event_id=event['id'], name=satellite.satellite_name, scope=satellite.scope, per_page=size) }}#participant-list" {{ 'selected' if satellite.pagination.per_page == size else '' }}>{{ size }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+        </header>
+        <div class="table-wrap">
+            <table class="participant-list-table">
+                <thead><tr><th>#</th><th>Registrant Name</th><th>Ticket Status</th><th>Check-In Status</th></tr></thead>
+                <tbody>
+                    {% for participant in satellite.participants %}
+                        <tr>
+                            <td>{{ satellite.pagination.start + loop.index0 }}</td>
+                            <td class="participant-name">{{ participant.name }}</td>
+                            <td>{{ participant.ticket_status }}</td>
+                            <td><span class="checkin-badge {{ 'checked' if participant.checked_in else '' }}">{{ 'Checked In' if participant.checked_in else 'Not Checked In' }}</span></td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <footer class="satellite-pagination">
+            <p>Showing {{ satellite.pagination.start|number }}–{{ satellite.pagination.end|number }} of {{ satellite.pagination.total|number }} registrants</p>
+            {% if satellite.pagination.pages > 1 %}
+                <nav aria-label="Registrant result pages">
+                    {% if satellite.pagination.has_previous %}
+                        <a href="{{ url_for('dashboard.event_satellite_registrants', event_id=event['id'], name=satellite.satellite_name, scope=satellite.scope, page=satellite.pagination.page - 1, per_page=satellite.pagination.per_page) }}#participant-list">Previous</a>
+                    {% else %}<span class="disabled">Previous</span>{% endif %}
+                    {% for page_number in satellite.pagination.page_numbers %}
+                        {% if page_number %}
+                            <a class="{{ 'selected' if page_number == satellite.pagination.page else '' }}" href="{{ url_for('dashboard.event_satellite_registrants', event_id=event['id'], name=satellite.satellite_name, scope=satellite.scope, page=page_number, per_page=satellite.pagination.per_page) }}#participant-list">{{ page_number }}</a>
+                        {% else %}<span class="ellipsis">…</span>{% endif %}
+                    {% endfor %}
+                    {% if satellite.pagination.has_next %}
+                        <a href="{{ url_for('dashboard.event_satellite_registrants', event_id=event['id'], name=satellite.satellite_name, scope=satellite.scope, page=satellite.pagination.page + 1, per_page=satellite.pagination.per_page) }}#participant-list">Next</a>
+                    {% else %}<span class="disabled">Next</span>{% endif %}
+                </nav>
+            {% endif %}
+        </footer>
+    </section>
+{% endif %}
+{% endblock %}

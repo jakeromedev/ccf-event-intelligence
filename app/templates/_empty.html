@@ -1,0 +1,8 @@
+{% from "_icons.html" import icon %}
+<section class="empty-state panel workspace-empty">
+    <span class="empty-icon">{{ icon('imports', 28) }}</span>
+    <p class="eyebrow">No active dataset</p>
+    <h2>No active dataset for this event</h2>
+    <p>Upload the three required event exports to generate this dashboard.</p>
+    <a class="button primary" href="{{ url_for('dashboard.event_imports', event_id=event['id']) }}">{{ icon('imports', 17) }} Upload Required CSV Files</a>
+</section>

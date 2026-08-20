@@ -1,0 +1,25 @@
+.venv/
+instance/
+__pycache__/
+*.py[cod]
+.DS_Store
+
+# Raw event exports can contain personal information.
+*.csv
+
+# Local configuration and secrets.
+.env
+.env.*
+!.env.example
+
+# Test, coverage, and tool caches.
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local editor and runtime files.
+.idea/
+.vscode/
+*.log

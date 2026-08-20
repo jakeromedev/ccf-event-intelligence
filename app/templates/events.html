@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Events · CCF Event Dashboard{% endblock %}
+{% block content %}
+<section class="events-hero">
+    <div>
+        <p class="hero-kicker">CCF Event Dashboard</p>
+        <h2>Event Dashboard</h2>
+        <p>Create an event, upload its registration exports, and view attendance and church-affiliation insights in one place.</p>
+    </div>
+    <a class="button hero-button" href="{{ url_for('dashboard.new_event') }}">{{ icon('plus', 18) }} Create Event</a>
+</section>
+
+<section class="events-section">
+    <div class="section-heading">
+        <div><p class="eyebrow">Event management</p><h2>Your Events</h2></div>
+        {% if event_summaries %}<span>{{ event_summaries|length }} event{{ '' if event_summaries|length == 1 else 's' }}</span>{% endif %}
+    </div>
+
+    {% if event_summaries %}
+        <div class="event-grid">
+        {% for summary in event_summaries %}
+            <article class="event-card">
+                <div class="event-card-head">
+                    <span class="event-icon">{{ icon('events', 22) }}</span>
+                    <span class="batch-status {{ summary.status }}">{{ summary.status|replace('-', ' ') }}</span>
+                </div>
+                <h3>{{ summary.event['name'] }}</h3>
+                {% if summary.metrics %}
+                    <div class="event-card-metrics">
+                        <div><span>Registrants</span><strong>{{ summary.metrics.total_registrants|number }}</strong></div>
+                        <div><span>Checked In</span><strong>{{ summary.metrics.checked_in|number }}</strong></div>
+                        <div><span>Attendance</span><strong>{{ summary.metrics.attendance_rate|percent }}</strong></div>
+                    </div>
+                    <p class="event-updated">Last import {{ summary.last_import }}</p>
+                {% else %}
+                    <div class="event-no-data"><strong>No active dataset</strong><span>Upload required</span></div>
+                    <p class="event-updated">Created {{ summary.event['created_at'] }}</p>
+                {% endif %}
+                <a class="event-open" href="{{ url_for('dashboard.event_overview', event_id=summary.event['id']) }}">Open Event {{ icon('arrow', 17) }}</a>
+            </article>
+        {% endfor %}
+        </div>
+    {% else %}
+        <div class="empty-state panel events-empty">
+            <span class="empty-icon">{{ icon('events', 28) }}</span>
+            <p class="eyebrow">Get started</p>
+            <h2>No events yet</h2>
+            <p>Create your first event to begin importing registration data and viewing event insights.</p>
+            <a class="button primary" href="{{ url_for('dashboard.new_event') }}">{{ icon('plus', 17) }} Create Event</a>
+        </div>
+    {% endif %}
+</section>
+{% endblock %}

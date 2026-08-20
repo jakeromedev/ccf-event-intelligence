@@ -1,0 +1,32 @@
+{% from "_icons.html" import icon %}
+
+{% macro render_page_header(title, event=none, active_batch=none, description=none, subtitle=none, variant='standard', header_class='') -%}
+{% if variant == 'workspace' %}
+<header class="overview-header{% if header_class %} {{ header_class }}{% endif %}">
+    <div class="overview-header-content">
+        <p class="eyebrow">CCF Event Intelligence</p>
+        <h1>{{ title }}</h1>
+        <h2>{{ subtitle if subtitle is not none else event['name'] }}</h2>
+        {% if description %}<p class="overview-description">{{ description }}</p>{% endif %}
+        {% if active_batch %}
+            <p class="overview-import">Imported {{ active_batch['activated_at'] }} <span>•</span> Batch #{{ active_batch['id'] }}</p>
+        {% endif %}
+    </div>
+    <span class="dataset-pill {{ 'active' if active_batch else 'empty' }}">
+        {{ icon('active', 17) }}
+        {{ 'Dataset active' if active_batch else 'No active dataset' }}
+    </span>
+</header>
+{% else %}
+<header class="topbar{% if header_class %} {{ header_class }}{% endif %}">
+    <div>
+        <p class="eyebrow">CCF Event Intelligence</p>
+        <h1>{{ title }}</h1>
+        {% if event %}<p class="topbar-context">{{ event['name'] }}</p>{% endif %}
+    </div>
+    {% if event %}
+        <span class="dataset-pill {{ 'active' if active_batch else 'empty' }}"><span class="status-dot"></span>{{ 'Dataset active' if active_batch else 'No active dataset' }}</span>
+    {% endif %}
+</header>
+{% endif %}
+{%- endmacro %}
