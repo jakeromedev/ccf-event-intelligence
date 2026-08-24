@@ -20,6 +20,20 @@ if database_url:
 target_metadata = Base.metadata
 
 
+def include_object(obj, name, type_, reflected, compare_to):
+    """Ignore MySQL's implicit supporting indexes for composite foreign keys."""
+    if (
+        type_ == "index"
+        and reflected
+        and compare_to is None
+        and name == "event_id_2"
+        and obj.table.name
+        in {"curated_registrant_satellites", "satellite_dataset_satellites"}
+    ):
+        return False
+    return True
+
+
 def run_migrations_offline():
     context.configure(
         url=config.get_main_option("sqlalchemy.url"),
@@ -27,6 +41,7 @@ def run_migrations_offline():
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_object=include_object,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -43,7 +58,12 @@ def run_migrations_online():
         **engine_options,
     )
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True,
+            include_object=include_object,
+        )
         with context.begin_transaction():
             context.run_migrations()
 

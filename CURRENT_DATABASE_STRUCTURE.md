@@ -17,7 +17,7 @@ Event
       -> rebuildable curated rows
 ```
 
-The current schema has twelve application tables:
+The current schema has fourteen application tables:
 
 1. `events`
 2. `import_batches`
@@ -31,6 +31,8 @@ The current schema has twelve application tables:
 10. `satellites`
 11. `satellite_source_variations`
 12. `curated_registrant_satellites`
+13. `satellite_datasets`
+14. `satellite_dataset_satellites`
 
 ## Relationship diagram
 
@@ -49,6 +51,9 @@ erDiagram
     CURATED_REGISTRANTS ||--o{ CURATED_REGISTRANT_SATELLITES : associates
     SATELLITES ||--o{ CURATED_REGISTRANT_SATELLITES : associates
     SATELLITES ||--|{ SATELLITE_SOURCE_VARIATIONS : normalizes
+    EVENTS ||--o{ SATELLITE_DATASETS : configures
+    SATELLITE_DATASETS ||--|{ SATELLITE_DATASET_SATELLITES : selects
+    SATELLITES ||--o{ SATELLITE_DATASET_SATELLITES : grouped_by
 ```
 
 `buyers` to `tickets` and `tickets` to `registrants` are batch-scoped logical
@@ -246,6 +251,53 @@ id, event_id, batch_id, curated_registrant_id, satellite_id, created_at
 
 `UNIQUE(curated_registrant_id, satellite_id)` prevents duplicate associations.
 
+## Satellite Dataset configuration tables
+
+### `satellite_datasets`
+
+One row is a reusable Event-owned satellite target group:
+
+```text
+id, event_id, name, participant_target, created_at, updated_at
+```
+
+Important constraints:
+
+```text
+event_id -> events.id ON DELETE CASCADE
+participant_target >= 0
+UNIQUE(event_id, name)
+UNIQUE(event_id, id)
+```
+
+Names use the schema's case-insensitive Unicode collation and are unique only
+within one Event. Participant totals are calculated from the active batch and
+are not stored in this table.
+
+### `satellite_dataset_satellites`
+
+Many-to-many selection of existing normalized satellite rows:
+
+```text
+id, event_id, satellite_dataset_id, satellite_batch_id,
+satellite_id, created_at
+```
+
+Composite foreign keys require both the dataset and satellite to belong to the
+same Event. `satellite_batch_id` makes the batch-scoped satellite ownership
+explicit. Both parents use `ON DELETE CASCADE`, so deleting a dataset removes
+only its mappings, while a derived satellite rebuild cannot leave orphan links.
+
+```text
+UNIQUE(satellite_dataset_id, satellite_id)
+```
+
+A satellite may appear in multiple datasets. On active-batch replacement,
+matching selections are moved to the new batch's existing satellite rows using
+the canonical `satellites.normalized_name`; no duplicate satellite catalog is
+created. A selection absent from the new batch remains historical and counts
+zero until a later import contains that identity again.
+
 ## Isolation, cascading, and indexes
 
 All derived rows carry both `event_id` and `batch_id`. Composite foreign keys
@@ -255,12 +307,14 @@ additionally start from the selected Event's active batch.
 
 Deleting an Event cascades to its batches. Deleting a batch cascades to its raw
 and curated children. Rebuilding one batch deletes and replaces only that
-batch's derived records.
+batch's derived records. Satellite Dataset mappings with matching normalized
+identities are restored around that rebuild.
 
 Indexes cover active-batch resolution, batch/type/check-in dashboard counts,
 common administrative status and gender filters, dedupe keys, mapping lookups
-in both directions, satellite names, satellite pivots, variations, and
-validation issue categories. See `app/models.py` for exact index names.
+in both directions, satellite names, satellite pivots, dataset ownership,
+dataset-to-satellite mappings, variations, and validation issue categories. See
+`app/models.py` for exact index names.
 
 ## Migration and rebuild behavior
 

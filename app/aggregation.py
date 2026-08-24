@@ -267,6 +267,99 @@ def registration_progress(participants, participant_target):
     }
 
 
+def satellite_dataset_metrics(db, event_id, batch_id):
+    """Aggregate all Event satellite targets without per-dataset queries."""
+    datasets = db.execute(
+        """
+        SELECT id, name, participant_target, created_at, updated_at
+        FROM satellite_datasets
+        WHERE event_id = ?
+        ORDER BY LOWER(name), id
+        """,
+        (event_id,),
+    ).fetchall()
+    if not datasets:
+        return []
+
+    configured_satellites = {dataset["id"]: [] for dataset in datasets}
+    links = db.execute(
+        """
+        SELECT dss.satellite_dataset_id, s.id, s.name, s.affiliation,
+               s.normalized_name, s.batch_id
+        FROM satellite_dataset_satellites dss
+        JOIN satellite_datasets d
+          ON d.id = dss.satellite_dataset_id AND d.event_id = dss.event_id
+        JOIN satellites s
+          ON s.id = dss.satellite_id
+         AND s.event_id = dss.event_id
+         AND s.batch_id = dss.satellite_batch_id
+        WHERE d.event_id = ?
+        ORDER BY dss.satellite_dataset_id, s.affiliation, LOWER(s.name), s.id
+        """,
+        (event_id,),
+    ).fetchall()
+    for link in links:
+        configured_satellites[link["satellite_dataset_id"]].append(
+            {
+                "id": link["id"],
+                "name": link["name"],
+                "affiliation": link["affiliation"],
+                "normalized_name": link["normalized_name"],
+                "available_in_active_batch": bool(
+                    batch_id is not None and link["batch_id"] == batch_id
+                ),
+            }
+        )
+
+    counts = {dataset["id"]: 0 for dataset in datasets}
+    if batch_id is not None:
+        count_rows = db.execute(
+            """
+            SELECT d.id dataset_id, COUNT(DISTINCT cr.id) actual_participants
+            FROM satellite_datasets d
+            LEFT JOIN satellite_dataset_satellites dss
+              ON dss.satellite_dataset_id = d.id AND dss.event_id = d.event_id
+            LEFT JOIN curated_registrant_satellites crs
+              ON crs.satellite_id = dss.satellite_id
+             AND crs.event_id = d.event_id
+             AND crs.batch_id = ?
+            LEFT JOIN curated_registrants cr
+              ON cr.id = crs.curated_registrant_id
+             AND cr.event_id = crs.event_id
+             AND cr.batch_id = crs.batch_id
+             AND cr.registration_type = 'participant'
+            WHERE d.event_id = ?
+            GROUP BY d.id
+            """,
+            (batch_id, event_id),
+        ).fetchall()
+        counts.update(
+            {
+                row["dataset_id"]: row["actual_participants"] or 0
+                for row in count_rows
+            }
+        )
+
+    result = []
+    for dataset in datasets:
+        actual = counts[dataset["id"]]
+        progress = registration_progress(actual, dataset["participant_target"])
+        satellites = configured_satellites[dataset["id"]]
+        result.append(
+            {
+                "id": dataset["id"],
+                "name": dataset["name"],
+                "participant_target": dataset["participant_target"],
+                "actual_participants": actual,
+                "satellite_count": len(satellites),
+                "satellite_ids": [satellite["id"] for satellite in satellites],
+                "satellites": satellites,
+                **progress,
+            }
+        )
+    return result
+
+
 def event_dashboard_metrics(db, event_id):
     """Return the authoritative, event-scoped Phase 1 dashboard response."""
     event = db.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
@@ -328,6 +421,9 @@ def event_dashboard_metrics(db, event_id):
             **progress,
         },
         "participant_profile": profile,
+        "satellite_datasets": satellite_dataset_metrics(
+            db, event_id, batch["id"] if batch else None
+        ),
         "reconciliation": {
             "registrations_reconcile": total_registrations == participants + volunteers,
             "gender_reconciles": sum(item["count"] for item in profile["gender"]["items"])

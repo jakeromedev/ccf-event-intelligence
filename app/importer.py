@@ -11,6 +11,7 @@ from werkzeug.utils import secure_filename
 
 from .classifier import classify_affiliation, clean
 from .curation import rebuild_batch_curation
+from .satellite_datasets import remap_satellite_dataset_links
 from .normalization import normalize_registration_type
 
 
@@ -703,6 +704,7 @@ def process_batch(db, batch_id):
 
         _insert_issues(db, batch_id, quality_issues)
         rebuild_batch_curation(db, batch_id)
+        remap_satellite_dataset_links(db, batch["event_id"], batch_id)
         db.execute(
             """
             UPDATE import_batches SET status = 'superseded', active_event_id = NULL

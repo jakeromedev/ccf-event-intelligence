@@ -3,6 +3,7 @@ from functools import wraps
 
 from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user
+from sqlalchemy.exc import IntegrityError
 
 from .aggregation import (
     active_batch,
@@ -28,6 +29,13 @@ from .admin_tables import (
 from .db import get_db
 from .import_history import IMPORT_HISTORY_STATUSES, import_history
 from .importer import process_batch, stage_upload_set, store_validation, validate_batch
+from .satellite_datasets import (
+    create_satellite_dataset,
+    delete_satellite_dataset,
+    satellite_dataset_options,
+    update_satellite_dataset,
+    validate_satellite_dataset_form,
+)
 
 
 bp = Blueprint("dashboard", __name__)
@@ -59,6 +67,23 @@ def get_event_or_404(event_id):
     if not event:
         abort(404)
     return event
+
+
+def get_satellite_dataset_or_404(event_id, dataset_id):
+    dataset = get_db().execute(
+        "SELECT * FROM satellite_datasets WHERE id = ? AND event_id = ?",
+        (dataset_id, event_id),
+    ).fetchone()
+    if not dataset:
+        abort(404)
+    return dataset
+
+
+def _satellite_dataset_redirect(event_id, dataset_id=None):
+    parameters = {"satellite_targets": 1}
+    if dataset_id is not None:
+        parameters["edit_dataset"] = dataset_id
+    return redirect(url_for("dashboard.event_overview", event_id=event_id, **parameters))
 
 
 @bp.get("/")
@@ -112,6 +137,9 @@ def event_overview(event_id):
         dashboard=dashboard,
         metrics=dashboard["overview"],
         profile=dashboard["participant_profile"],
+        satellite_options=satellite_dataset_options(
+            db, event_id, batch["id"] if batch else None
+        ),
     )
 
 
@@ -163,6 +191,61 @@ def update_event_settings(event_id):
     db.commit()
     flash("Event settings saved. Dashboard metrics have been refreshed.", "success")
     return redirect(url_for("dashboard.event_overview", event_id=event_id) + "#event-settings")
+
+
+@bp.post("/events/<int:event_id>/satellite-datasets")
+def create_event_satellite_dataset(event_id):
+    get_event_or_404(event_id)
+    db = get_db()
+    values, errors = validate_satellite_dataset_form(db, event_id, request.form)
+    if errors:
+        flash(" ".join(errors), "error")
+        return _satellite_dataset_redirect(event_id)
+    try:
+        dataset_id = create_satellite_dataset(db, event_id, values)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        flash("A Satellite Dataset with that name already exists for this Event.", "error")
+        return _satellite_dataset_redirect(event_id)
+    flash("Satellite Dataset created.", "success")
+    return _satellite_dataset_redirect(event_id, dataset_id)
+
+
+@bp.post("/events/<int:event_id>/satellite-datasets/<int:dataset_id>")
+def update_event_satellite_dataset(event_id, dataset_id):
+    get_event_or_404(event_id)
+    get_satellite_dataset_or_404(event_id, dataset_id)
+    db = get_db()
+    values, errors = validate_satellite_dataset_form(
+        db, event_id, request.form, dataset_id=dataset_id
+    )
+    if errors:
+        flash(" ".join(errors), "error")
+        return _satellite_dataset_redirect(event_id, dataset_id)
+    try:
+        update_satellite_dataset(db, event_id, dataset_id, values)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        flash("A Satellite Dataset with that name already exists for this Event.", "error")
+        return _satellite_dataset_redirect(event_id, dataset_id)
+    flash("Satellite Dataset updated.", "success")
+    return _satellite_dataset_redirect(event_id, dataset_id)
+
+
+@bp.post("/events/<int:event_id>/satellite-datasets/<int:dataset_id>/delete")
+def delete_event_satellite_dataset(event_id, dataset_id):
+    get_event_or_404(event_id)
+    dataset = get_satellite_dataset_or_404(event_id, dataset_id)
+    if request.form.get("confirm_delete") != "yes":
+        flash("Confirm deletion before removing the Satellite Dataset.", "error")
+        return _satellite_dataset_redirect(event_id, dataset_id)
+    db = get_db()
+    delete_satellite_dataset(db, event_id, dataset_id)
+    db.commit()
+    flash("Satellite Dataset ‘{}’ deleted.".format(dataset["name"]), "success")
+    return _satellite_dataset_redirect(event_id)
 
 
 @bp.get("/events/<int:event_id>/overview/registrants")

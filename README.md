@@ -13,6 +13,7 @@ A privacy-conscious, event-based dashboard for importing CCF Generated Tickets, 
 - Event-scoped Event Date and Participant Target settings
 - Unique participant, unique volunteer, raw-registration, target, progress, and remaining-slot metrics
 - Participant-only Gender, Life Stage, and event-date Age distributions with Unknown reconciliation
+- Configurable Event-scoped Satellite Datasets with independent participant targets
 - Read-only event dashboard JSON at `/events/<event_id>/dashboard`
 - Registrant and checked-in attendance metrics
 - Approved CCF Main, Local Satellite, International Satellite, Non-CCF, and Unknown classification
@@ -141,6 +142,7 @@ their identity provider through `ADMIN_TABLES_AUTHORIZER`.
 
 ## Module documentation
 
+- [Event Dashboard module](DASHBOARD_MODULE.md)
 - [Event Imports module](EVENT_IMPORTS_MODULE.md)
 - [Phase 1 Core Event Dashboard](PHASE_1_CORE_DASHBOARD.md)
 - [Current Database Structure](CURRENT_DATABASE_STRUCTURE.md)

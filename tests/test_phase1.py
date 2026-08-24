@@ -297,6 +297,19 @@ class EventIntegrationTests(unittest.TestCase):
             process_batch(get_db(), batch_id)
         return batch_id
 
+    def _satellite_id(self, event_id, normalized_name):
+        with self.app.app_context():
+            batch = active_batch(get_db(), event_id)
+            row = get_db().execute(
+                """
+                SELECT id FROM satellites
+                WHERE event_id = ? AND batch_id = ? AND normalized_name = ?
+                """,
+                (event_id, batch["id"], normalized_name),
+            ).fetchone()
+            self.assertIsNotNone(row, normalized_name)
+            return row["id"]
+
     def _add_satellite_ranking_fixture(self, batch_id):
         """Add aggregate-only rows that exercise ranking pagination and sorting."""
         rows = []
@@ -502,6 +515,259 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertIn(b'class="application-header"', page.data)
         self.assertIn(b'form="event-settings-form"', page.data)
         self.assertEqual(1, page.data.count(b">Save Changes</span>"))
+
+    def test_satellite_dataset_crud_validation_and_event_scoping(self):
+        batch_a = self._process(self.event_a)
+        self._write_fixture(registrant_limit=3)
+        self._process(self.event_b)
+        eastwood_a = self._satellite_id(self.event_a, "ccf eastwood")
+        singapore_a = self._satellite_id(self.event_a, "ccf singapore")
+        eastwood_b = self._satellite_id(self.event_b, "ccf eastwood")
+        client = self.app.test_client()
+
+        created = client.post(
+            "/events/{}/satellite-datasets".format(self.event_a),
+            data={
+                "name": "  GGMA  ",
+                "participant_target": "250",
+                "satellite_ids": [str(eastwood_a), str(singapore_a)],
+            },
+        )
+        self.assertEqual(302, created.status_code)
+        with self.app.app_context():
+            dataset = get_db().execute(
+                "SELECT * FROM satellite_datasets WHERE event_id = ?",
+                (self.event_a,),
+            ).fetchone()
+            self.assertEqual("GGMA", dataset["name"])
+            self.assertEqual(250, dataset["participant_target"])
+            dataset_id = dataset["id"]
+            self.assertEqual(
+                2,
+                get_db().execute(
+                    "SELECT COUNT(*) FROM satellite_dataset_satellites "
+                    "WHERE satellite_dataset_id = ?",
+                    (dataset_id,),
+                ).fetchone()[0],
+            )
+
+        duplicate = client.post(
+            "/events/{}/satellite-datasets".format(self.event_a),
+            data={"name": "ggma", "participant_target": "10", "satellite_ids": str(eastwood_a)},
+        )
+        self.assertEqual(302, duplicate.status_code)
+        empty_selection = client.post(
+            "/events/{}/satellite-datasets".format(self.event_a),
+            data={"name": "Empty", "participant_target": "10"},
+        )
+        self.assertEqual(302, empty_selection.status_code)
+        for invalid_target in ("", "-1", "1.5", "invalid", "1000000001"):
+            response = client.post(
+                "/events/{}/satellite-datasets".format(self.event_a),
+                data={
+                    "name": "Invalid {}".format(invalid_target or "blank"),
+                    "participant_target": invalid_target,
+                    "satellite_ids": str(eastwood_a),
+                },
+            )
+            self.assertEqual(302, response.status_code)
+
+        same_name_other_event = client.post(
+            "/events/{}/satellite-datasets".format(self.event_b),
+            data={"name": "GGMA", "participant_target": "50", "satellite_ids": str(eastwood_b)},
+        )
+        self.assertEqual(302, same_name_other_event.status_code)
+        with self.app.app_context():
+            event_a_metric = event_dashboard_metrics(get_db(), self.event_a)[
+                "satellite_datasets"
+            ][0]
+            self.assertEqual(2, event_a_metric["actual_participants"])
+        cross_event_satellite = client.post(
+            "/events/{}/satellite-datasets".format(self.event_a),
+            data={"name": "Cross Event", "participant_target": "50", "satellite_ids": str(eastwood_b)},
+        )
+        self.assertEqual(302, cross_event_satellite.status_code)
+
+        edited = client.post(
+            "/events/{}/satellite-datasets/{}".format(self.event_a, dataset_id),
+            data={"name": "East Cluster", "participant_target": "5", "satellite_ids": str(eastwood_a)},
+        )
+        self.assertEqual(302, edited.status_code)
+        self.assertEqual(
+            404,
+            client.post(
+                "/events/{}/satellite-datasets/{}".format(self.event_b, dataset_id),
+                data={"name": "Hijacked", "participant_target": "1", "satellite_ids": str(eastwood_b)},
+            ).status_code,
+        )
+        self.assertEqual(
+            404,
+            client.post(
+                "/events/{}/satellite-datasets/{}/delete".format(self.event_b, dataset_id),
+                data={"confirm_delete": "yes"},
+            ).status_code,
+        )
+
+        not_confirmed = client.post(
+            "/events/{}/satellite-datasets/{}/delete".format(self.event_a, dataset_id),
+            data={},
+        )
+        self.assertEqual(302, not_confirmed.status_code)
+        deleted = client.post(
+            "/events/{}/satellite-datasets/{}/delete".format(self.event_a, dataset_id),
+            data={"confirm_delete": "yes"},
+        )
+        self.assertEqual(302, deleted.status_code)
+        with self.app.app_context():
+            db = get_db()
+            self.assertIsNone(
+                db.execute("SELECT id FROM satellite_datasets WHERE id = ?", (dataset_id,)).fetchone()
+            )
+            self.assertEqual(
+                0,
+                db.execute(
+                    "SELECT COUNT(*) FROM satellite_dataset_satellites WHERE satellite_dataset_id = ?",
+                    (dataset_id,),
+                ).fetchone()[0],
+            )
+            self.assertGreater(
+                db.execute("SELECT COUNT(*) FROM satellites WHERE batch_id = ?", (batch_a,)).fetchone()[0],
+                0,
+            )
+            names = [
+                row["name"]
+                for row in db.execute("SELECT name FROM satellite_datasets ORDER BY event_id, id")
+            ]
+            self.assertEqual(["GGMA"], names)
+
+    def test_satellite_dataset_aggregation_deduplicates_people_and_excludes_volunteers(self):
+        batch_id = self._process(self.event_a)
+        eastwood = self._satellite_id(self.event_a, "ccf eastwood")
+        singapore = self._satellite_id(self.event_a, "ccf singapore")
+        client = self.app.test_client()
+        for name, target, satellites in (
+            ("Combined", 1, (eastwood, singapore)),
+            ("East Only", 5, (eastwood,)),
+            ("Singapore Only", 0, (singapore,)),
+        ):
+            self.assertEqual(
+                302,
+                client.post(
+                    "/events/{}/satellite-datasets".format(self.event_a),
+                    data={
+                        "name": name,
+                        "participant_target": str(target),
+                        "satellite_ids": [str(value) for value in satellites],
+                    },
+                ).status_code,
+            )
+
+        with self.app.app_context():
+            db = get_db()
+            # This source row has the same complete curation identity as the
+            # Eastwood participant but a Singapore relationship. It must add a
+            # second satellite association, not a second person.
+            db.execute(
+                """
+                INSERT INTO registrants (
+                    batch_id, registration_code, ticket_code, last_name,
+                    gender_raw, life_stage_raw, birth_month_raw, birth_year_raw,
+                    affiliation, satellite_name, registration_type,
+                    ticket_matched, checked_in
+                ) VALUES (?, 'R-DUP-EAST', 'T-DUP-EAST', 'Registrant',
+                          'Female', 'Single', 'October', '1990',
+                          'International Satellite', 'Singapore', 'participant', 1, 0)
+                """,
+                (batch_id,),
+            )
+            db.execute(
+                """
+                INSERT INTO registrants (
+                    batch_id, registration_code, ticket_code, last_name,
+                    gender_raw, life_stage_raw, birth_month_raw, birth_year_raw,
+                    affiliation, satellite_name, registration_type,
+                    ticket_matched, checked_in
+                ) VALUES (?, 'R-VOL-EAST', 'T-VOL-EAST', 'Volunteer',
+                          'Male', 'Single', 'March', '1985',
+                          'Local Satellite', 'Eastwood', 'volunteer', 1, 0)
+                """,
+                (batch_id,),
+            )
+            rebuild_batch_curation(db, batch_id)
+            db.commit()
+            dashboard = event_dashboard_metrics(db, self.event_a)
+
+        datasets = {item["name"]: item for item in dashboard["satellite_datasets"]}
+        combined = datasets["Combined"]
+        self.assertEqual(2, combined["actual_participants"])
+        self.assertEqual(200, combined["progress_percentage"])
+        self.assertEqual(0, combined["remaining_slots"])
+        self.assertTrue(combined["target_exceeded"])
+        self.assertEqual(1, datasets["East Only"]["actual_participants"])
+        self.assertEqual(20, datasets["East Only"]["progress_percentage"])
+        self.assertEqual(4, datasets["East Only"]["remaining_slots"])
+        self.assertEqual(2, datasets["Singapore Only"]["actual_participants"])
+        self.assertFalse(datasets["Singapore Only"]["target_configured"])
+        self.assertIsNone(datasets["Singapore Only"]["progress_percentage"])
+        self.assertIsNone(datasets["Singapore Only"]["remaining_slots"])
+
+        payload = client.get("/events/{}/dashboard".format(self.event_a)).get_json()
+        self.assertEqual(3, len(payload["satellite_datasets"]))
+        self.assertNotIn("@example.com", str(payload))
+        self.assertNotIn("Mobile Number", str(payload))
+        page = client.get("/events/{}".format(self.event_a))
+        self.assertIn(b"Manage Satellite Targets", page.data)
+        self.assertIn(b"Combined", page.data)
+        self.assertIn(b"satellite-dataset-modal", page.data)
+
+    def test_satellite_dataset_survives_active_batch_replacement_and_recalculates(self):
+        first_batch = self._process(self.event_a)
+        eastwood = self._satellite_id(self.event_a, "ccf eastwood")
+        client = self.app.test_client()
+        client.post(
+            "/events/{}/satellite-datasets".format(self.event_a),
+            data={"name": "East", "participant_target": "5", "satellite_ids": str(eastwood)},
+        )
+        with self.app.app_context():
+            before = event_dashboard_metrics(get_db(), self.event_a)["satellite_datasets"][0]
+            self.assertEqual(1, before["actual_participants"])
+            dataset_id = before["id"]
+
+        # The next import contains two distinct Eastwood participants.
+        self._write_fixture(registrant_limit=3)
+        with open(self.paths["registrants"], "r", encoding="utf-8", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        rows[2]["Are You From A Local Or International Satellite"] = "Local Satellite"
+        rows[2]["Which Local Satellite"] = "Eastwood"
+        rows[2]["Which International Satellite"] = ""
+        write_csv(self.paths["registrants"], REGISTRANT_FIELDS, rows)
+        second_batch = self._process(self.event_a)
+
+        with self.app.app_context():
+            db = get_db()
+            after = event_dashboard_metrics(db, self.event_a)["satellite_datasets"][0]
+            self.assertEqual(dataset_id, after["id"])
+            self.assertEqual("East", after["name"])
+            self.assertEqual(5, after["participant_target"])
+            self.assertEqual(2, after["actual_participants"])
+            mapping = db.execute(
+                "SELECT satellite_batch_id FROM satellite_dataset_satellites "
+                "WHERE satellite_dataset_id = ?",
+                (dataset_id,),
+            ).fetchone()
+            self.assertEqual(second_batch, mapping["satellite_batch_id"])
+            self.assertEqual(
+                "superseded",
+                db.execute("SELECT status FROM import_batches WHERE id = ?", (first_batch,)).fetchone()[0],
+            )
+
+        # Activating another Event remains isolated from Event A's target.
+        self._write_fixture(registrant_limit=2)
+        self._process(self.event_b)
+        with self.app.app_context():
+            isolated = event_dashboard_metrics(get_db(), self.event_a)["satellite_datasets"][0]
+            self.assertEqual(2, isolated["actual_participants"])
+            self.assertEqual(dataset_id, isolated["id"])
 
     def test_curation_is_traceable_incomplete_safe_idempotent_and_batch_scoped(self):
         with open(self.paths["registrants"], "r", encoding="utf-8", newline="") as handle:

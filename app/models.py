@@ -45,6 +45,9 @@ CASE_SENSITIVE_SOURCE_TEXT = mysql.VARCHAR(
 USERNAME_TYPE = mysql.VARCHAR(
     64, collation="utf8mb4_unicode_ci"
 ).with_variant(String(64, collation="NOCASE"), "sqlite")
+SATELLITE_DATASET_NAME_TYPE = mysql.VARCHAR(
+    160, collation="utf8mb4_unicode_ci"
+).with_variant(String(160, collation="NOCASE"), "sqlite")
 PASSWORD_HASHER = PasswordHasher()
 
 
@@ -443,6 +446,35 @@ class Satellite(Base):
     updated_at: Mapped[object] = mapped_column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
 
 
+class SatelliteDataset(Base):
+    """Event-owned reporting target over existing normalized satellites."""
+
+    __tablename__ = "satellite_datasets"
+    __table_args__ = (
+        CheckConstraint(
+            "participant_target >= 0",
+            name="ck_satellite_datasets_target_nonnegative",
+        ),
+        UniqueConstraint("event_id", "name", name="uq_satellite_datasets_event_name"),
+        UniqueConstraint("event_id", "id", name="uq_satellite_datasets_event_id"),
+        Index("idx_satellite_datasets_event", "event_id", "created_at"),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(
+        ID_TYPE, ForeignKey("events.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(SATELLITE_DATASET_NAME_TYPE, nullable=False)
+    participant_target: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+    updated_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+
 class SatelliteSourceVariation(Base):
     __tablename__ = "satellite_source_variations"
     __table_args__ = (
@@ -499,6 +531,46 @@ class CuratedRegistrantSatellite(Base):
     created_at: Mapped[object] = mapped_column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
 
 
+class SatelliteDatasetSatellite(Base):
+    """Many-to-many selection of existing Event satellite records."""
+
+    __tablename__ = "satellite_dataset_satellites"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["event_id", "satellite_dataset_id"],
+            ["satellite_datasets.event_id", "satellite_datasets.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["event_id", "satellite_batch_id", "satellite_id"],
+            ["satellites.event_id", "satellites.batch_id", "satellites.id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "satellite_dataset_id",
+            "satellite_id",
+            name="uq_satellite_dataset_satellites_pair",
+        ),
+        Index("idx_satellite_dataset_satellites_dataset", "satellite_dataset_id"),
+        Index("idx_satellite_dataset_satellites_satellite", "satellite_id"),
+        Index(
+            "idx_satellite_dataset_satellites_event_batch",
+            "event_id",
+            "satellite_batch_id",
+        ),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    satellite_dataset_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    satellite_batch_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    satellite_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    created_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+
 TABLES_IN_DEPENDENCY_ORDER = (
     Event,
     ImportBatch,
@@ -510,6 +582,8 @@ TABLES_IN_DEPENDENCY_ORDER = (
     CuratedRegistrant,
     CuratedRegistrantSource,
     Satellite,
+    SatelliteDataset,
     SatelliteSourceVariation,
     CuratedRegistrantSatellite,
+    SatelliteDatasetSatellite,
 )

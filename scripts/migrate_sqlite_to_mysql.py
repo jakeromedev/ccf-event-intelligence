@@ -37,6 +37,8 @@ OPTIONAL_DERIVED_TABLES = {
     "satellites",
     "satellite_source_variations",
     "curated_registrant_satellites",
+    "satellite_datasets",
+    "satellite_dataset_satellites",
 }
 OWNERSHIP = {
     "import_batches": ("event_id", "events"),
@@ -50,6 +52,8 @@ OWNERSHIP = {
     "satellites": ("batch_id", "import_batches"),
     "satellite_source_variations": ("batch_id", "import_batches"),
     "curated_registrant_satellites": ("batch_id", "import_batches"),
+    "satellite_datasets": ("event_id", "events"),
+    "satellite_dataset_satellites": ("event_id", "events"),
 }
 UNIQUE_KEYS = {
     "import_files": (("batch_id", "export_type"),),
@@ -58,6 +62,10 @@ UNIQUE_KEYS = {
     "registrants": (("batch_id", "registration_code"), ("batch_id", "ticket_code")),
     "curated_registrants": (("batch_id", "dedupe_key"),),
     "satellites": (("batch_id", "normalized_name"),),
+    "satellite_datasets": (("event_id", "name"),),
+    "satellite_dataset_satellites": (
+        ("satellite_dataset_id", "satellite_id"),
+    ),
 }
 
 

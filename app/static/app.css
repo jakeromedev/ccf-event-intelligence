@@ -1925,3 +1925,102 @@ body.admin-drawer-open { overflow: hidden; }
     .admin-pagination-controls { align-items: flex-start; flex-direction: column; }
     .admin-pagination-controls nav { max-width: 100%; overflow-x: auto; }
 }
+
+/* Event Dashboard satellite target groups */
+.satellite-targets { margin-bottom: 20px; padding: 22px 24px 24px; border-color: #dce4ef; box-shadow: 0 6px 18px rgba(31, 68, 118, .055); }
+.satellite-targets-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 17px; }
+.satellite-targets-heading .phase1-section-heading { margin-bottom: 0; }
+.satellite-target-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(245px, 1fr)); gap: 13px; }
+.satellite-target-card { min-width: 0; padding: 18px; border: 1px solid #dce6f2; border-radius: 11px; background: linear-gradient(145deg, #fff, #f9fbff); }
+.satellite-target-card.exceeded { border-color: #e8c882; background: linear-gradient(145deg, #fff, #fffbf2); }
+.satellite-target-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.satellite-target-card h3 { margin: 0; overflow: hidden; color: #14263e; font-size: 15px; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.satellite-target-card header small { display: block; margin-top: 3px; color: #77889e; font-size: 9px; }
+.satellite-target-status { flex: 0 0 auto; padding: 4px 7px; color: #8b5d12; border-radius: 11px; background: #fff0cc; font-size: 8px; font-weight: 700; }
+.satellite-target-total { margin: 19px 0 12px; color: #61748d; font-size: 11px; }
+.satellite-target-total strong { color: #1265d8; font-size: 27px; letter-spacing: -.035em; }
+.satellite-target-progress { height: 8px; overflow: hidden; border-radius: 5px; background: #e8eef7; }
+.satellite-target-progress i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #2e83ee, #1265d8); }
+.satellite-target-card.exceeded .satellite-target-progress i { background: linear-gradient(90deg, #eeb344, #d88b12); }
+.satellite-target-progress.unconfigured i { width: 0; }
+.satellite-target-card > footer { margin-top: 9px; display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #72839a; font-size: 9px; }
+.satellite-target-card > footer strong { color: #1a3557; font-size: 13px; }
+.satellite-target-empty { min-height: 104px; padding: 17px 19px; display: flex; align-items: center; gap: 15px; border: 1px dashed #cad9ea; border-radius: 10px; background: #f9fbfe; }
+.satellite-target-empty > div { flex: 1; }
+.satellite-target-empty strong { color: #203750; font-size: 12px; }
+.satellite-target-empty p { margin: 3px 0 0; color: #71839a; font-size: 10px; }
+
+body.satellite-dataset-modal-open { overflow: hidden; }
+.satellite-dataset-modal[hidden] { display: none; }
+.satellite-dataset-modal { position: fixed; inset: 0; z-index: 110; display: grid; place-items: center; padding: 20px; }
+.satellite-dataset-backdrop { position: absolute; inset: 0; background: rgba(13, 31, 59, .58); backdrop-filter: blur(3px); }
+.satellite-dataset-dialog { position: relative; width: min(1050px, 100%); max-height: calc(100vh - 40px); display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; border: 1px solid #d8e2ef; border-radius: 16px; background: #fff; box-shadow: 0 28px 80px rgba(13, 31, 59, .3); }
+.satellite-dataset-modal-header { min-height: 94px; padding: 18px 22px; display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; border-bottom: 1px solid #dfe7f0; background: linear-gradient(120deg, #fff, #f4f8ff); }
+.satellite-dataset-modal-header h2 { margin: 2px 0 0; color: #10213a; font-size: 23px; letter-spacing: -.03em; }
+.satellite-dataset-modal-header p:last-child { margin: 4px 0 0; color: #6f8097; font-size: 10px; }
+.satellite-dataset-modal-close { width: 38px; height: 38px; padding: 0; flex: 0 0 auto; color: #6c7e94; border: 1px solid #d4deea; border-radius: 50%; background: #fff; cursor: pointer; font-size: 25px; line-height: 1; }
+.satellite-dataset-modal-close:hover { color: #1265d8; border-color: #9fc1ee; background: #f2f7ff; }
+.satellite-dataset-modal-body { min-height: 0; display: grid; grid-template-columns: 285px minmax(0, 1fr); }
+.satellite-dataset-list-panel { min-height: 0; padding: 17px 14px; overflow-y: auto; border-right: 1px solid #e1e8f1; background: #f8faff; }
+.satellite-dataset-list-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 5px 10px; color: #435773; font-size: 9px; text-transform: uppercase; letter-spacing: .05em; }
+.satellite-dataset-list-heading button { padding: 4px 7px; color: #1265d8; border: 0; background: transparent; cursor: pointer; font-size: 9px; font-weight: 700; }
+.satellite-dataset-list { display: grid; gap: 6px; }
+.satellite-dataset-list > button { width: 100%; min-width: 0; padding: 11px 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #243a56; border: 1px solid transparent; border-radius: 9px; background: transparent; cursor: pointer; text-align: left; }
+.satellite-dataset-list > button:hover { background: #fff; border-color: #dce5f1; }
+.satellite-dataset-list > button.selected { color: #0e5fc9; border-color: #bfd5f1; background: #fff; box-shadow: 0 4px 11px rgba(31,68,118,.05); }
+.satellite-dataset-list button span:first-child { min-width: 0; }
+.satellite-dataset-list button strong, .satellite-dataset-list button small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.satellite-dataset-list button strong { font-size: 11px; }
+.satellite-dataset-list button small { margin-top: 3px; color: #78899e; font-size: 8px; }
+.satellite-dataset-list-empty { padding: 25px 12px; color: #8190a3; text-align: center; font-size: 9px; }
+.satellite-dataset-editor { min-width: 0; min-height: 0; overflow-y: auto; }
+.satellite-dataset-editor > form:first-child { min-height: 100%; padding: 21px 23px; display: flex; flex-direction: column; }
+.satellite-dataset-editor-heading h3 { margin: 2px 0 15px; color: #152943; font-size: 18px; }
+.satellite-dataset-fields { display: grid; grid-template-columns: 1.4fr 1fr; gap: 13px; }
+.satellite-dataset-fields label > span { display: block; margin-bottom: 5px; color: #4e627a; font-size: 9px; font-weight: 700; }
+.satellite-dataset-fields input, .satellite-dataset-choice-heading input { width: 100%; min-height: 41px; padding: 8px 11px; color: #1b2f48; border: 1px solid #d1dce9; border-radius: 8px; outline: 0; background: #fff; font-size: 10px; }
+.satellite-dataset-fields input:focus, .satellite-dataset-choice-heading input:focus { border-color: #2677df; box-shadow: 0 0 0 3px rgba(38,119,223,.1); }
+.satellite-dataset-choices { min-height: 0; margin-top: 18px; display: flex; flex: 1; flex-direction: column; }
+.satellite-dataset-choice-heading { display: flex; align-items: end; justify-content: space-between; gap: 18px; }
+.satellite-dataset-choice-heading strong, .satellite-dataset-choice-heading small { display: block; }
+.satellite-dataset-choice-heading strong { color: #334a66; font-size: 10px; }
+.satellite-dataset-choice-heading small { margin-top: 2px; color: #7b8b9f; font-size: 8px; }
+.satellite-dataset-choice-heading input { width: min(270px, 48%); min-height: 36px; }
+.satellite-dataset-selection-note { margin: 9px 0 0; padding: 7px 9px; color: #765b19; border-radius: 6px; background: #fff7e4; font-size: 8px; }
+.satellite-dataset-checklist { max-height: 275px; margin-top: 9px; padding: 7px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; overflow-y: auto; border: 1px solid #dfe6ef; border-radius: 9px; background: #fafcff; }
+.satellite-dataset-checklist label { min-width: 0; padding: 9px 10px; display: flex; align-items: center; gap: 9px; border: 1px solid transparent; border-radius: 7px; background: #fff; cursor: pointer; }
+.satellite-dataset-checklist label:hover { border-color: #cbdcf1; }
+.satellite-dataset-checklist input { accent-color: #1265d8; }
+.satellite-dataset-checklist label span { min-width: 0; }
+.satellite-dataset-checklist label strong, .satellite-dataset-checklist label small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.satellite-dataset-checklist label strong { color: #263d59; font-size: 9px; }
+.satellite-dataset-checklist label small { margin-top: 2px; color: #8290a2; font-size: 7px; }
+.satellite-dataset-checklist > p { grid-column: 1 / -1; padding: 30px 10px; color: #7b899c; text-align: center; font-size: 9px; }
+.satellite-dataset-no-satellites { min-height: 105px; margin-top: 9px; padding: 18px; display: flex; align-items: center; justify-content: center; gap: 11px; color: #6d7e92; border: 1px dashed #ced9e6; border-radius: 9px; background: #fafcff; }
+.satellite-dataset-no-satellites p { margin: 0; }
+.satellite-dataset-no-satellites strong, .satellite-dataset-no-satellites span { display: block; }
+.satellite-dataset-no-satellites strong { color: #354a63; font-size: 10px; }
+.satellite-dataset-no-satellites span { margin-top: 3px; font-size: 8px; }
+.satellite-dataset-form-actions { margin-top: 18px; padding-top: 15px; display: grid; grid-template-columns: auto 1fr auto auto; gap: 8px; border-top: 1px solid #e3e9f1; }
+.button.danger { color: var(--danger); border-color: #edcbc8; background: #fff8f7; }
+.button.danger:hover { color: #fff; border-color: var(--danger); background: var(--danger); }
+
+@media (max-width: 780px) {
+    .satellite-targets { padding: 19px; }
+    .satellite-targets-heading { align-items: flex-start; flex-direction: column; }
+    .satellite-targets-heading > .button { width: 100%; }
+    .satellite-target-empty { align-items: flex-start; flex-wrap: wrap; }
+    .satellite-target-empty .button { width: 100%; }
+    .satellite-dataset-modal { padding: 0; }
+    .satellite-dataset-dialog { width: 100%; height: 100%; max-height: none; border: 0; border-radius: 0; }
+    .satellite-dataset-modal-header { padding: 15px 16px; }
+    .satellite-dataset-modal-header h2 { font-size: 20px; }
+    .satellite-dataset-modal-body { grid-template-columns: 1fr; overflow-y: auto; }
+    .satellite-dataset-list-panel { max-height: 185px; border-right: 0; border-bottom: 1px solid #e1e8f1; }
+    .satellite-dataset-editor { overflow: visible; }
+    .satellite-dataset-fields { grid-template-columns: 1fr; }
+    .satellite-dataset-checklist { grid-template-columns: 1fr; }
+    .satellite-dataset-form-actions { grid-template-columns: 1fr 1fr; }
+    .satellite-dataset-form-actions > span { display: none; }
+    .satellite-dataset-form-actions .button { width: 100%; }
+}

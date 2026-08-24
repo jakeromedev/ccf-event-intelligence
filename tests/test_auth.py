@@ -203,6 +203,17 @@ class AuthenticationTests(unittest.TestCase):
         self.assertEqual(302, self.client.get("/events").status_code)
         self.assertEqual(302, self.client.get("/events/1/dashboard").status_code)
         self.assertEqual(
+            302,
+            self.client.post(
+                "/events/1/satellite-datasets",
+                data={
+                    "name": "Unauthenticated",
+                    "participant_target": "10",
+                    "satellite_ids": "1",
+                },
+            ).status_code,
+        )
+        self.assertEqual(
             400,
             self.client.post(
                 "/register",

@@ -10,6 +10,10 @@ import unicodedata
 from collections import Counter, defaultdict
 
 from .normalization import normalize_gender, normalize_life_stage
+from .satellite_datasets import (
+    capture_rebuilt_batch_links,
+    restore_rebuilt_batch_links,
+)
 
 
 IDENTITY_FIELDS = ("Last Name", "Birth Month", "Birth Year", "Gender")
@@ -153,6 +157,7 @@ def rebuild_batch_curation(db, batch_id):
     if event_id is None:
         raise ValueError("The import batch is not owned by an Event.")
 
+    preserved_dataset_links = capture_rebuilt_batch_links(db, batch_id)
     rows = db.execute(
         """
         SELECT id, registration_code, source_id, first_name, last_name,
@@ -328,6 +333,9 @@ def rebuild_batch_curation(db, batch_id):
         ) VALUES (?, ?, ?, ?)
         """,
         pivot_rows,
+    )
+    restore_rebuilt_batch_links(
+        db, event_id, batch_id, preserved_dataset_links
     )
 
     return {
