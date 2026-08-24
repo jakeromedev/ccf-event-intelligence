@@ -2,222 +2,180 @@
 {% from "_icons.html" import icon %}
 {% from "_page_header.html" import render_page_header %}
 
-{% macro origin_card(label, count, icon_name, origin_filter) -%}
-<button type="button" class="origin-mini-card drilldown-trigger" data-registrant-trigger data-filter-origin="{{ origin_filter }}" data-modal-title="{{ label }} registrants">
-    <span class="origin-mini-icon">{{ icon(icon_name, 22) }}</span>
-    <p>{{ label }}</p>
-    <strong>{{ count|number }}</strong>
-    <small>{{ ((count / metrics.basis_total * 100) if metrics.basis_total else 0)|percent }}</small>
-</button>
+{% macro metric_card(label, value, icon_name, tone, note) -%}
+<article class="phase1-kpi-card {{ tone }}">
+    <span class="phase1-kpi-icon">{{ icon(icon_name, 23) }}</span>
+    <div class="phase1-kpi-copy">
+        <div class="phase1-kpi-heading">
+            <p>{{ label }}</p>
+            <span class="phase1-inline-info" title="{{ note }}">i</span>
+        </div>
+        <strong>{{ value }}</strong>
+    </div>
+    <small class="phase1-kpi-note">{{ note }}</small>
+</article>
 {%- endmacro %}
 
-{% block title %}Overview · CCF Event Dashboard{% endblock %}
+{% macro donut_panel(title, distribution, palette) -%}
+<section class="phase1-profile-card">
+    <header class="phase1-card-heading">
+        <h3>{{ title }}</h3>
+        <span class="phase1-inline-info" title="Unknown values remain in the participant population.">i</span>
+    </header>
+    {% if distribution.total %}
+        <div class="phase1-donut-layout">
+            <div class="phase1-donut {{ palette }}"
+                 role="img"
+                 aria-label="{{ title }} distribution for {{ distribution.total|number }} participants"
+                 style="background: conic-gradient({% for item in distribution['items'] %}var(--{{ palette }}-{{ item.key }}) {{ item.start }}% {{ item.end }}%{% if not loop.last %}, {% endif %}{% endfor %})">
+                <span><strong>{{ distribution.total|number }}</strong><small>Participants</small></span>
+            </div>
+            <div class="phase1-legend">
+                {% for item in distribution['items'] %}
+                    <div class="phase1-legend-row">
+                        <span class="phase1-swatch" style="background: var(--{{ palette }}-{{ item.key }})"></span>
+                        <span>{{ item.label }}</span>
+                        <strong>{{ item.count|number }}</strong>
+                        <small>{{ item.percentage|percent }}</small>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+    {% else %}
+        <div class="phase1-chart-empty">No participant registrations to display.</div>
+    {% endif %}
+    <footer><span>Total Participants</span><strong>{{ distribution.total|number }}</strong></footer>
+</section>
+{%- endmacro %}
+
+{% block title %}Event Dashboard · CCF Events Intelligence{% endblock %}
 
 {% block page_header %}
-{{ render_page_header('Event Overview', event, active_batch, 'Registration and participant profile at a glance.', variant='workspace') }}
+{{ render_page_header('Event Dashboard', event, active_batch, 'Overview and participant profile insights.', variant='workspace', action_form_id='event-settings-form', action_label='Save Changes') }}
 {% endblock %}
 
 {% block content %}
+<section class="phase1-settings panel" id="event-settings" aria-labelledby="event-settings-title">
+    <form id="event-settings-form" method="post" action="{{ url_for('dashboard.update_event_settings', event_id=event['id']) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <header class="phase1-section-heading settings-heading">
+            <span class="phase1-section-icon">{{ icon('save', 20) }}</span>
+            <div>
+                <p class="eyebrow" id="event-settings-title">Event Settings</p>
+                <h2>Dashboard configuration</h2>
+            </div>
+        </header>
+        <div class="phase1-settings-grid">
+            <label class="phase1-field">
+                <span>Event Date</span>
+                <span class="phase1-input-wrap">{{ icon('events', 19) }}<input type="date" name="event_date" value="{{ event['event_date'] or '' }}"></span>
+                <small>Used for age calculation and time-based metrics.</small>
+            </label>
+            <label class="phase1-field">
+                <span>Participant Target <i class="phase1-inline-info" title="This benchmark never alters registration records.">i</i></span>
+                <span class="phase1-input-wrap">{{ icon('person', 19) }}<input type="number" min="0" max="1000000000" step="1" inputmode="numeric" name="participant_target" value="{{ event['participant_target'] if event['participant_target'] is not none else '' }}" placeholder="Not configured"></span>
+                <small>Set the target number of participant registrations.</small>
+            </label>
+            <aside class="phase1-target-note">
+                <span class="phase1-target-icon">{{ icon('chart', 34) }}</span>
+                <p>The participant target measures registration progress. It does not affect registration data.</p>
+            </aside>
+        </div>
+    </form>
+</section>
+
 {% if not active_batch %}
-    {% include "_empty.html" %}
-{% else %}
-    <section class="overview-primary-metrics" aria-label="Event registration metric">
-        <button type="button" class="overview-metric-card drilldown-trigger" data-registrant-trigger data-modal-title="All registrants">
-            <span class="overview-metric-icon">{{ icon('users', 28) }}</span>
-            <div>
-                <p>Total Registrants</p>
-                <strong>{{ metrics.total_registrants|number }}</strong>
-                <span>Ticket-linked registration records · Click to view</span>
-            </div>
-        </button>
+<aside class="phase1-import-empty">
+    {{ icon('imports', 20) }}
+    <div><strong>No active dataset for this event</strong><span>Metrics remain at zero until the three required exports are imported.</span></div>
+    <a class="button secondary" href="{{ url_for('dashboard.event_imports', event_id=event['id']) }}">Open Imports</a>
+</aside>
+{% endif %}
+
+<div class="phase1-overview-row">
+    <section class="phase1-overview panel" aria-labelledby="event-overview-title">
+        <header class="phase1-section-heading">
+            <span class="phase1-section-icon">{{ icon('chart', 20) }}</span>
+            <div><p class="eyebrow" id="event-overview-title">Event Overview</p><h2>Registration snapshot</h2></div>
+        </header>
+        <div class="phase1-kpi-grid">
+            {{ metric_card('Unique Participants', metrics.participants|number, 'users', 'participants', 'Curated participant people') }}
+            {{ metric_card('Unique Volunteers', metrics.volunteers|number, 'person', 'volunteers', 'Curated volunteer people') }}
+            {{ metric_card('Unique Registrants', metrics.total_registrations|number, 'ticket', 'total', 'Unique Participants + Unique Volunteers') }}
+            {{ metric_card('Raw Registrations', metrics.raw_registrations|number, 'imports', 'raw', 'Valid source registration rows') }}
+            {{ metric_card('Participant Target', (metrics.participant_target|number if metrics.participant_target is not none else '—'), 'chart', 'target', 'Event target') }}
+        </div>
     </section>
 
-    <section class="overview-profile-grid" aria-label="Registrant profile analytics">
-        <section class="origin-panel panel">
-            <div class="analytics-heading">
-                <h2>Registrants by Church Origin</h2>
-                <p>Based on {{ metrics.basis_total|number }} registrants</p>
-            </div>
-
-            <div class="origin-mini-grid">
-                {{ origin_card('CCF Main', metrics.ccf_main, 'church', 'CCF Main') }}
-                {{ origin_card('Satellite Churches', metrics.satellites, 'users', 'satellites') }}
-                {{ origin_card('Non-CCF', metrics.non_ccf, 'globe', 'Non-CCF') }}
-                {{ origin_card('Unknown', metrics.unknown, 'unknown', 'Unknown') }}
-            </div>
-
-            <div class="origin-distribution">
-                <h3>Church Origin Distribution</h3>
-                <p>Count and share of all registrants</p>
-                <div class="stacked-bar" aria-label="Registrant church origin distribution">
-                    {% for item in metrics.affiliation %}
-                        {% set color_class = {'CCF Main':'main','Local Satellite':'local','International Satellite':'international','Non-CCF':'nonccf','Unknown':'unknown'}[item.name] %}
-                        {% if item.percentage > 0 %}<button type="button" class="{{ color_class }} drilldown-trigger" style="width: {{ item.percentage }}%" title="View {{ item.name }} registrants" aria-label="View {{ item.name }} registrants: {{ item.count|number }}" data-registrant-trigger data-filter-origin="{{ item.name }}" data-modal-title="{{ item.name }} registrants"></button>{% endif %}
-                    {% endfor %}
+    <section class="phase1-progress panel" aria-labelledby="registration-progress-title">
+        <header class="phase1-section-heading phase1-progress-heading">
+            <span class="phase1-section-icon">{{ icon('chart', 20) }}</span>
+            <div><p class="eyebrow">Registration</p><h2 id="registration-progress-title">Registration Progress</h2></div>
+            <span class="phase1-inline-info" title="Progress uses participants only; volunteers are excluded.">i</span>
+        </header>
+        {% if metrics.target_configured %}
+            {% set visual_progress = 100 if metrics.progress_percentage > 100 else metrics.progress_percentage %}
+            <div class="phase1-progress-body">
+                <div class="phase1-progress-ring" style="--phase1-progress: {{ visual_progress }}">
+                    <span><strong>{{ metrics.progress_percentage|percent }}</strong><small>of target</small></span>
                 </div>
-                <div class="origin-detail-list" aria-label="Church origin counts and percentages">
-                    {% for item in metrics.affiliation %}
-                        {% set color_class = {'CCF Main':'main','Local Satellite':'local','International Satellite':'international','Non-CCF':'nonccf','Unknown':'unknown'}[item.name] %}
-                        <button type="button" class="origin-detail-row drilldown-trigger" data-registrant-trigger data-filter-origin="{{ item.name }}" data-modal-title="{{ item.name }} registrants">
-                            <span class="swatch {{ color_class }}"></span>
-                            <span>{{ item.name }}</span>
-                            <strong>{{ item.count|number }}</strong>
-                            <span>{{ item.percentage|percent }}</span>
-                        </button>
-                    {% endfor %}
-                    <div class="origin-detail-row total">
-                        <span></span><span>Total</span><strong>{{ metrics.basis_total|number }}</strong><strong>100.0%</strong>
-                    </div>
-                </div>
+                <dl>
+                    <div><dt><strong>{{ metrics.participants|number }}</strong> / {{ metrics.participant_target|number }}</dt><dd>Participants Registered</dd></div>
+                    <div><dt>{{ metrics.remaining_slots|number }}</dt><dd>{{ 'Target exceeded' if metrics.target_exceeded else 'Remaining Slots' }}</dd></div>
+                </dl>
             </div>
-        </section>
-
-        <section class="gender-panel panel">
-            <div class="analytics-heading">
-                <h2>Registrant Profile by Gender</h2>
-                <p>Based on {{ profile.gender.total|number }} registrants</p>
+        {% else %}
+            <div class="phase1-progress-empty">
+                <span class="phase1-target-icon">{{ icon('chart', 32) }}</span>
+                <strong>Participant target not configured</strong>
+                <p>Set a target above zero in Event Settings to calculate registration progress.</p>
             </div>
-
-            <div class="gender-content">
-                <button type="button" class="gender-donut drilldown-trigger"
-                     aria-label="Gender distribution for {{ profile.gender.total|number }} registrants"
-                     title="Click a chart segment to view registrants"
-                     data-gender-chart
-                     data-gender-segments='{{ profile.gender["items"]|tojson }}'
-                     {% if profile.gender.total %}style="background: conic-gradient({% for item in profile.gender['items'] %}var(--gender-{{ item.key }}) {{ item.start }}% {{ item.end }}%{% if not loop.last %}, {% endif %}{% endfor %})"{% endif %}>
-                    <div class="gender-donut-center">
-                        <span>Total</span>
-                        <strong>{{ profile.gender.total|number }}</strong>
-                    </div>
-                </button>
-
-                <div class="gender-legend">
-                    {% for item in profile.gender['items'] %}
-                        {% if item.count %}
-                            <button type="button" class="gender-row drilldown-trigger" data-registrant-trigger data-filter-gender="{{ item.key }}" data-modal-title="{{ item.label }} registrants">
-                                <span class="gender-swatch {{ item.key }}"></span>
-                                <span>{{ item.label }}</span>
-                                <strong>{{ item.count|number }}</strong>
-                                <span>{{ item.percentage|percent }}</span>
-                            </button>
-                        {% endif %}
-                    {% endfor %}
-                </div>
-            </div>
-
-            <div class="analytics-note">
-                {{ icon('info', 18) }}
-                <p>Gender uses the profile response provided during registration. Blank responses are included as Unknown.</p>
-            </div>
-        </section>
+        {% endif %}
     </section>
+</div>
 
-    <section class="age-panel panel">
-        <div class="analytics-heading age-heading">
-            <div>
-                <h2>Age Distribution</h2>
-                <p>Based on {{ profile.age.valid|number }} registrants with usable age data</p>
-            </div>
-            <span class="basis-badge">Estimated age groups</span>
-        </div>
+<section class="phase1-profile panel" aria-labelledby="participant-profile-title">
+    <header class="phase1-section-heading profile-heading">
+        <span class="phase1-section-icon">{{ icon('users', 20) }}</span>
+        <div><p class="eyebrow" id="participant-profile-title">Participant Profile</p><h2>Demographic breakdown</h2></div>
+        <span>Participants only · Unknown values included</span>
+    </header>
+    <div class="phase1-profile-grid">
+        {{ donut_panel('Gender', profile.gender, 'phase1-gender') }}
+        {{ donut_panel('Life Stage', profile.life_stage, 'phase1-life') }}
 
-        <div class="age-chart-scroll">
-            <div class="age-chart" role="img" aria-label="Age distribution for {{ profile.age.valid|number }} registrants with usable birth month and year">
-                <span class="age-axis-title">Registrants</span>
-                <div class="age-bars">
-                    {% for item in profile.age['items'] %}
-                        <div class="age-column">
-                            <button type="button" class="age-bar-space drilldown-trigger" aria-label="View registrants age {{ item.label }}: {{ item.count|number }}" data-registrant-trigger data-filter-age="{{ item.label }}" data-modal-title="Age {{ item.label }} registrants">
-                                <span class="age-count" style="bottom: calc({{ item.height }}% + 5px)">{{ item.count|number }}</span>
-                                <span class="age-bar" style="height: {{ item.height }}%"></span>
-                            </button>
-                            <span class="age-label">{{ item.label }}</span>
-                        </div>
-                    {% endfor %}
-                </div>
-            </div>
-        </div>
-
-        <div class="age-data-summary">
-            <span><strong>{{ profile.age.valid|number }}</strong> valid age profiles</span>
-            <span><strong>{{ profile.age.missing|number }}</strong> missing age profiles</span>
-            <span><strong>{{ profile.age.invalid|number }}</strong> invalid age profiles</span>
-        </div>
-        <p class="age-method">Ages are estimated from Birth Month and Birth Year as of {{ profile.age.reference_date }} ({{ profile.age.reference_source }}). The source does not include the day of birth.</p>
-    </section>
-
-    <aside class="privacy-strip">
-        {{ icon('lock', 17) }}
-        <strong>Your data is safe.</strong>
-        <span>Contact information is not displayed. Registrant names appear only in the drill-down table.</span>
-    </aside>
-
-    <div class="registrant-modal" data-registrant-modal data-endpoint="{{ url_for('dashboard.event_overview_registrants', event_id=event['id']) }}" hidden>
-        <div class="registrant-modal-backdrop" data-modal-close></div>
-        <section class="registrant-dialog" role="dialog" aria-modal="true" aria-labelledby="registrant-modal-title">
-            <header class="registrant-modal-header">
-                <div>
-                    <p class="eyebrow">Registrant drill-down</p>
-                    <h2 id="registrant-modal-title">All registrants</h2>
-                    <p>Names and registration details only; contact information is not displayed.</p>
-                </div>
-                <button type="button" class="registrant-modal-close" data-modal-close aria-label="Close registrant table">×</button>
+        <section class="phase1-profile-card phase1-age-card">
+            <header class="phase1-card-heading">
+                <h3>Age Distribution <small>(as of event date)</small></h3>
+                <span class="phase1-inline-info" title="Age is calculated at the configured event date.">i</span>
             </header>
-
-            <div class="registrant-filters" aria-label="Registrant table filters">
-                <label class="registrant-search">
-                    <span>Search</span>
-                    <input type="search" data-filter-search placeholder="Name, registration, ticket, or satellite" autocomplete="off">
-                </label>
-                <label><span>Church origin</span><select data-filter-origin>
-                    <option value="all">All origins</option>
-                    <option value="CCF Main">CCF Main</option>
-                    <option value="satellites">All Satellites</option>
-                    <option value="Local Satellite">Local Satellite</option>
-                    <option value="International Satellite">International Satellite</option>
-                    <option value="Non-CCF">Non-CCF</option>
-                    <option value="Unknown">Unknown</option>
-                </select></label>
-                <label><span>Gender</span><select data-filter-gender>
-                    <option value="all">All genders</option>
-                    {% for key, label in [('male', 'Male'), ('female', 'Female'), ('prefer-not-to-say', 'Prefer not to say'), ('other', 'Other'), ('unknown', 'Unknown')] %}
-                        <option value="{{ key }}">{{ label }}</option>
+            {% if profile.age.total %}
+                <div class="phase1-age-chart">
+                    {% for item in profile.age['items'] %}
+                    <div class="phase1-age-row">
+                        <span>{{ item.label }}</span>
+                        <div><i style="width: {{ item.percentage }}%"></i></div>
+                        <strong>{{ item.count|number }}</strong>
+                        <small>{{ item.percentage|percent }}</small>
+                    </div>
                     {% endfor %}
-                </select></label>
-                <label><span>Age group</span><select data-filter-age>
-                    <option value="all">All age groups</option>
-                    {% for item in profile.age['items'] %}<option value="{{ item.label }}">{{ item.label }}</option>{% endfor %}
-                    <option value="Missing">Missing</option>
-                    <option value="Invalid">Invalid</option>
-                </select></label>
-                <label><span>Check-in</span><select data-filter-checkin>
-                    <option value="all">All statuses</option>
-                    <option value="checked">Checked In</option>
-                    <option value="not-checked">Not Checked In</option>
-                </select></label>
-                <label><span>Rows</span><select data-page-size>
-                    <option value="25">25</option>
-                    <option value="50">50</option>
-                    <option value="100">100</option>
-                </select></label>
-            </div>
-
-            <div class="registrant-table-state" data-table-state>Loading registrants…</div>
-            <div class="registrant-table-wrap" data-table-wrap hidden>
-                <table class="registrant-table">
-                    <thead><tr><th>Name</th><th>Registration</th><th>Ticket</th><th>Origin</th><th>Satellite</th><th>Gender</th><th>Age Group</th><th>Ticket Status</th><th>Check-In</th></tr></thead>
-                    <tbody data-registrant-rows></tbody>
-                </table>
-            </div>
-            <footer class="registrant-modal-footer">
-                <p data-result-summary>Loading…</p>
-                <nav class="registrant-pagination" aria-label="Registrant table pages" data-pagination></nav>
-            </footer>
+                </div>
+                {% if not profile.age.configured %}
+                    <p class="phase1-age-warning">Configure the Event Date to resolve age buckets; participants currently reconcile under Unknown.</p>
+                {% elif profile.age.estimated %}
+                    <p class="phase1-age-method">{{ profile.age.estimated|number }} ages use the imported Birth Month/Year estimate because the source export has no birth day.</p>
+                {% endif %}
+            {% else %}
+                <div class="phase1-chart-empty">No participant registrations to display.</div>
+            {% endif %}
+            <footer><span>Total Participants</span><strong>{{ profile.age.total|number }}</strong></footer>
         </section>
     </div>
-{% endif %}
-{% endblock %}
+</section>
 
-{% block scripts %}
-{% if active_batch %}<script src="{{ url_for('static', filename='overview.js', v='20260820-people') }}" defer></script>{% endif %}
+<aside class="phase1-scope-note">
+    {{ icon('info', 18) }}
+    <span>All metrics are scoped to <strong>{{ event['name'] }}</strong>. Unique-person metrics use the curated layer for the latest active import; raw registrations remain separately visible.</span>
+    <small>Last updated: {{ dashboard.last_updated|datetime_short }}</small>
+</aside>
 {% endblock %}

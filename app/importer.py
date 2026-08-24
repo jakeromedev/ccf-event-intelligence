@@ -1,4 +1,5 @@
 import csv
+import json
 import os
 import uuid
 from collections import Counter
@@ -9,6 +10,8 @@ from pathlib import Path
 from werkzeug.utils import secure_filename
 
 from .classifier import classify_affiliation, clean
+from .curation import rebuild_batch_curation
+from .normalization import normalize_registration_type
 
 
 REGISTRANT_CORE_HEADERS = {
@@ -524,7 +527,13 @@ def process_batch(db, batch_id):
         db.commit()
         raise
 
-    db.execute("UPDATE import_batches SET status = 'processing' WHERE id = ?", (batch_id,))
+    # Serialize replacement of an Event's active batch. The checked nullable
+    # unique column remains the final database-level guard against concurrent writers.
+    db.lock_event(batch["event_id"])
+    db.execute(
+        "UPDATE import_batches SET status = 'processing', active_event_id = NULL WHERE id = ?",
+        (batch_id,),
+    )
     try:
         for row in parsed["buyers"]:
             quantity = clean(row.get("Quantity"))
@@ -536,8 +545,8 @@ def process_batch(db, batch_id):
                 """
                 INSERT INTO buyers (
                     batch_id, source_id, event_slug, buyer_reference,
-                    payment_status, quantity
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    payment_status, quantity, source_data_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     batch_id,
@@ -546,16 +555,20 @@ def process_batch(db, batch_id):
                     clean(row.get("Buyer Reference Number")),
                     clean(row.get("Payment Status")),
                     quantity_value,
+                    json.dumps(row, ensure_ascii=False, separators=(",", ":")),
                 ),
             )
 
         for row in parsed["tickets"]:
+            check_in_raw = clean(row.get("Check-in Date Time"))
+            check_in_at = datetime.fromisoformat(check_in_raw).replace(tzinfo=None) if check_in_raw else None
             db.execute(
                 """
                 INSERT INTO tickets (
                     batch_id, source_id, event_slug, ticket_code, control_number,
-                    buyer_reference, ticket_status, payment_status, check_in_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    buyer_reference, ticket_status, payment_status, check_in_at,
+                    source_data_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     batch_id,
@@ -566,7 +579,8 @@ def process_batch(db, batch_id):
                     clean(row.get("Buyer Reference Number")) or None,
                     clean(row.get("Ticket Status")),
                     clean(row.get("Payment Status")),
-                    clean(row.get("Check-in Date Time")) or None,
+                    check_in_at,
+                    json.dumps(row, ensure_ascii=False, separators=(",", ":")),
                 ),
             )
 
@@ -574,10 +588,15 @@ def process_batch(db, batch_id):
             clean(row.get("Ticket Code")): bool(clean(row.get("Check-in Date Time")))
             for row in parsed["tickets"]
         }
+        ticket_names = {
+            clean(row.get("Ticket Code")): clean(row.get("Ticket Name"))
+            for row in parsed["tickets"]
+        }
         quality_issues = []
         for source_row, row in enumerate(parsed["registrants"], start=2):
             classification = classify_affiliation(row)
             ticket_code = clean(row.get("Ticket Code"))
+            ticket_name = clean(row.get("Ticket Name")) or ticket_names.get(ticket_code, "")
             identity_values = [
                 clean(row.get("First Name")),
                 clean(row.get("Last Name")),
@@ -588,15 +607,17 @@ def process_batch(db, batch_id):
                 """
                 INSERT INTO registrants (
                     batch_id, source_id, event_slug, registration_code, ticket_code,
-                    ticket_status, first_name, last_name,
+                    ticket_name_raw, ticket_status, first_name, last_name,
                     first_name_present, last_name_present,
-                    email_present, mobile_present, gender_raw, birth_month_raw,
-                    birth_year_raw, b1g_satellite_hub_raw, b1g_satellite_raw,
+                    email_present, mobile_present, gender_raw, life_stage_raw,
+                    birth_date_raw, birth_month_raw, birth_year_raw,
+                    b1g_satellite_hub_raw, b1g_satellite_raw,
                     b1g_satellite_specify_raw, attending_ccf_raw,
                     satellite_scope_raw, local_satellite_raw,
                     international_satellite_raw, affiliation, satellite_name,
-                    ticket_matched, checked_in
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    registration_type, ticket_matched, checked_in
+                    , source_data_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     batch_id,
@@ -604,6 +625,7 @@ def process_batch(db, batch_id):
                     clean(row.get("Event Slug")),
                     clean(row.get("Registration Code")),
                     ticket_code,
+                    ticket_name or None,
                     clean(row.get("Ticket Status")),
                     identity_values[0] or None,
                     identity_values[1] or None,
@@ -612,6 +634,8 @@ def process_batch(db, batch_id):
                     int(bool(identity_values[2])),
                     int(bool(identity_values[3])),
                     clean(row.get("Gender")) or None,
+                    clean(row.get("Life Stage")) or None,
+                    clean(row.get("Date of Birth") or row.get("Birth Date")) or None,
                     clean(row.get("Birth Month")) or None,
                     clean(row.get("Birth Year")) or None,
                     clean(row.get("B1g Satellite Hub")) or None,
@@ -623,8 +647,10 @@ def process_batch(db, batch_id):
                     clean(row.get("Which International Satellite")),
                     classification.affiliation,
                     classification.satellite_name,
+                    normalize_registration_type(ticket_name, row.get("Event Name")),
                     int(ticket_code in ticket_checkins),
                     int(ticket_checkins.get(ticket_code, False)),
+                    json.dumps(row, ensure_ascii=False, separators=(",", ":")),
                 ),
             )
 
@@ -676,9 +702,10 @@ def process_batch(db, batch_id):
             )
 
         _insert_issues(db, batch_id, quality_issues)
+        rebuild_batch_curation(db, batch_id)
         db.execute(
             """
-            UPDATE import_batches SET status = 'superseded'
+            UPDATE import_batches SET status = 'superseded', active_event_id = NULL
             WHERE event_id = ? AND status = 'active' AND id <> ?
             """,
             (batch["event_id"], batch_id),
@@ -686,17 +713,23 @@ def process_batch(db, batch_id):
         db.execute(
             """
             UPDATE import_batches
-            SET status = 'active', processed_at = CURRENT_TIMESTAMP,
+            SET status = 'active', active_event_id = event_id,
+                processed_at = CURRENT_TIMESTAMP,
                 activated_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
             (batch_id,),
         )
+        db.execute(
+            "UPDATE events SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (batch["event_id"],),
+        )
         db.commit()
     except Exception as exc:
         db.rollback()
         db.execute(
-            "UPDATE import_batches SET status = 'failed', error_message = ? WHERE id = ?",
+            "UPDATE import_batches SET status = 'failed', active_event_id = NULL, "
+            "error_message = ? WHERE id = ?",
             (str(exc), batch_id),
         )
         db.commit()

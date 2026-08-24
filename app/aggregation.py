@@ -1,7 +1,13 @@
-import calendar
-from datetime import datetime
-
 from .classifier import AFFILIATIONS
+from .normalization import (
+    AGE_BUCKETS,
+    GENDER_CATEGORIES,
+    LIFE_STAGE_CATEGORIES,
+    calculate_age_at_event,
+    get_age_bucket,
+    normalize_gender,
+    normalize_life_stage,
+)
 
 
 def active_batch(db, event_id):
@@ -27,7 +33,7 @@ def event_summaries(db):
             """,
             (event["id"],),
         ).fetchone()
-        metrics = overview_metrics(db, batch["id"]) if batch else None
+        metrics = event_summary_metrics(db, batch["id"]) if batch else None
         summaries.append(
             {
                 "event": event,
@@ -39,6 +45,30 @@ def event_summaries(db):
             }
         )
     return summaries
+
+
+def event_summary_metrics(db, batch_id):
+    """Unique-person metrics for the Event selector cards."""
+    row = db.execute(
+        """
+        SELECT COUNT(*) total_registrants,
+               COALESCE(SUM(checked_in), 0) checked_in
+        FROM curated_registrants WHERE batch_id = ?
+        """,
+        (batch_id,),
+    ).fetchone()
+    total = row["total_registrants"] or 0
+    checked = row["checked_in"] or 0
+    raw = db.execute(
+        "SELECT COUNT(*) FROM registrants WHERE batch_id = ? AND ticket_matched = 1",
+        (batch_id,),
+    ).fetchone()[0]
+    return {
+        "total_registrants": total,
+        "checked_in": checked,
+        "attendance_rate": checked / total * 100 if total else 0,
+        "raw_registrations": raw,
+    }
 
 
 def overview_metrics(db, batch_id, basis="registrants"):
@@ -81,132 +111,265 @@ def overview_metrics(db, batch_id, basis="registrants"):
     }
 
 
-GENDER_CATEGORIES = (
-    ("male", "Male"),
-    ("female", "Female"),
-    ("prefer-not-to-say", "Prefer not to say"),
-    ("other", "Other"),
-    ("unknown", "Unknown"),
-)
-
-AGE_GROUPS = (
-    ("Below 13", None, 12),
-    ("13–17", 13, 17),
-    ("18–24", 18, 24),
-    ("25–34", 25, 34),
-    ("35–44", 35, 44),
-    ("45–54", 45, 54),
-    ("55–64", 55, 64),
-    ("65+", 65, None),
-)
-
-
-def normalize_gender(value):
-    normalized = (value or "").strip().casefold()
-    if normalized in ("male", "m"):
-        return "male"
-    if normalized in ("female", "f"):
-        return "female"
-    if normalized in (
-        "prefer not to say",
-        "prefer not to answer",
-        "decline to answer",
-        "rather not say",
-    ):
-        return "prefer-not-to-say"
-    if not normalized:
-        return "unknown"
-    return "other"
+def _distribution(categories, counts, total, include_segments=False):
+    items = []
+    cumulative = 0.0
+    for key, label in categories:
+        count = counts[key]
+        percentage = count / total * 100 if total else 0
+        item = {
+            "key": key,
+            "label": label,
+            "count": count,
+            "percentage": percentage,
+        }
+        if include_segments:
+            item.update({"start": cumulative, "end": cumulative + percentage})
+        items.append(item)
+        cumulative += percentage
+    return {"total": total, "items": items}
 
 
-def participant_profile_metrics(db, batch_id):
-    """Aggregate privacy-safe gender and age profile data for one import batch."""
+def participant_profile_metrics(db, batch_id, event_date=None):
+    """Aggregate Phase 1 demographics for participants in one import batch."""
     rows = db.execute(
         """
-        SELECT gender_raw, birth_month_raw, birth_year_raw
+        SELECT gender_raw, life_stage_raw, birth_date_raw,
+               birth_month_raw, birth_year_raw
         FROM registrants
         WHERE batch_id = ? AND ticket_matched = 1
+          AND registration_type = 'participant'
         """,
         (batch_id,),
     ).fetchall()
     total = len(rows)
 
     gender_counts = {key: 0 for key, _label in GENDER_CATEGORIES}
+    life_stage_counts = {key: 0 for key, _label in LIFE_STAGE_CATEGORIES}
     for row in rows:
         gender_counts[normalize_gender(row["gender_raw"])] += 1
+        life_stage_counts[normalize_life_stage(row["life_stage_raw"])] += 1
 
-    gender_items = []
-    cumulative = 0.0
-    for key, label in GENDER_CATEGORIES:
-        count = gender_counts[key]
-        percentage = count / total * 100 if total else 0
-        gender_items.append(
-            {
-                "key": key,
-                "label": label,
-                "count": count,
-                "percentage": percentage,
-                "start": cumulative,
-                "end": cumulative + percentage,
-            }
-        )
-        cumulative += percentage
-
-    reference_date, reference_source = _profile_reference_date(db, batch_id)
-    month_numbers = {
-        name.casefold(): number
-        for number, name in enumerate(calendar.month_name)
-        if name
-    }
-    age_counts = {label: 0 for label, _minimum, _maximum in AGE_GROUPS}
-    missing_age = 0
-    invalid_age = 0
+    age_counts = {label: 0 for label in AGE_BUCKETS}
     for row in rows:
-        month_raw = (row["birth_month_raw"] or "").strip()
-        year_raw = (row["birth_year_raw"] or "").strip()
-        if not month_raw and not year_raw:
-            missing_age += 1
-            continue
-        try:
-            birth_month = month_numbers[month_raw.casefold()]
-            birth_year = int(year_raw)
-            age = reference_date.year - birth_year - int(birth_month > reference_date.month)
-        except (KeyError, TypeError, ValueError):
-            invalid_age += 1
-            continue
-        if age < 0 or age > 120:
-            invalid_age += 1
-            continue
-        for label, minimum, maximum in AGE_GROUPS:
-            if (minimum is None or age >= minimum) and (maximum is None or age <= maximum):
-                age_counts[label] += 1
-                break
+        age = calculate_age_at_event(
+            row["birth_date_raw"],
+            event_date,
+            row["birth_month_raw"],
+            row["birth_year_raw"],
+        )
+        age_counts[get_age_bucket(age)] += 1
 
-    valid_age = sum(age_counts.values())
-    max_age_count = max(age_counts.values()) if age_counts else 0
     age_items = [
         {
             "label": label,
             "count": age_counts[label],
-            "height": age_counts[label] / max_age_count * 100 if max_age_count else 0,
+            "percentage": age_counts[label] / total * 100 if total else 0,
         }
-        for label, _minimum, _maximum in AGE_GROUPS
+        for label in AGE_BUCKETS
     ]
     return {
-        "gender": {
-            "total": total,
-            "items": gender_items,
-        },
+        "gender": _distribution(
+            GENDER_CATEGORIES, gender_counts, total, include_segments=True
+        ),
+        "life_stage": _distribution(
+            LIFE_STAGE_CATEGORIES, life_stage_counts, total, include_segments=True
+        ),
         "age": {
             "total": total,
-            "valid": valid_age,
-            "missing": missing_age,
-            "invalid": invalid_age,
             "items": age_items,
-            "reference_date": "{} {}, {}".format(
-                reference_date.strftime("%B"), reference_date.day, reference_date.year
+            "reference_date": event_date,
+            "configured": bool(event_date),
+            "unknown": age_counts["Unknown"],
+            "estimated": sum(
+                1
+                for row in rows
+                if not (row["birth_date_raw"] or "").strip()
+                and (row["birth_month_raw"] or "").strip()
+                and (row["birth_year_raw"] or "").strip()
+                and calculate_age_at_event(
+                    None, event_date, row["birth_month_raw"], row["birth_year_raw"]
+                ) is not None
             ),
-            "reference_source": reference_source,
+        },
+    }
+
+
+def curated_participant_profile_metrics(db, batch_id, event_date=None):
+    """Aggregate participant demographics from unique curated people."""
+    rows = db.execute(
+        """
+        SELECT gender, life_stage, birth_date, birth_month, birth_year
+        FROM curated_registrants
+        WHERE batch_id = ? AND registration_type = 'participant'
+        """,
+        (batch_id,),
+    ).fetchall()
+    total = len(rows)
+    gender_counts = {key: 0 for key, _label in GENDER_CATEGORIES}
+    life_stage_counts = {key: 0 for key, _label in LIFE_STAGE_CATEGORIES}
+    age_counts = {label: 0 for label in AGE_BUCKETS}
+    estimated = 0
+    for row in rows:
+        gender_counts[normalize_gender(row["gender"])] += 1
+        life_stage_counts[normalize_life_stage(row["life_stage"])] += 1
+        age = calculate_age_at_event(
+            row["birth_date"], event_date, row["birth_month"], row["birth_year"]
+        )
+        age_counts[get_age_bucket(age)] += 1
+        if (
+            not (row["birth_date"] or "").strip()
+            and row["birth_month"]
+            and row["birth_year"]
+            and age is not None
+        ):
+            estimated += 1
+    return {
+        "gender": _distribution(
+            GENDER_CATEGORIES, gender_counts, total, include_segments=True
+        ),
+        "life_stage": _distribution(
+            LIFE_STAGE_CATEGORIES, life_stage_counts, total, include_segments=True
+        ),
+        "age": {
+            "total": total,
+            "items": [
+                {
+                    "label": label,
+                    "count": age_counts[label],
+                    "percentage": age_counts[label] / total * 100 if total else 0,
+                }
+                for label in AGE_BUCKETS
+            ],
+            "reference_date": event_date,
+            "configured": bool(event_date),
+            "unknown": age_counts["Unknown"],
+            "estimated": estimated,
+        },
+    }
+
+
+def registration_progress(participants, participant_target):
+    """Calculate participant-only progress with an explicit unconfigured state."""
+    configured = participant_target is not None and participant_target > 0
+    if not configured:
+        return {
+            "target_configured": False,
+            "progress_percentage": None,
+            "remaining_slots": None,
+            "target_exceeded": False,
+        }
+    return {
+        "target_configured": True,
+        "progress_percentage": participants / participant_target * 100,
+        "remaining_slots": max(participant_target - participants, 0),
+        "target_exceeded": participants > participant_target,
+    }
+
+
+def event_dashboard_metrics(db, event_id):
+    """Return the authoritative, event-scoped Phase 1 dashboard response."""
+    event = db.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+    if event is None:
+        return None
+    batch = active_batch(db, event_id)
+    counts = {"participant": 0, "volunteer": 0}
+    raw_registrations = 0
+    source_mappings = 0
+    if batch:
+        rows = db.execute(
+            """
+            SELECT registration_type, COUNT(*) AS count
+            FROM curated_registrants
+            WHERE batch_id = ?
+            GROUP BY registration_type
+            """,
+            (batch["id"],),
+        ).fetchall()
+        counts.update({row["registration_type"]: row["count"] for row in rows})
+        raw_registrations = db.execute(
+            """
+            SELECT COUNT(*) FROM registrants
+            WHERE batch_id = ? AND ticket_matched = 1
+            """,
+            (batch["id"],),
+        ).fetchone()[0]
+        source_mappings = db.execute(
+            "SELECT COUNT(*) FROM curated_registrant_sources WHERE batch_id = ?",
+            (batch["id"],),
+        ).fetchone()[0]
+
+    participants = counts["participant"]
+    volunteers = counts["volunteer"]
+    target = event["participant_target"]
+    progress = registration_progress(participants, target)
+    profile = (
+        curated_participant_profile_metrics(db, batch["id"], event["event_date"])
+        if batch
+        else participant_profile_metrics_empty(event["event_date"])
+    )
+    total_registrations = participants + volunteers
+    return {
+        "event": {
+            "id": event["id"],
+            "name": event["name"],
+            "event_date": event["event_date"],
+        },
+        "active_batch_id": batch["id"] if batch else None,
+        "last_updated": batch["activated_at"] if batch else event["updated_at"],
+        "overview": {
+            "participants": participants,
+            "volunteers": volunteers,
+            "total_registrations": total_registrations,
+            "unique_registrants": total_registrations,
+            "raw_registrations": raw_registrations,
+            "duplicate_records_merged": max(raw_registrations - total_registrations, 0),
+            "participant_target": target,
+            **progress,
+        },
+        "participant_profile": profile,
+        "reconciliation": {
+            "registrations_reconcile": total_registrations == participants + volunteers,
+            "gender_reconciles": sum(item["count"] for item in profile["gender"]["items"])
+            == participants,
+            "life_stage_reconciles": sum(
+                item["count"] for item in profile["life_stage"]["items"]
+            )
+            == participants,
+            "age_reconciles": sum(item["count"] for item in profile["age"]["items"])
+            == participants,
+            "raw_to_curated_reconciles": raw_registrations
+            == total_registrations + max(raw_registrations - total_registrations, 0),
+            "source_traceability_reconciles": source_mappings == raw_registrations,
+        },
+    }
+
+
+def participant_profile_metrics_empty(event_date=None):
+    gender = _distribution(
+        GENDER_CATEGORIES,
+        {key: 0 for key, _label in GENDER_CATEGORIES},
+        0,
+        include_segments=True,
+    )
+    life_stage = _distribution(
+        LIFE_STAGE_CATEGORIES,
+        {key: 0 for key, _label in LIFE_STAGE_CATEGORIES},
+        0,
+        include_segments=True,
+    )
+    return {
+        "gender": gender,
+        "life_stage": life_stage,
+        "age": {
+            "total": 0,
+            "items": [
+                {"label": label, "count": 0, "percentage": 0} for label in AGE_BUCKETS
+            ],
+            "reference_date": event_date,
+            "configured": bool(event_date),
+            "unknown": 0,
+            "estimated": 0,
         },
     }
 
@@ -225,7 +388,15 @@ def overview_registrants(db, batch_id):
         """,
         (batch_id,),
     ).fetchall()
-    reference_date, _reference_source = _profile_reference_date(db, batch_id)
+    reference_date = db.execute(
+        """
+        SELECT event.event_date
+        FROM import_batches batch
+        JOIN events event ON event.id = batch.event_id
+        WHERE batch.id = ?
+        """,
+        (batch_id,),
+    ).fetchone()[0]
     gender_labels = {key: label for key, label in GENDER_CATEGORIES}
     registrants = []
     for row in rows:
@@ -253,49 +424,9 @@ def overview_registrants(db, batch_id):
 
 
 def _registrant_age_group(month_raw, year_raw, reference_date):
-    if not (month_raw or "").strip() and not (year_raw or "").strip():
-        return "Missing"
-    month_numbers = {
-        name.casefold(): number
-        for number, name in enumerate(calendar.month_name)
-        if name
-    }
-    try:
-        birth_month = month_numbers[(month_raw or "").strip().casefold()]
-        birth_year = int((year_raw or "").strip())
-        age = reference_date.year - birth_year - int(birth_month > reference_date.month)
-    except (KeyError, TypeError, ValueError):
-        return "Invalid"
-    if age < 0 or age > 120:
-        return "Invalid"
-    for label, minimum, maximum in AGE_GROUPS:
-        if (minimum is None or age >= minimum) and (maximum is None or age <= maximum):
-            return label
-    return "Invalid"
-
-
-def _profile_reference_date(db, batch_id):
-    first_check_in = db.execute(
-        "SELECT MIN(check_in_at) FROM tickets WHERE batch_id = ? AND check_in_at IS NOT NULL",
-        (batch_id,),
-    ).fetchone()[0]
-    if first_check_in:
-        try:
-            return datetime.fromisoformat(first_check_in), "first recorded check-in"
-        except ValueError:
-            pass
-
-    batch = db.execute(
-        "SELECT activated_at, processed_at, created_at FROM import_batches WHERE id = ?",
-        (batch_id,),
-    ).fetchone()
-    for value in (batch["activated_at"], batch["processed_at"], batch["created_at"]):
-        if value:
-            try:
-                return datetime.fromisoformat(value), "import activation"
-            except ValueError:
-                continue
-    return datetime.utcnow(), "import processing"
+    return get_age_bucket(
+        calculate_age_at_event(None, reference_date, month_raw, year_raw)
+    )
 
 
 SATELLITE_SORTS = {
@@ -327,20 +458,18 @@ def satellite_metrics(
     filters = ""
     filter_params = [batch_id]
     if scope == "local":
-        filters += " AND r.affiliation = 'Local Satellite'"
+        filters += " AND s.affiliation = 'Local Satellite'"
     elif scope == "international":
-        filters += " AND r.affiliation = 'International Satellite'"
+        filters += " AND s.affiliation = 'International Satellite'"
     if query:
         filters += """
             AND (
-                LOWER(r.satellite_name) LIKE LOWER(?)
+                LOWER(s.name) LIKE LOWER(?)
                 OR EXISTS (
                     SELECT 1
-                    FROM registrants participant
-                    WHERE participant.batch_id = r.batch_id
-                      AND participant.ticket_matched = 1
-                      AND participant.affiliation = r.affiliation
-                      AND participant.satellite_name = r.satellite_name
+                    FROM curated_registrant_sources source
+                    JOIN registrants participant ON participant.id = source.registrant_id
+                    WHERE source.curated_registrant_id = cr.id
                       AND LOWER(TRIM(
                           COALESCE(participant.first_name, '') || ' ' ||
                           COALESCE(participant.last_name, '')
@@ -353,20 +482,22 @@ def satellite_metrics(
 
     grouped_sql = """
         WITH grouped AS (
-            SELECT r.satellite_name,
-                   CASE r.affiliation
+            SELECT s.id satellite_id,
+                   s.name satellite_name,
+                   CASE s.affiliation
                        WHEN 'Local Satellite' THEN 'Local'
                        ELSE 'International'
                    END scope,
-                   COUNT(*) registrants,
-                   COALESCE(SUM(r.checked_in), 0) checked_in,
-                   CAST(COALESCE(SUM(r.checked_in), 0) AS REAL) / COUNT(*) * 100 attendance_rate
-            FROM registrants r
-            WHERE r.batch_id = ?
-              AND r.ticket_matched = 1
-              AND r.affiliation IN ('Local Satellite', 'International Satellite')
+                   COUNT(cr.id) registrants,
+                   COALESCE(SUM(cr.checked_in), 0) checked_in,
+                   CAST(COALESCE(SUM(cr.checked_in), 0) AS REAL) / COUNT(cr.id) * 100 attendance_rate
+            FROM satellites s
+            JOIN curated_registrant_satellites link ON link.satellite_id = s.id
+            JOIN curated_registrants cr ON cr.id = link.curated_registrant_id
+            WHERE s.batch_id = ?
+              AND s.affiliation IN ('Local Satellite', 'International Satellite')
               {filters}
-            GROUP BY r.satellite_name, r.affiliation
+            GROUP BY s.id, s.name, s.affiliation
         )
     """.format(filters=filters)
 
@@ -391,6 +522,7 @@ def satellite_metrics(
     ranking = [
         {
             "rank": offset + index,
+            "id": row["satellite_id"],
             "name": row["satellite_name"],
             "scope": row["scope"],
             "registrants": row["registrants"],
@@ -402,14 +534,24 @@ def satellite_metrics(
 
     totals = db.execute(
         """
+        WITH associated AS (
+            SELECT cr.id, cr.checked_in, s.affiliation
+            FROM curated_registrants cr
+            JOIN curated_registrant_satellites link ON link.curated_registrant_id = cr.id
+            JOIN satellites s ON s.id = link.satellite_id
+            WHERE cr.batch_id = ?
+              AND s.affiliation IN ('Local Satellite', 'International Satellite')
+        ), people AS (
+            SELECT id, MAX(checked_in) checked_in,
+                   MAX(affiliation = 'Local Satellite') has_local,
+                   MAX(affiliation = 'International Satellite') has_international
+            FROM associated GROUP BY id
+        )
         SELECT COUNT(*) registrants,
-               SUM(checked_in) checked_in,
-               SUM(CASE WHEN affiliation = 'Local Satellite' THEN 1 ELSE 0 END) local_count,
-               SUM(CASE WHEN affiliation = 'International Satellite' THEN 1 ELSE 0 END) international_count
-        FROM registrants
-        WHERE batch_id = ?
-          AND ticket_matched = 1
-          AND affiliation IN ('Local Satellite', 'International Satellite')
+               COALESCE(SUM(checked_in), 0) checked_in,
+               COALESCE(SUM(has_local), 0) local_count,
+               COALESCE(SUM(has_international), 0) international_count
+        FROM people
         """,
         (batch_id,),
     ).fetchone()
@@ -443,7 +585,7 @@ def satellite_metrics(
 
 
 def satellite_registrants(db, batch_id, satellite_name, scope, page=1, per_page=50):
-    """Return a privacy-limited participant list for one satellite."""
+    """Return a privacy-limited unique-person list for one curated satellite."""
     affiliation = {
         "local": "Local Satellite",
         "international": "International Satellite",
@@ -453,13 +595,22 @@ def satellite_registrants(db, batch_id, satellite_name, scope, page=1, per_page=
 
     page = max(int(page or 1), 1)
     per_page = per_page if per_page in (25, 50, 100) else 50
-    params = (batch_id, affiliation, satellite_name)
+    satellite = db.execute(
+        """
+        SELECT id, name FROM satellites
+        WHERE batch_id = ? AND affiliation = ? AND name = ? COLLATE NOCASE
+        """,
+        (batch_id, affiliation, satellite_name),
+    ).fetchone()
+    if satellite is None:
+        return None
+    params = (batch_id, satellite["id"])
     total = db.execute(
         """
         SELECT COUNT(*)
-        FROM registrants
-        WHERE batch_id = ? AND ticket_matched = 1
-          AND affiliation = ? AND satellite_name = ?
+        FROM curated_registrant_satellites link
+        JOIN curated_registrants cr ON cr.id = link.curated_registrant_id
+        WHERE cr.batch_id = ? AND link.satellite_id = ?
         """,
         params,
     ).fetchone()[0]
@@ -468,10 +619,10 @@ def satellite_registrants(db, batch_id, satellite_name, scope, page=1, per_page=
 
     checked_in = db.execute(
         """
-        SELECT COALESCE(SUM(checked_in), 0)
-        FROM registrants
-        WHERE batch_id = ? AND ticket_matched = 1
-          AND affiliation = ? AND satellite_name = ?
+        SELECT COALESCE(SUM(cr.checked_in), 0)
+        FROM curated_registrant_satellites link
+        JOIN curated_registrants cr ON cr.id = link.curated_registrant_id
+        WHERE cr.batch_id = ? AND link.satellite_id = ?
         """,
         params,
     ).fetchone()[0]
@@ -480,12 +631,20 @@ def satellite_registrants(db, batch_id, satellite_name, scope, page=1, per_page=
     offset = (page - 1) * per_page
     rows = db.execute(
         """
-        SELECT first_name, last_name, ticket_status, checked_in
-        FROM registrants
-        WHERE batch_id = ? AND ticket_matched = 1
-          AND affiliation = ? AND satellite_name = ?
-        ORDER BY LOWER(COALESCE(last_name, '')),
-                 LOWER(COALESCE(first_name, '')), id
+        WITH representative AS (
+            SELECT source.curated_registrant_id, MIN(source.registrant_id) registrant_id
+            FROM curated_registrant_sources source
+            WHERE source.batch_id = ?
+            GROUP BY source.curated_registrant_id
+        )
+        SELECT raw.first_name, raw.last_name, raw.ticket_status, cr.checked_in
+        FROM curated_registrant_satellites link
+        JOIN curated_registrants cr ON cr.id = link.curated_registrant_id
+        JOIN representative rep ON rep.curated_registrant_id = cr.id
+        JOIN registrants raw ON raw.id = rep.registrant_id
+        WHERE link.satellite_id = ?
+        ORDER BY LOWER(COALESCE(raw.last_name, '')),
+                 LOWER(COALESCE(raw.first_name, '')), cr.id
         LIMIT ? OFFSET ?
         """,
         params + (per_page, offset),
@@ -503,7 +662,7 @@ def satellite_registrants(db, batch_id, satellite_name, scope, page=1, per_page=
             }
         )
     return {
-        "satellite_name": satellite_name,
+        "satellite_name": satellite["name"],
         "scope": scope,
         "scope_label": affiliation,
         "registrants": total,
@@ -537,6 +696,194 @@ def _pagination_numbers(page, pages):
         result.append(number)
         previous = number
     return result
+
+
+def curation_quality(db, batch_id, limit=100):
+    """Return batch-scoped curation metrics and audit-friendly review tables."""
+    limit = min(max(int(limit or 100), 1), 250)
+    summary = db.execute(
+        """
+        WITH satellite_counts AS (
+            SELECT curated_registrant_id, COUNT(*) count
+            FROM curated_registrant_satellites
+            WHERE batch_id = ?
+            GROUP BY curated_registrant_id
+        )
+        SELECT
+            (SELECT COUNT(*) FROM registrants
+             WHERE batch_id = ? AND ticket_matched = 1) raw_registrants,
+            (SELECT COUNT(*) FROM curated_registrants
+             WHERE batch_id = ?) curated_registrants,
+            (SELECT COALESCE(SUM(source_registrant_count - 1), 0)
+             FROM curated_registrants WHERE batch_id = ?) duplicate_records_merged,
+            (SELECT COUNT(*) FROM curated_registrants
+             WHERE batch_id = ? AND source_registrant_count > 1) duplicate_groups,
+            (SELECT COUNT(*) FROM curated_registrants
+             WHERE batch_id = ? AND dedupe_complete = 0) incomplete_identity_records,
+            (SELECT COUNT(*) FROM curated_registrants
+             WHERE batch_id = ? AND registration_type_conflict = 1) registration_type_conflicts,
+            (SELECT COUNT(*) FROM satellite_counts WHERE count > 1) multiple_satellite_registrants,
+            (SELECT COUNT(*) FROM satellites WHERE batch_id = ?) unique_satellites,
+            (SELECT COUNT(*) FROM satellite_source_variations
+             WHERE batch_id = ?) raw_satellite_variations,
+            (SELECT COUNT(*) FROM curated_registrant_satellites
+             WHERE batch_id = ?) registrant_associations
+        """,
+        (batch_id,) * 10,
+    ).fetchone()
+
+    duplicate_groups = db.execute(
+        """
+        SELECT cr.id, cr.last_name, cr.birth_month, cr.birth_year, cr.gender,
+               cr.dedupe_key, cr.source_registrant_count, cr.checked_in,
+               cr.registration_type, cr.registration_type_conflict,
+               COUNT(link.satellite_id) satellite_count
+        FROM curated_registrants cr
+        LEFT JOIN curated_registrant_satellites link
+          ON link.curated_registrant_id = cr.id
+        WHERE cr.batch_id = ? AND cr.source_registrant_count > 1
+        GROUP BY cr.id
+        ORDER BY cr.source_registrant_count DESC, cr.dedupe_key
+        LIMIT ?
+        """,
+        (batch_id, limit),
+    ).fetchall()
+
+    incomplete = db.execute(
+        """
+        SELECT cr.id, cr.last_name, cr.missing_identity_fields,
+               cr.registration_type, cr.checked_in,
+               raw.registration_code, raw.source_id
+        FROM curated_registrants cr
+        JOIN curated_registrant_sources source
+          ON source.curated_registrant_id = cr.id
+        JOIN registrants raw ON raw.id = source.registrant_id
+        WHERE cr.batch_id = ? AND cr.dedupe_complete = 0
+        ORDER BY cr.id
+        LIMIT ?
+        """,
+        (batch_id, limit),
+    ).fetchall()
+
+    satellites = db.execute(
+        """
+        SELECT s.id, s.name, s.normalized_name, s.affiliation,
+               s.source_record_count,
+               COUNT(DISTINCT variation.id) variation_count,
+               COUNT(DISTINCT link.curated_registrant_id) curated_registrants,
+               GROUP_CONCAT(DISTINCT variation.source_value) source_values
+        FROM satellites s
+        LEFT JOIN satellite_source_variations variation ON variation.satellite_id = s.id
+        LEFT JOIN curated_registrant_satellites link ON link.satellite_id = s.id
+        WHERE s.batch_id = ?
+        GROUP BY s.id
+        ORDER BY curated_registrants DESC, s.name COLLATE NOCASE
+        LIMIT ?
+        """,
+        (batch_id, limit),
+    ).fetchall()
+
+    multi_satellite = db.execute(
+        """
+        SELECT cr.id, cr.last_name, cr.birth_month, cr.birth_year, cr.gender,
+               cr.source_registrant_count,
+               COUNT(link.satellite_id) satellite_count,
+               GROUP_CONCAT(s.name, ' | ') satellite_names
+        FROM curated_registrants cr
+        JOIN curated_registrant_satellites link ON link.curated_registrant_id = cr.id
+        JOIN satellites s ON s.id = link.satellite_id
+        WHERE cr.batch_id = ?
+        GROUP BY cr.id
+        HAVING COUNT(link.satellite_id) > 1
+        ORDER BY satellite_count DESC, cr.last_name COLLATE NOCASE
+        LIMIT ?
+        """,
+        (batch_id, limit),
+    ).fetchall()
+
+    return {
+        "summary": dict(summary),
+        "duplicate_groups": [dict(row) for row in duplicate_groups],
+        "incomplete_identity": [dict(row) for row in incomplete],
+        "satellites": [
+            {
+                **dict(row),
+                "source_values": (
+                    sorted(row["source_values"].split(","), key=str.casefold)
+                    if row["source_values"]
+                    else []
+                ),
+            }
+            for row in satellites
+        ],
+        "multi_satellite": [
+            {
+                **dict(row),
+                "satellite_names": (
+                    row["satellite_names"].split(" | ")
+                    if row["satellite_names"]
+                    else []
+                ),
+            }
+            for row in multi_satellite
+        ],
+        "display_limit": limit,
+    }
+
+
+def curated_registrant_detail(db, batch_id, curated_registrant_id):
+    curated = db.execute(
+        """
+        SELECT cr.*,
+               (SELECT COUNT(*) FROM curated_registrant_satellites link
+                WHERE link.curated_registrant_id = cr.id) satellite_count
+        FROM curated_registrants cr
+        WHERE cr.id = ? AND cr.batch_id = ?
+        """,
+        (curated_registrant_id, batch_id),
+    ).fetchone()
+    if curated is None:
+        return None
+    sources = db.execute(
+        """
+        SELECT raw.id, raw.registration_code, raw.source_id,
+               raw.first_name, raw.last_name, raw.satellite_name,
+               raw.affiliation, raw.registration_type, raw.checked_in,
+               raw.gender_raw, raw.birth_month_raw, raw.birth_year_raw
+        FROM curated_registrant_sources source
+        JOIN registrants raw ON raw.id = source.registrant_id
+        WHERE source.curated_registrant_id = ? AND source.batch_id = ?
+        ORDER BY raw.id
+        """,
+        (curated_registrant_id, batch_id),
+    ).fetchall()
+    return {"curated_registrant": dict(curated), "source_registrations": [dict(row) for row in sources]}
+
+
+def satellite_curation_detail(db, batch_id, satellite_id):
+    satellite = db.execute(
+        """
+        SELECT s.*,
+               COUNT(DISTINCT link.curated_registrant_id) curated_registrants
+        FROM satellites s
+        LEFT JOIN curated_registrant_satellites link ON link.satellite_id = s.id
+        WHERE s.id = ? AND s.batch_id = ?
+        GROUP BY s.id
+        """,
+        (satellite_id, batch_id),
+    ).fetchone()
+    if satellite is None:
+        return None
+    variations = db.execute(
+        """
+        SELECT source_value, normalized_source_value, affiliation, source_record_count
+        FROM satellite_source_variations
+        WHERE satellite_id = ? AND batch_id = ?
+        ORDER BY source_record_count DESC, source_value COLLATE NOCASE
+        """,
+        (satellite_id, batch_id),
+    ).fetchall()
+    return {"satellite": dict(satellite), "source_variations": [dict(row) for row in variations]}
 
 
 QUALITY_LABELS = {

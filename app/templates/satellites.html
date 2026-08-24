@@ -18,7 +18,7 @@
 {% block title %}Satellites · CCF Event Dashboard{% endblock %}
 
 {% block page_header %}
-{{ render_page_header('Satellite Analytics', event, active_batch, 'Insights about Satellite Churches, including registration, check-in, and attendance.', variant='workspace', header_class='satellite-header') }}
+{{ render_page_header('Satellite Analytics', event, active_batch, 'Unique-person satellite insights with traceable registration sources.', variant='workspace', header_class='satellite-header') }}
 {% endblock %}
 
 {% block content %}
@@ -37,11 +37,11 @@
     <section class="satellite-metric-grid" aria-label="Satellite summary metrics">
         <article class="satellite-metric-card">
             <span class="satellite-metric-icon">{{ icon('users', 26) }}</span>
-            <div><p>Satellite Registrants</p><strong>{{ metrics.registrants|number }}</strong><span>Ticket-linked satellite registrants</span></div>
+            <div><p>Unique Satellite Registrants</p><strong>{{ metrics.registrants|number }}</strong><span>Curated people linked to a satellite</span></div>
         </article>
         <article class="satellite-metric-card">
             <span class="satellite-metric-icon">{{ icon('checkin', 26) }}</span>
-            <div><p>Satellite Checked In</p><strong>{{ metrics.checked_in|number }}</strong><span>With a valid check-in timestamp</span></div>
+            <div><p>Unique Checked In</p><strong>{{ metrics.checked_in|number }}</strong><span>Any linked source registration checked in</span></div>
         </article>
         <article class="satellite-metric-card">
             <span class="satellite-metric-icon">{{ icon('chart', 26) }}</span>
@@ -49,11 +49,11 @@
         </article>
         <article class="satellite-metric-card">
             <span class="satellite-metric-icon">{{ icon('location', 26) }}</span>
-            <div><p>Local Registrants</p><strong>{{ metrics.local_count|number }}</strong><span>From Local Satellites</span></div>
+            <div><p>Unique Local Registrants</p><strong>{{ metrics.local_count|number }}</strong><span>Associated with Local Satellites</span></div>
         </article>
         <article class="satellite-metric-card">
             <span class="satellite-metric-icon">{{ icon('globe', 26) }}</span>
-            <div><p>International Registrants</p><strong>{{ metrics.international_count|number }}</strong><span>From International Satellites</span></div>
+            <div><p>Unique International Registrants</p><strong>{{ metrics.international_count|number }}</strong><span>Associated with International Satellites</span></div>
         </article>
     </section>
 
@@ -92,7 +92,7 @@
                 {{ icon('info', 20) }}
                 <div>
                     <h3>About these numbers</h3>
-                    <p>These metrics include only registrants classified as Local or International Satellites. CCF Main, Non-CCF, and Unknown are excluded.</p>
+                    <p>These metrics use unique curated people associated with Local or International Satellites. A person associated with both types appears in each type count but only once in the overall total.</p>
                 </div>
             </aside>
         </div>
@@ -102,7 +102,7 @@
         <div class="satellite-table-heading">
             <div>
                 <h2>Top Satellite Churches by Registrants</h2>
-                <p>Ranked by aggregate satellite registrations</p>
+                <p>Ranked by unique curated registrants</p>
             </div>
             <form class="satellite-table-filters" method="get" action="{{ url_for('dashboard.event_satellites', event_id=event['id']) }}#satellite-table">
                 <input type="hidden" name="scope" value="{{ scope }}">
@@ -131,7 +131,7 @@
                         <th>Rank</th>
                         <th><a href="{{ sort_url('name') }}">Satellite Church {{ sort_indicator('name') }}</a></th>
                         <th><a href="{{ sort_url('scope') }}">Type {{ sort_indicator('scope') }}</a></th>
-                        <th class="numeric"><a href="{{ sort_url('registrants') }}">Registrants {{ sort_indicator('registrants') }}</a></th>
+                        <th class="numeric"><a href="{{ sort_url('registrants') }}">Unique Registrants {{ sort_indicator('registrants') }}</a></th>
                         <th class="numeric"><a href="{{ sort_url('checked_in') }}">Checked In {{ sort_indicator('checked_in') }}</a></th>
                         <th class="numeric"><a href="{{ sort_url('attendance_rate') }}">Attendance Rate {{ sort_indicator('attendance_rate') }}</a></th>
                         <th><span class="visually-hidden">Actions</span></th>

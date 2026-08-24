@@ -1,5 +1,9 @@
 # CCF Event Dashboard — Phase 1 Implementation
 
+> Historical implementation record: SQLite-specific sections below describe the
+> original MVP. The current runtime uses SQLAlchemy, MySQL, and Alembic; see
+> `README.md` and `CURRENT_DATABASE_STRUCTURE.md` for current operations.
+
 ## Document Purpose
 
 This document describes everything created for the Phase 1 CCF Event Dashboard MVP, including:

@@ -15,6 +15,10 @@
 <span class="sort-indicator" aria-hidden="true">{% if quality.filters.sort == field %}{{ '↑' if quality.filters.direction == 'asc' else '↓' }}{% else %}↕{% endif %}</span>
 {%- endmacro %}
 
+{% macro curated_identity(item) -%}
+{{ item.last_name or 'Last name unavailable' }} / {{ item.birth_month or '—' }} / {{ item.birth_year or '—' }} / {{ item.gender|title if item.gender else '—' }}
+{%- endmacro %}
+
 {% block title %}Data Quality · CCF Event Dashboard{% endblock %}
 
 {% block page_header %}
@@ -25,9 +29,131 @@
 {% if not active_batch %}
     {% include "_empty.html" %}
 {% else %}
+    <section class="quality-summary-heading curation-heading">
+        <p class="eyebrow">Curation Quality</p>
+        <h2>Registrant Curation</h2>
+        <p>How valid raw registrations were normalized into unique, traceable people for analytics.</p>
+    </section>
+
+    <aside class="curation-explainer panel">
+        {{ icon('info', 20) }}
+        <p><strong>Raw registrations remain unchanged.</strong> Unique Registrants are grouped only when Last Name, Birth Month, Birth Year, and Gender all match after normalization. Select a group to inspect every source registration.</p>
+    </aside>
+
+    <section class="curation-summary-grid" aria-label="Registrant curation summary">
+        {% for label, value, note in (
+            ('Raw Registrations', curation.summary.raw_registrants, 'Valid imported registration rows'),
+            ('Unique Registrants', curation.summary.curated_registrants, 'Analytically deduplicated people'),
+            ('Duplicate Records Merged', curation.summary.duplicate_records_merged, 'Additional source rows represented by an existing person'),
+            ('Duplicate Groups', curation.summary.duplicate_groups, 'Unique people linked to two or more source rows'),
+            ('Incomplete Identity', curation.summary.incomplete_identity_records, 'Records kept separate because identity fields are missing'),
+            ('Type Conflicts', curation.summary.registration_type_conflicts, 'Groups containing participant and volunteer registrations'),
+            ('Multiple Satellites', curation.summary.multiple_satellite_registrants, 'Unique people associated with more than one satellite'),
+            ('Unique Satellites', curation.summary.unique_satellites, 'Normalized satellite entities in this dataset')
+        ) %}
+        <article class="curation-summary-card" title="{{ note }}">
+            <p>{{ label }}</p>
+            <strong>{{ value|number }}</strong>
+            <span>{{ note }}</span>
+        </article>
+        {% endfor %}
+    </section>
+
+    <section class="curation-panel panel" id="duplicate-groups">
+        <header class="quality-issues-heading">
+            <h2>Duplicate Groups</h2>
+            <p>Groups merged by the complete four-field match rule. Every source row remains available.</p>
+        </header>
+        <div class="table-wrap">
+            <table class="curation-table">
+                <thead><tr><th>Curated Person</th><th>Match Key</th><th class="numeric">Source Records</th><th class="numeric">Satellites</th><th>Check-In</th><th>Registration Type</th><th>Status</th></tr></thead>
+                <tbody>
+                {% for item in curation.duplicate_groups %}
+                    <tr>
+                        <td><button type="button" class="curation-detail-link" data-curation-kind="registrant" data-curation-url="{{ url_for('dashboard.event_curated_registrant_detail', event_id=event['id'], curated_id=item.id) }}">{{ curated_identity(item) }}</button></td>
+                        <td><code>{{ item.dedupe_key }}</code></td>
+                        <td class="numeric">{{ item.source_registrant_count|number }}</td>
+                        <td class="numeric">{{ item.satellite_count|number }}</td>
+                        <td><span class="checkin-badge {{ 'checked' if item.checked_in else '' }}">{{ 'Checked in' if item.checked_in else 'Not checked in' }}</span></td>
+                        <td>{{ item.registration_type|title }}{% if item.registration_type_conflict %} <span class="severity warning">Conflict</span>{% endif %}</td>
+                        <td><span class="curation-status">Merged</span></td>
+                    </tr>
+                {% else %}
+                    <tr><td colspan="7" class="empty-table"><strong>No duplicate groups were detected.</strong></td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="curation-panel panel" id="incomplete-identities">
+        <header class="quality-issues-heading">
+            <h2>Incomplete Identity</h2>
+            <p>These registrations remain separate because automatic grouping requires all four identity fields.</p>
+        </header>
+        <div class="table-wrap">
+            <table class="curation-table">
+                <thead><tr><th>Registration</th><th>Registrant</th><th>Missing Fields</th><th>Result</th><th>Source Record</th></tr></thead>
+                <tbody>
+                {% for item in curation.incomplete_identity %}
+                    <tr>
+                        <td><button type="button" class="curation-detail-link" data-curation-kind="registrant" data-curation-url="{{ url_for('dashboard.event_curated_registrant_detail', event_id=event['id'], curated_id=item.id) }}">{{ item.registration_code or 'Unavailable' }}</button></td>
+                        <td>{{ item.last_name or 'Name unavailable' }}</td>
+                        <td>{{ item.missing_identity_fields }}</td>
+                        <td>Not automatically merged</td>
+                        <td>{{ item.source_id or '—' }}</td>
+                    </tr>
+                {% else %}
+                    <tr><td colspan="5" class="empty-table"><strong>Every registrant has a complete deduplication identity.</strong></td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="curation-panel panel" id="satellite-curation">
+        <header class="quality-issues-heading">
+            <h2>Satellite Curation</h2>
+            <p>{{ curation.summary.raw_satellite_variations|number }} source variations normalized into {{ curation.summary.unique_satellites|number }} satellites and {{ curation.summary.registrant_associations|number }} unique-person associations.</p>
+        </header>
+        <div class="table-wrap">
+            <table class="curation-table">
+                <thead><tr><th>Normalized Satellite</th><th>Affiliation</th><th class="numeric">Source Variations</th><th class="numeric">Raw Associations</th><th class="numeric">Unique Registrants</th></tr></thead>
+                <tbody>
+                {% for item in curation.satellites %}
+                    <tr>
+                        <td><button type="button" class="curation-detail-link" data-curation-kind="satellite" data-curation-url="{{ url_for('dashboard.event_satellite_curation_detail', event_id=event['id'], satellite_id=item.id) }}">{{ item.name }}</button></td>
+                        <td>{{ item.affiliation }}</td>
+                        <td class="numeric">{{ item.variation_count|number }}</td>
+                        <td class="numeric">{{ item.source_record_count|number }}</td>
+                        <td class="numeric">{{ item.curated_registrants|number }}</td>
+                    </tr>
+                {% else %}
+                    <tr><td colspan="5" class="empty-table"><strong>No valid satellite associations were found.</strong></td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="curation-panel panel" id="multiple-satellites">
+        <header class="quality-issues-heading"><h2>Multiple-Satellite Registrants</h2><p>This is a review condition, not an automatic import error.</p></header>
+        <div class="table-wrap"><table class="curation-table">
+            <thead><tr><th>Curated Person</th><th class="numeric">Source Registrations</th><th class="numeric">Satellites</th><th>Associated Satellites</th></tr></thead>
+            <tbody>
+            {% for item in curation.multi_satellite %}
+                <tr><td><button type="button" class="curation-detail-link" data-curation-kind="registrant" data-curation-url="{{ url_for('dashboard.event_curated_registrant_detail', event_id=event['id'], curated_id=item.id) }}">{{ curated_identity(item) }}</button></td><td class="numeric">{{ item.source_registrant_count|number }}</td><td class="numeric">{{ item.satellite_count|number }}</td><td>{{ item.satellite_names|join(', ') }}</td></tr>
+            {% else %}
+                <tr><td colspan="4" class="empty-table"><strong>No unique registrant is associated with multiple satellites.</strong></td></tr>
+            {% endfor %}
+            </tbody>
+        </table></div>
+    </section>
+
     <section class="quality-summary-heading">
+        <p class="eyebrow">Import Quality</p>
         <h2>Data Quality Summary</h2>
-        <p>Overview of data issues in the active dataset.</p>
+        <p>Whether uploaded data was valid and internally consistent before curation.</p>
     </section>
 
     <section class="quality-summary-grid" aria-label="Data Quality summary">
@@ -218,11 +344,23 @@
             </footer>
         </section>
     </div>
+
+    <div class="registrant-modal" data-curation-modal hidden>
+        <div class="registrant-modal-backdrop" data-curation-close></div>
+        <section class="registrant-dialog curation-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="curation-detail-title">
+            <header class="registrant-modal-header">
+                <div><p class="eyebrow">CURATION AUDIT TRAIL</p><h2 id="curation-detail-title" data-curation-title>Details</h2><p data-curation-subtitle>Loading source records…</p></div>
+                <button class="registrant-modal-close" type="button" data-curation-close aria-label="Close curation details">&times;</button>
+            </header>
+            <div class="curation-detail-body" data-curation-body><div class="registrant-table-state">Loading…</div></div>
+        </section>
+    </div>
 {% endif %}
 {% endblock %}
 
 {% block scripts %}
 {% if active_batch %}
     <script src="{{ url_for('static', filename='data_quality.js', v='20260820-quality-details') }}" defer></script>
+    <script src="{{ url_for('static', filename='curation_quality.js', v='20260822-curation') }}" defer></script>
 {% endif %}
 {% endblock %}

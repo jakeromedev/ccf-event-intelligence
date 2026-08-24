@@ -26,9 +26,9 @@
 
     <section class="participant-summary-grid" aria-label="Satellite participant summary">
         <article class="participant-summary-card">
-            <p>Satellite Registrants</p>
+            <p>Unique Satellite Registrants</p>
             <strong>{{ satellite.registrants|number }}</strong>
-            <span>Ticket-linked registrants</span>
+            <span>Curated people with source traceability</span>
         </article>
         <article class="participant-summary-card">
             <p>Checked In</p>
@@ -73,7 +73,7 @@
             </table>
         </div>
         <footer class="satellite-pagination">
-            <p>Showing {{ satellite.pagination.start|number }}–{{ satellite.pagination.end|number }} of {{ satellite.pagination.total|number }} registrants</p>
+            <p>Showing {{ satellite.pagination.start|number }}–{{ satellite.pagination.end|number }} of {{ satellite.pagination.total|number }} unique registrants</p>
             {% if satellite.pagination.pages > 1 %}
                 <nav aria-label="Registrant result pages">
                     {% if satellite.pagination.has_previous %}

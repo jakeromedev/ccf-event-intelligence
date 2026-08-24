@@ -203,7 +203,8 @@ Possible persisted states are:
 | `failed` | Processing raised an exception |
 | `superseded` | A newer batch became active for the same Event |
 
-The database enforces at most one active batch per Event with a partial unique index.
+The database enforces at most one active batch per Event with a unique stored
+generated `active_event_id` that is non-NULL only for `active` rows.
 
 ## Import history queries
 
@@ -294,7 +295,7 @@ Client-side readiness is only a usability feature. The server independently requ
 
 | Setting | Default |
 |---|---|
-| `DATABASE` | `instance/ccf_dashboard.sqlite3` |
+| `DATABASE_URL` | Required; `mysql+pymysql://user:password@host:3306/database` |
 | `STAGING_DIR` | `instance/staged_imports` |
 | `MAX_CONTENT_LENGTH` | 32 MB per HTTP request |
 

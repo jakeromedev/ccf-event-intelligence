@@ -1,0 +1,33 @@
+{% from "_icons.html" import icon %}
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}CCF Event Intelligence{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v='20260824-auth-1') }}">
+</head>
+<body class="auth-page">
+    <main class="auth-shell">
+        <section class="auth-brand-panel" aria-label="CCF Event Intelligence">
+            <div class="auth-brand-lockup">
+                <span class="auth-brand-mark"><img src="{{ url_for('static', filename='CCF-Logo-2017-01.png') }}" alt="CCF"></span>
+                <span><strong>CCF EVENT</strong><small>INTELLIGENCE</small></span>
+            </div>
+            <div class="auth-brand-copy">
+                <p class="hero-kicker">Secure event operations</p>
+                <h1>Events, attendance, and insight—protected.</h1>
+                <p>Authorized operators can manage event imports and review registration intelligence in one workspace.</p>
+            </div>
+        </section>
+        <section class="auth-form-panel">
+            <div class="auth-card">
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}<div class="flash-stack auth-flashes">{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}
+                {% endwith %}
+                {% block content %}{% endblock %}
+            </div>
+        </section>
+    </main>
+</body>
+</html>

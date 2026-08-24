@@ -28,7 +28,7 @@
                 <h3>{{ summary.event['name'] }}</h3>
                 {% if summary.metrics %}
                     <div class="event-card-metrics">
-                        <div><span>Registrants</span><strong>{{ summary.metrics.total_registrants|number }}</strong></div>
+                        <div><span>Unique Registrants</span><strong>{{ summary.metrics.total_registrants|number }}</strong></div>
                         <div><span>Checked In</span><strong>{{ summary.metrics.checked_in|number }}</strong></div>
                         <div><span>Attendance</span><strong>{{ summary.metrics.attendance_rate|percent }}</strong></div>
                     </div>

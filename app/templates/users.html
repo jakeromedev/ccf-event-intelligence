@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Users · CCF Event Intelligence{% endblock %}
+{% block page_header %}
+<section class="overview-header users-header">
+    <div class="overview-header-content">
+        <p class="eyebrow">Administration</p>
+        <h1>Users</h1>
+        <p class="overview-description">Review registrations and approve access to the application.</p>
+    </div>
+</section>
+{% endblock %}
+{% block content %}
+<section class="panel users-panel">
+    <header class="users-panel-heading">
+        <div><h2>Registered users</h2><p>Public registrations remain pending until approved here.</p></div>
+        <span>{{ users|length }} account{{ '' if users|length == 1 else 's' }}</span>
+    </header>
+    {% if users %}
+        <div class="users-table-wrap">
+            <table class="users-table">
+                <thead><tr><th>Username</th><th>Status</th><th>Registered</th><th>Approved</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+                <tbody>
+                {% for user in users %}
+                    <tr>
+                        <td><strong>{{ user.username }}</strong><small>Standard user</small></td>
+                        <td><span class="user-status {{ user.status }}"><i></i>{{ user.status|capitalize }}</span></td>
+                        <td>{{ user.created_at|datetime_short }}</td>
+                        <td>{{ user.approved_at|datetime_short if user.approved_at else '—' }}</td>
+                        <td class="users-action">
+                            {% if user.status == 'pending' %}
+                                <form method="post" action="{{ url_for('auth.approve_user', user_id=user.id) }}">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button class="button primary compact" type="submit">{{ icon('active', 14) }} Approve</button>
+                                </form>
+                            {% else %}<span class="approved-label">Approved</span>{% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="users-empty">{{ icon('users', 26) }}<h3>No registered users</h3><p>New account requests will appear here.</p></div>
+    {% endif %}
+</section>
+{% endblock %}

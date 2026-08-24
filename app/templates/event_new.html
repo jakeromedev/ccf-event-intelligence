@@ -11,6 +11,7 @@
         <h2>Name your event</h2>
         <p>That is all you need for now. CSV source details will be detected when you import the required exports.</p>
         <form action="{{ url_for('dashboard.create_event') }}" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <label for="event-name">Event Name</label>
             <input id="event-name" name="name" maxlength="160" value="{{ entered_name or '' }}" placeholder="e.g. Welcome Retreat 2026" required autofocus>
             <div class="form-actions">

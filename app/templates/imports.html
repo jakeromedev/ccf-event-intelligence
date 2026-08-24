@@ -23,6 +23,7 @@
 
 {% block content %}
 <form class="panel import-upload-panel" action="{{ url_for('dashboard.validate_import', event_id=event['id']) }}" method="post" enctype="multipart/form-data" id="import-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <header class="imports-section-heading">
         <div><h2><span>1.</span> Upload Complete Export Set</h2><p>All 3 files are required and validated together.</p></div>
         <span class="required-note">3 of 3 required</span>
@@ -146,7 +147,7 @@
                 <span class="validation-action-icon">{{ icon('info' if selected['status'] != 'validated' else 'active', 23) }}</span>
                 {% if selected['status'] == 'validated' %}
                     <div><strong>Ready to activate</strong><p>Activating replaces only this Event's current active dataset. History is preserved.</p></div>
-                    <form action="{{ url_for('dashboard.process_import', event_id=event['id'], batch_id=selected['id']) }}" method="post"><button class="button primary" type="submit">Process and Activate</button></form>
+                    <form action="{{ url_for('dashboard.process_import', event_id=event['id'], batch_id=selected['id']) }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button primary" type="submit">Process and Activate</button></form>
                 {% elif selected['status'] == 'invalid' %}
                     <div><strong>Blocking issues found</strong><p>Correct the errors and upload a new complete set.</p></div>
                     <button class="button" type="button" disabled>Cannot process</button>

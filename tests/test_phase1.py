@@ -1,26 +1,67 @@
 import csv
+import json
+import os
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 
+from sqlalchemy import create_engine, event as sqlalchemy_event, inspect, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError
+
 from app import create_app
 from app.aggregation import (
     active_batch,
+    curated_registrant_detail,
+    curation_quality,
     data_quality,
+    event_dashboard_metrics,
     event_summaries,
     overview_metrics,
     overview_registrants,
     participant_profile_metrics,
+    registration_progress,
+    satellite_curation_detail,
     satellite_metrics,
 )
 from app.classifier import classify_affiliation
-from app.db import get_db
+from app.curation import (
+    normalize_birth_month,
+    normalize_birth_year,
+    normalize_last_name,
+    normalize_satellite_name,
+    rebuild_batch_curation,
+)
+from app.db import DatabaseConfigurationError, get_db, get_engine
 from app.import_history import import_history
 from app.importer import process_batch, store_validation, validate_batch, validate_file
+from app.normalization import (
+    calculate_age_at_event,
+    get_age_bucket,
+    normalize_gender,
+    normalize_life_stage,
+    normalize_registration_type,
+)
+from app.models import Base
+from scripts.migrate_sqlite_to_mysql import MigrationError, migrate
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
+    dbapi_connection.execute("PRAGMA foreign_keys = ON")
+
+
+def create_test_schema(app, reset=False):
+    with app.app_context():
+        engine = get_engine()
+        if engine.dialect.name == "sqlite":
+            sqlalchemy_event.listen(engine, "connect", enable_sqlite_foreign_keys)
+        if reset:
+            Base.metadata.drop_all(engine)
+        Base.metadata.create_all(engine)
 TICKET_FIELDS = [
     "Id", "Slug", "Event Name", "Ticket Code", "Control Number", "Ticket Status",
     "Payment Status", "Buyer Reference Number", "Check-in Date Time",
@@ -31,8 +72,8 @@ BUYER_FIELDS = [
 ]
 REGISTRANT_FIELDS = [
     "ID", "Event Name", "Event Slug", "Registration Code", "Ticket Code", "Ticket Status",
-    "First Name", "Last Name", "Email Address", "Mobile Number", "Are You Attending Ccf",
-    "Gender", "Birth Month", "Birth Year",
+    "Ticket Name", "First Name", "Last Name", "Email Address", "Mobile Number", "Are You Attending Ccf",
+    "Gender", "Life Stage", "Date of Birth", "Birth Month", "Birth Year",
     "Are You From A Local Or International Satellite", "Which Local Satellite",
     "Which International Satellite",
 ]
@@ -89,18 +130,110 @@ class ClassifierTests(unittest.TestCase):
                 self.assertEqual(satellite, result.satellite_name)
 
 
+class DashboardNormalizationTests(unittest.TestCase):
+    def test_registration_progress_contract(self):
+        configured = registration_progress(525, 700)
+        self.assertEqual(75, configured["progress_percentage"])
+        self.assertEqual(175, configured["remaining_slots"])
+        self.assertTrue(configured["target_configured"])
+        zero = registration_progress(0, 700)
+        self.assertEqual(0, zero["progress_percentage"])
+        self.assertEqual(700, zero["remaining_slots"])
+        for target in (None, 0):
+            result = registration_progress(525, target)
+            self.assertIsNone(result["progress_percentage"])
+            self.assertIsNone(result["remaining_slots"])
+            self.assertFalse(result["target_configured"])
+        exceeded = registration_progress(8, 5)
+        self.assertEqual(160, exceeded["progress_percentage"])
+        self.assertEqual(0, exceeded["remaining_slots"])
+        self.assertTrue(exceeded["target_exceeded"])
+
+    def test_gender_normalization_contract(self):
+        for value in ("Male", " male ", "MALE", "m"):
+            self.assertEqual("male", normalize_gender(value))
+        for value in ("Female", " female ", "FEMALE", "f"):
+            self.assertEqual("female", normalize_gender(value))
+        for value in (None, "", "  ", "unexpected", "Prefer not to say"):
+            self.assertEqual("unknown", normalize_gender(value))
+
+    def test_life_stage_normalization_contract(self):
+        for value in ("Single", " single ", "SINGLE"):
+            self.assertEqual("single", normalize_life_stage(value))
+        for value in ("Single Parent", "single-parent", " solo  parent "):
+            self.assertEqual("single-parent", normalize_life_stage(value))
+        self.assertEqual("married", normalize_life_stage(" MARRIED "))
+        for value in (None, "", "Separated", "Widow/Widower"):
+            self.assertEqual("unknown", normalize_life_stage(value))
+
+    def test_registration_type_uses_explicit_volunteer_labels(self):
+        self.assertEqual("volunteer", normalize_registration_type("Event Volunteer", "Event"))
+        self.assertEqual("volunteer", normalize_registration_type("Main", "Event (Volunteers)"))
+        self.assertEqual("participant", normalize_registration_type("Main", "Event (Participants)"))
+        self.assertEqual("participant", normalize_registration_type("", "Event"))
+
+    def test_age_at_event_honors_birthday_and_bucket_boundaries(self):
+        self.assertEqual(25, calculate_age_at_event("2000-09-13", "2026-09-12"))
+        self.assertEqual(26, calculate_age_at_event("2000-09-12", "2026-09-12"))
+        self.assertEqual(25, calculate_age_at_event(None, "2026-09-12", "October", "2000"))
+        for age, bucket in (
+            (19, "Below 20"), (20, "20–25"), (25, "20–25"),
+            (26, "26–30"), (30, "26–30"), (31, "31–35"),
+            (35, "31–35"), (36, "36–40"), (40, "36–40"),
+            (41, "41+"),
+        ):
+            self.assertEqual(bucket, get_age_bucket(age))
+        for age in (None, -1, 121, "invalid"):
+            self.assertEqual("Unknown", get_age_bucket(age))
+        self.assertIsNone(calculate_age_at_event(None, None, "January", "2000"))
+        self.assertIsNone(calculate_age_at_event("not-a-date", "2026-09-12"))
+        self.assertIsNone(calculate_age_at_event(None, "2026-09-12", "Month 13", "2000"))
+
+
+class CurationNormalizationTests(unittest.TestCase):
+    def test_identity_fields_normalize_conservatively(self):
+        for value in ("  DE LA CRUZ ", "De La Cruz", "de   la cruz"):
+            self.assertEqual("de la cruz", normalize_last_name(value))
+        for value in ("January", "JAN", "Jan", "1", "01"):
+            self.assertEqual("01", normalize_birth_month(value))
+        self.assertEqual("12", normalize_birth_month("December"))
+        for value in (None, "", "13", "not a month"):
+            self.assertIsNone(normalize_birth_month(value))
+        self.assertEqual("1995", normalize_birth_year(" 1995 "))
+        for value in (None, "95", "unknown", "1899"):
+            self.assertIsNone(normalize_birth_year(value))
+
+    def test_satellite_aliases_normalize_without_merging_b1g_names(self):
+        aliases = ("CCF Eastwood", "Eastwood", "CCF EASTWOOD", "CCF EastWood")
+        self.assertEqual(
+            {"ccf eastwood"},
+            {normalize_satellite_name(value, "Local Satellite")["key"] for value in aliases},
+        )
+        self.assertEqual(
+            "b1g eastwood",
+            normalize_satellite_name("B1G Eastwood", "Local Satellite")["key"],
+        )
+        self.assertIsNone(normalize_satellite_name("", "Local Satellite"))
+
 class EventIntegrationTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         root = Path(self.temp.name)
         self.database = str(root / "test.sqlite3")
         self.staging_dir = str(root / "staging")
+        mysql_test_url = os.environ.get("MYSQL_TEST_DATABASE_URL")
+        if mysql_test_url and "test" not in (make_url(mysql_test_url).database or "").casefold():
+            self.fail("MYSQL_TEST_DATABASE_URL must name a dedicated database containing 'test'.")
+        self.database_url = mysql_test_url or "sqlite+pysqlite:///{}".format(self.database)
         self.app = create_app({
             "TESTING": True,
             "SECRET_KEY": "test",
-            "DATABASE": self.database,
+            "DATABASE_URL": self.database_url,
             "STAGING_DIR": self.staging_dir,
+            "AUTHENTICATION_DISABLED": True,
+            "WTF_CSRF_ENABLED": False,
         })
+        create_test_schema(self.app, reset=bool(mysql_test_url))
         self.paths = {
             "tickets": root / "anything-a.csv",
             "buyers": root / "anything-b.csv",
@@ -115,7 +248,7 @@ class EventIntegrationTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def _write_fixture(self, registrant_limit=None):
+    def _write_fixture(self, registrant_limit=None, volunteer_identifier=None):
         buyer = lambda identifier, reference: {
             "Id": identifier, "Slug": "event-1", "Event Name": "Event One",
             "Buyer Reference Number": reference, "Payment Status": "Payment Validated",
@@ -126,12 +259,14 @@ class EventIntegrationTests(unittest.TestCase):
             "Control Number": identifier, "Ticket Status": "Assigned", "Payment Status": "Payment Validated",
             "Buyer Reference Number": buyer_ref, "Check-in Date Time": checked,
         }
-        registrant = lambda identifier, code, attending, scope="", local="", international="", gender="", birth_month="", birth_year="": {
+        registrant = lambda identifier, code, attending, scope="", local="", international="", gender="", life_stage="Single", birth_date="", birth_month="", birth_year="": {
             "ID": identifier, "Event Name": "Event One", "Event Slug": "event-1",
             "Registration Code": "R-{}".format(identifier), "Ticket Code": code, "Ticket Status": "Assigned",
+            "Ticket Name": "Event Volunteer" if identifier == volunteer_identifier else "Event Participant",
             "First Name": "Test", "Last Name": "Registrant", "Email Address": "test{}@example.com".format(identifier),
             "Mobile Number": "0900", "Are You Attending Ccf": attending,
-            "Gender": gender, "Birth Month": birth_month, "Birth Year": birth_year,
+            "Gender": gender, "Life Stage": life_stage, "Date of Birth": birth_date,
+            "Birth Month": birth_month, "Birth Year": birth_year,
             "Are You From A Local Or International Satellite": scope,
             "Which Local Satellite": local, "Which International Satellite": international,
         }
@@ -200,6 +335,7 @@ class EventIntegrationTests(unittest.TestCase):
                 """,
                 rows,
             )
+            rebuild_batch_curation(get_db(), batch_id)
             get_db().commit()
 
     def _add_quality_fixture(self, batch_id):
@@ -267,6 +403,348 @@ class EventIntegrationTests(unittest.TestCase):
             self.assertEqual(5, summaries[self.event_a]["metrics"]["total_registrants"])
             self.assertEqual(2, summaries[self.event_b]["metrics"]["total_registrants"])
 
+    def test_mysql_schema_constraints_and_logical_orphans(self):
+        batch_id = self._process(self.event_a)
+        with self.app.app_context():
+            db = get_db()
+
+            def rejected(statement, params):
+                with self.assertRaises(DBAPIError):
+                    db.execute(statement, params)
+                db.rollback()
+
+            rejected(
+                "INSERT INTO import_batches (event_id, status) VALUES (?, 'active')",
+                (self.event_a,),
+            )
+            rejected(
+                "INSERT INTO import_files (batch_id, export_type, filename, staged_path, status) "
+                "VALUES (?, 'tickets', 'duplicate.csv', '/private/duplicate.csv', 'valid')",
+                (batch_id,),
+            )
+            rejected(
+                "INSERT INTO buyers (batch_id, buyer_reference) VALUES (?, 'B-1')",
+                (batch_id,),
+            )
+            rejected(
+                "INSERT INTO tickets (batch_id, ticket_code) VALUES (?, 'T-MAIN')",
+                (batch_id,),
+            )
+            rejected(
+                "INSERT INTO registrants "
+                "(batch_id, registration_code, ticket_code, affiliation, registration_type) "
+                "VALUES (?, 'R-1', 'UNUSED', 'Unknown', 'participant')",
+                (batch_id,),
+            )
+            rejected(
+                "INSERT INTO registrants "
+                "(batch_id, registration_code, ticket_code, affiliation, registration_type) "
+                "VALUES (?, 'UNUSED', 'T-MAIN', 'Unknown', 'participant')",
+                (batch_id,),
+            )
+
+            # Cross-file references intentionally remain logical so validation
+            # can retain and report inconsistent source records.
+            db.execute(
+                "INSERT INTO tickets (batch_id, ticket_code, buyer_reference) "
+                "VALUES (?, 'T-LOGICAL-ORPHAN', 'NO-SUCH-BUYER')",
+                (batch_id,),
+            )
+            db.execute(
+                "INSERT INTO registrants "
+                "(batch_id, registration_code, ticket_code, affiliation, registration_type) "
+                "VALUES (?, 'R-LOGICAL-ORPHAN', 'NO-SUCH-TICKET', 'Unknown', 'participant')",
+                (batch_id,),
+            )
+            db.commit()
+
+    def test_phase1_dashboard_counts_progress_profiles_and_api_are_scoped(self):
+        self._write_fixture(volunteer_identifier="4")
+        self._process(self.event_a)
+        self._write_fixture(registrant_limit=2)
+        self._process(self.event_b)
+        client = self.app.test_client()
+        saved = client.post(
+            "/events/{}/settings".format(self.event_a),
+            data={"event_date": "2025-09-05", "participant_target": "8"},
+        )
+        self.assertEqual(302, saved.status_code)
+
+        with self.app.app_context():
+            dashboard = event_dashboard_metrics(get_db(), self.event_a)
+            self.assertEqual(4, dashboard["overview"]["participants"])
+            self.assertEqual(1, dashboard["overview"]["volunteers"])
+            self.assertEqual(5, dashboard["overview"]["total_registrations"])
+            self.assertEqual(50, dashboard["overview"]["progress_percentage"])
+            self.assertEqual(4, dashboard["overview"]["remaining_slots"])
+            self.assertTrue(all(dashboard["reconciliation"].values()))
+            profile = dashboard["participant_profile"]
+            self.assertEqual(4, sum(item["count"] for item in profile["gender"]["items"]))
+            self.assertEqual(4, sum(item["count"] for item in profile["life_stage"]["items"]))
+            self.assertEqual(4, sum(item["count"] for item in profile["age"]["items"]))
+            isolated = event_dashboard_metrics(get_db(), self.event_b)
+            self.assertEqual(2, isolated["overview"]["participants"])
+            self.assertEqual(0, isolated["overview"]["volunteers"])
+            self.assertIsNone(isolated["overview"]["participant_target"])
+
+        payload = client.get("/events/{}/dashboard".format(self.event_a)).get_json()
+        self.assertEqual(4, payload["overview"]["participants"])
+        self.assertEqual(1, payload["overview"]["volunteers"])
+        self.assertTrue(all(payload["reconciliation"].values()))
+        self.assertNotIn("@example.com", str(payload))
+        page = client.get("/events/{}".format(self.event_a))
+        self.assertIn(b"50.0%", page.data)
+        self.assertIn(b"Remaining Slots", page.data)
+        self.assertIn(b"Life Stage", page.data)
+        self.assertNotIn(b"Participant target not configured", page.data)
+        self.assertIn(b"CCF EVENT", page.data)
+        self.assertIn(b"INTELLIGENCE", page.data)
+        self.assertIn(b'class="application-header"', page.data)
+        self.assertIn(b'form="event-settings-form"', page.data)
+        self.assertEqual(1, page.data.count(b">Save Changes</span>"))
+
+    def test_curation_is_traceable_incomplete_safe_idempotent_and_batch_scoped(self):
+        with open(self.paths["registrants"], "r", encoding="utf-8", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        duplicate_variants = (
+            ("  DE LA CRUZ ", "January", "Male", "Eastwood", "Event Participant"),
+            ("De La Cruz", "JAN", " male ", "CCF EASTWOOD", "Event Volunteer"),
+            ("de   la cruz", "01", "MALE", "CCF Main", "Event Participant"),
+        )
+        for row, (last_name, month, gender, satellite, ticket_name) in zip(rows[:3], duplicate_variants):
+            row["Last Name"] = last_name
+            row["Birth Month"] = month
+            row["Birth Year"] = "1995"
+            row["Gender"] = gender
+            row["Ticket Name"] = ticket_name
+            row["Are You Attending Ccf"] = "Yes"
+            row["Are You From A Local Or International Satellite"] = "Local Satellite"
+            row["Which Local Satellite"] = satellite
+            row["Which International Satellite"] = ""
+        for row in rows[3:]:
+            row["Last Name"] = "Santos"
+            row["Birth Month"] = ""
+            row["Birth Year"] = ""
+            row["Gender"] = "Female"
+            row["Ticket Name"] = "Event Participant"
+        write_csv(self.paths["registrants"], REGISTRANT_FIELDS, rows)
+
+        batch_a = self._process(self.event_a)
+        with self.app.app_context():
+            db = get_db()
+            summary = curation_quality(db, batch_a)["summary"]
+            self.assertEqual(5, summary["raw_registrants"])
+            self.assertEqual(3, summary["curated_registrants"])
+            self.assertEqual(2, summary["duplicate_records_merged"])
+            self.assertEqual(1, summary["duplicate_groups"])
+            self.assertEqual(2, summary["incomplete_identity_records"])
+            self.assertEqual(1, summary["registration_type_conflicts"])
+            self.assertEqual(1, summary["multiple_satellite_registrants"])
+
+            duplicate = db.execute(
+                """
+                SELECT * FROM curated_registrants
+                WHERE batch_id = ? AND source_registrant_count = 3
+                """,
+                (batch_a,),
+            ).fetchone()
+            self.assertEqual("de la cruz|01|1995|male", duplicate["dedupe_key"])
+            self.assertEqual("participant", duplicate["registration_type"])
+            self.assertTrue(duplicate["registration_type_conflict"])
+            self.assertTrue(duplicate["checked_in"])
+            self.assertEqual(
+                3,
+                db.execute(
+                    "SELECT COUNT(*) FROM curated_registrant_sources WHERE curated_registrant_id = ?",
+                    (duplicate["id"],),
+                ).fetchone()[0],
+            )
+            self.assertEqual(
+                2,
+                db.execute(
+                    "SELECT COUNT(*) FROM curated_registrant_satellites WHERE curated_registrant_id = ?",
+                    (duplicate["id"],),
+                ).fetchone()[0],
+            )
+            incomplete_keys = [
+                row["dedupe_key"]
+                for row in db.execute(
+                    "SELECT dedupe_key FROM curated_registrants WHERE batch_id = ? AND dedupe_complete = 0",
+                    (batch_a,),
+                )
+            ]
+            self.assertEqual(2, len(incomplete_keys))
+            self.assertEqual(2, len(set(incomplete_keys)))
+
+            before = {
+                table: db.execute("SELECT COUNT(*) FROM {} WHERE batch_id = ?".format(table), (batch_a,)).fetchone()[0]
+                for table in (
+                    "curated_registrants", "curated_registrant_sources",
+                    "satellites", "curated_registrant_satellites",
+                    "satellite_source_variations",
+                )
+            }
+            rebuild_batch_curation(db, batch_a)
+            after = {
+                table: db.execute("SELECT COUNT(*) FROM {} WHERE batch_id = ?".format(table), (batch_a,)).fetchone()[0]
+                for table in before
+            }
+            self.assertEqual(before, after)
+            db.commit()
+
+            dashboard = event_dashboard_metrics(db, self.event_a)
+            self.assertEqual(3, dashboard["overview"]["participants"])
+            self.assertEqual(5, dashboard["overview"]["raw_registrations"])
+            self.assertEqual(2, dashboard["overview"]["duplicate_records_merged"])
+
+        batch_b = self._process(self.event_b)
+        with self.app.app_context():
+            db = get_db()
+            self.assertEqual(3, curation_quality(db, batch_b)["summary"]["curated_registrants"])
+            self.assertEqual(3, event_dashboard_metrics(db, self.event_a)["overview"]["participants"])
+            self.assertEqual(3, event_dashboard_metrics(db, self.event_b)["overview"]["participants"])
+            self.assertEqual(
+                2,
+                db.execute(
+                    "SELECT COUNT(*) FROM curated_registrants WHERE dedupe_key = 'de la cruz|01|1995|male'"
+                ).fetchone()[0],
+            )
+
+    def test_curation_drilldowns_are_active_batch_scoped_and_auditable(self):
+        batch_a = self._process(self.event_a)
+        self._process(self.event_b)
+        with self.app.app_context():
+            db = get_db()
+            curated_id = db.execute(
+                "SELECT id FROM curated_registrants WHERE batch_id = ? ORDER BY id LIMIT 1",
+                (batch_a,),
+            ).fetchone()[0]
+            satellite_id = db.execute(
+                "SELECT id FROM satellites WHERE batch_id = ? AND name = 'CCF Eastwood'",
+                (batch_a,),
+            ).fetchone()[0]
+            detail = curated_registrant_detail(db, batch_a, curated_id)
+            self.assertTrue(detail["source_registrations"])
+            self.assertNotIn("email", detail["source_registrations"][0])
+            variation = satellite_curation_detail(db, batch_a, satellite_id)
+            self.assertEqual("CCF Eastwood", variation["satellite"]["name"])
+            self.assertEqual("Eastwood", variation["source_variations"][0]["source_value"])
+
+        client = self.app.test_client()
+        self.assertEqual(
+            200,
+            client.get("/events/{}/data-quality/curation/registrants/{}".format(self.event_a, curated_id)).status_code,
+        )
+        self.assertEqual(
+            404,
+            client.get("/events/{}/data-quality/curation/registrants/{}".format(self.event_b, curated_id)).status_code,
+        )
+        page = client.get("/events/{}/data-quality".format(self.event_a))
+        self.assertIn(b"Registrant Curation", page.data)
+        self.assertIn(b"Raw Registrations", page.data)
+        self.assertIn(b"Unique Registrants", page.data)
+        self.assertIn(b"Satellite Curation", page.data)
+        self.assertIn(b"curation_quality.js", page.data)
+
+    def test_curation_scope_guards_and_batch_delete_cascade(self):
+        batch_a = self._process(self.event_a)
+        batch_b = self._process(self.event_b)
+        with self.app.app_context():
+            db = get_db()
+            curated_a = db.execute(
+                "SELECT id FROM curated_registrants WHERE batch_id = ? LIMIT 1",
+                (batch_a,),
+            ).fetchone()[0]
+            satellite_b = db.execute(
+                "SELECT id FROM satellites WHERE batch_id = ? LIMIT 1",
+                (batch_b,),
+            ).fetchone()[0]
+            with self.assertRaises(DBAPIError):
+                db.execute(
+                    """
+                    INSERT INTO curated_registrant_satellites (
+                        event_id, batch_id, curated_registrant_id, satellite_id
+                    ) VALUES (?, ?, ?, ?)
+                    """,
+                    (self.event_a, batch_a, curated_a, satellite_b),
+                )
+            db.rollback()
+
+            db.execute("DELETE FROM import_batches WHERE id = ?", (batch_b,))
+            db.commit()
+            for table in (
+                "registrants", "curated_registrants", "curated_registrant_sources",
+                "satellites", "satellite_source_variations",
+                "curated_registrant_satellites",
+            ):
+                self.assertEqual(
+                    0,
+                    db.execute(
+                        "SELECT COUNT(*) FROM {} WHERE batch_id = ?".format(table),
+                        (batch_b,),
+                    ).fetchone()[0],
+                )
+            self.assertGreater(
+                db.execute(
+                    "SELECT COUNT(*) FROM curated_registrants WHERE batch_id = ?",
+                    (batch_a,),
+                ).fetchone()[0],
+                0,
+            )
+
+    def test_event_settings_validation_update_zero_and_event_isolation(self):
+        client = self.app.test_client()
+        first = client.post(
+            "/events/{}/settings".format(self.event_a),
+            data={"event_date": "2026-09-12", "participant_target": "700"},
+        )
+        self.assertEqual(302, first.status_code)
+        update = client.post(
+            "/events/{}/settings".format(self.event_a),
+            data={"event_date": "2026-09-13", "participant_target": "0"},
+        )
+        self.assertEqual(302, update.status_code)
+        with self.app.app_context():
+            event_a = get_db().execute("SELECT * FROM events WHERE id = ?", (self.event_a,)).fetchone()
+            event_b = get_db().execute("SELECT * FROM events WHERE id = ?", (self.event_b,)).fetchone()
+            self.assertEqual("2026-09-13", event_a["event_date"])
+            self.assertEqual(0, event_a["participant_target"])
+            self.assertIsNone(event_b["event_date"])
+            self.assertIsNone(event_b["participant_target"])
+            self.assertFalse(event_dashboard_metrics(get_db(), self.event_a)["overview"]["target_configured"])
+
+        for invalid_target in ("-1", "1.5", "abc"):
+            response = client.post(
+                "/events/{}/settings".format(self.event_a),
+                data={"event_date": "2026-09-13", "participant_target": invalid_target},
+            )
+            self.assertEqual(302, response.status_code)
+        response = client.post(
+            "/events/{}/settings".format(self.event_a),
+            data={"event_date": "2026-02-30", "participant_target": "10"},
+        )
+        self.assertEqual(302, response.status_code)
+        with self.app.app_context():
+            event_a = get_db().execute("SELECT * FROM events WHERE id = ?", (self.event_a,)).fetchone()
+            self.assertEqual("2026-09-13", event_a["event_date"])
+            self.assertEqual(0, event_a["participant_target"])
+            with self.assertRaises(DBAPIError):
+                get_db().execute(
+                    "UPDATE events SET participant_target = -1 WHERE id = ?", (self.event_a,)
+                )
+
+    def test_target_exceeded_never_returns_negative_remaining_slots(self):
+        self._process(self.event_a)
+        self.app.test_client().post(
+            "/events/{}/settings".format(self.event_a),
+            data={"event_date": "2025-09-05", "participant_target": "2"},
+        )
+        with self.app.app_context():
+            overview = event_dashboard_metrics(get_db(), self.event_a)["overview"]
+            self.assertEqual(250, overview["progress_percentage"])
+            self.assertEqual(0, overview["remaining_slots"])
+            self.assertTrue(overview["target_exceeded"])
+
     def test_new_event_a_batch_supersedes_only_event_a(self):
         first_a = self._process(self.event_a)
         active_b = self._process(self.event_b)
@@ -313,14 +791,13 @@ class EventIntegrationTests(unittest.TestCase):
             self.assertEqual(1, metrics["unknown"])
             checked = overview_metrics(get_db(), batch_id, "checked-in")
             self.assertEqual(4, checked["basis_total"])
-            profile = participant_profile_metrics(get_db(), batch_id)
+            profile = participant_profile_metrics(get_db(), batch_id, "2025-09-05")
             self.assertEqual(5, profile["gender"]["total"])
             self.assertEqual(5, sum(item["count"] for item in profile["gender"]["items"]))
-            self.assertEqual(4, profile["age"]["valid"])
-            self.assertEqual(1, profile["age"]["missing"])
-            self.assertEqual(0, profile["age"]["invalid"])
+            self.assertEqual(5, sum(item["count"] for item in profile["age"]["items"]))
+            self.assertEqual(1, profile["age"]["unknown"])
             satellites = satellite_metrics(get_db(), batch_id)
-            self.assertEqual(["Eastwood", "Singapore"], [row["name"] for row in satellites["ranking"]])
+            self.assertEqual(["CCF Eastwood", "CCF Singapore"], [row["name"] for row in satellites["ranking"]])
             quality = {item["category"]: item["count"] for item in data_quality(get_db(), batch_id)["cards"]}
             self.assertEqual(1, quality["unknown_affiliation"])
             self.assertEqual(1, quality["contradictory_affiliation"])
@@ -330,10 +807,11 @@ class EventIntegrationTests(unittest.TestCase):
         client = self.app.test_client()
         overview_page = client.get("/events/{}".format(self.event_a))
         self.assertEqual(200, overview_page.status_code)
-        self.assertIn(b"Registrants by Church Origin", overview_page.data)
-        self.assertIn(b"Registrant Profile by Gender", overview_page.data)
+        self.assertIn(b"Event Overview", overview_page.data)
+        self.assertIn(b"Participant Profile", overview_page.data)
+        self.assertIn(b"Life Stage", overview_page.data)
         self.assertIn(b"Age Distribution", overview_page.data)
-        self.assertIn(b"Based on 5 registrants", overview_page.data)
+        self.assertIn(b"Total Participants", overview_page.data)
         self.assertIn(b"100.0%", overview_page.data)
         self.assertNotIn(b"Checked-In Attendees", overview_page.data)
         self.assertNotIn(b"Attendance Rate", overview_page.data)
@@ -352,15 +830,13 @@ class EventIntegrationTests(unittest.TestCase):
                 {"CCF Main", "Local Satellite", "International Satellite", "Non-CCF", "Unknown"},
                 {row["origin"] for row in registrants},
             )
-            self.assertEqual("25–34", registrants[0]["age_group"])
+            self.assertEqual("Unknown", registrants[0]["age_group"])
             self.assertNotIn("email", registrants[0])
             self.assertNotIn("mobile", registrants[0])
 
         client = self.app.test_client()
         overview_page = client.get("/events/{}".format(self.event_a))
-        self.assertIn(b"data-registrant-modal", overview_page.data)
-        self.assertIn(b"data-registrant-trigger", overview_page.data)
-        self.assertIn(b"overview.js", overview_page.data)
+        self.assertIn(b"Participant Profile", overview_page.data)
 
         response = client.get(
             "/events/{}/overview/registrants".format(self.event_a),
@@ -386,7 +862,7 @@ class EventIntegrationTests(unittest.TestCase):
             self.assertEqual(19, default["registrants"])
             self.assertEqual(16, default["pagination"]["total"])
             self.assertEqual(10, len(default["ranking"]))
-            self.assertEqual(["Alpha Hub", "Beta Hub"], [
+            self.assertEqual(["CCF Alpha Hub", "CCF Beta Hub"], [
                 row["name"] for row in default["ranking"][:2]
             ])
 
@@ -403,7 +879,7 @@ class EventIntegrationTests(unittest.TestCase):
                 get_db(), batch_id, query="test registrant",
             )
             self.assertEqual(
-                {"Eastwood", "Singapore"},
+                {"CCF Eastwood", "CCF Singapore"},
                 {row["name"] for row in participant_search["ranking"]},
             )
 
@@ -416,7 +892,7 @@ class EventIntegrationTests(unittest.TestCase):
             attendance = satellite_metrics(
                 get_db(), batch_id, sort="attendance_rate", direction="asc",
             )
-            self.assertEqual("Beta Hub", attendance["ranking"][0]["name"])
+            self.assertEqual("CCF Beta Hub", attendance["ranking"][0]["name"])
             self.assertEqual(0, attendance["ranking"][0]["attendance_rate"])
 
         client = self.app.test_client()
@@ -437,7 +913,7 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertNotIn(b"Test Registrant", ranking.data)
         participant_page = client.get(
             "/events/{}/satellites/registrants".format(self.event_a),
-            query_string={"name": "Eastwood", "scope": "local"},
+            query_string={"name": "CCF Eastwood", "scope": "local"},
         )
         self.assertEqual(200, participant_page.status_code)
         self.assertIn(b"Test Registrant", participant_page.data)
@@ -526,10 +1002,11 @@ class EventIntegrationTests(unittest.TestCase):
             ).lastrowid
             get_db().execute(
                 """
-                INSERT INTO import_batches (event_id, event_slug, event_name, status, activated_at)
-                VALUES (?, 'clean-event', 'Clean Event', 'active', CURRENT_TIMESTAMP)
+                INSERT INTO import_batches (
+                    event_id, event_slug, event_name, status, active_event_id, activated_at
+                ) VALUES (?, 'clean-event', 'Clean Event', 'active', ?, CURRENT_TIMESTAMP)
                 """,
-                (clean_event,),
+                (clean_event, clean_event),
             )
             get_db().commit()
         clean_page = client.get("/events/{}/data-quality".format(clean_event))
@@ -637,7 +1114,13 @@ class EventIntegrationTests(unittest.TestCase):
             self.assertIn(b"Event A", response.data)
             if suffix != "/imports":
                 self.assertIn(b"No active dataset for this event", response.data)
+        empty_dashboard = client.get("/events/{}/dashboard".format(self.event_a)).get_json()
+        self.assertEqual(0, empty_dashboard["overview"]["participants"])
+        self.assertEqual(0, empty_dashboard["overview"]["volunteers"])
+        self.assertEqual(0, empty_dashboard["overview"]["total_registrations"])
+        self.assertTrue(all(empty_dashboard["reconciliation"].values()))
         self.assertEqual(404, client.get("/events/999999").status_code)
+        self.assertEqual(404, client.get("/events/999999/dashboard").status_code)
 
     def test_import_history_cannot_cross_event_boundaries(self):
         batch_a = self._process(self.event_a)
@@ -783,6 +1266,18 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertEqual("valid", result.status)
         self.assertEqual(1, result.duplicate_records)
 
+    def test_duplicate_authoritative_registration_identity_is_rejected(self):
+        with open(self.paths["registrants"], "r", encoding="utf-8", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        rows[1]["Registration Code"] = rows[0]["Registration Code"]
+        write_csv(self.paths["registrants"], REGISTRANT_FIELDS, rows)
+        result = validate_file(
+            "registrants", self.paths["registrants"].name, str(self.paths["registrants"])
+        )
+        self.assertEqual("invalid", result.status)
+        self.assertEqual(1, result.duplicate_records)
+        self.assertIn("duplicate_identifier", {issue.category for issue in result.issues})
+
     def test_b1g_registrants_header_variant_is_recognized(self):
         write_csv(
             self.paths["registrants"],
@@ -832,13 +1327,14 @@ class EventIntegrationTests(unittest.TestCase):
             ).fetchone()
             self.assertEqual("ICP", raw["b1g_satellite_hub_raw"])
 
-    def test_profile_fields_are_backfilled_for_an_existing_batch(self):
+    def test_application_startup_does_not_mutate_existing_rows(self):
         batch_id = self._process(self.event_a)
         with self.app.app_context():
             get_db().execute(
                 """
                 UPDATE registrants
-                SET gender_raw = NULL, birth_month_raw = NULL, birth_year_raw = NULL
+                SET gender_raw = NULL, life_stage_raw = NULL, ticket_name_raw = NULL,
+                    birth_month_raw = NULL, birth_year_raw = NULL
                 WHERE batch_id = ?
                 """,
                 (batch_id,),
@@ -847,48 +1343,337 @@ class EventIntegrationTests(unittest.TestCase):
 
         migrated_app = create_app({
             "TESTING": True,
-            "DATABASE": self.database,
+            "DATABASE_URL": self.database_url,
             "STAGING_DIR": self.staging_dir,
         })
         with migrated_app.app_context():
-            profile = participant_profile_metrics(get_db(), batch_id)
+            profile = participant_profile_metrics(get_db(), batch_id, "2025-09-05")
             self.assertEqual(5, profile["gender"]["total"])
-            self.assertEqual(4, profile["age"]["valid"])
-            self.assertEqual(1, profile["age"]["missing"])
+            self.assertEqual(5, sum(item["count"] for item in profile["age"]["items"]))
+            self.assertEqual(5, profile["age"]["unknown"])
+            self.assertEqual(5, sum(item["count"] for item in profile["life_stage"]["items"]))
+    def test_admin_tables_navigation_primary_exports_and_authorization(self):
+        self._process(self.event_a)
+        client = self.app.test_client()
+        page = client.get("/events/{}/admin-tables/registrants".format(self.event_a))
+        self.assertEqual(200, page.status_code)
+        self.assertIn(b"Admin Tables", page.data)
+        self.assertIn(b"Generated Tickets", page.data)
+        self.assertIn(b"Buyers", page.data)
+        self.assertIn(b"All Registrants", page.data)
+        self.assertIn(b"Curated Registrants", page.data)
+        self.assertIn(b"admin_tables.js", page.data)
+        self.assertIn(b"data-nav-group-toggle", page.data)
+        self.assertIn(b'aria-controls="admin-tables-submenu"', page.data)
+        self.assertIn(b'aria-expanded="true"', page.data)
+        self.assertIn(b'class="nav-module active expanded"', page.data)
+        self.assertNotIn(b"Registrant-Satellite Links", page.data)
+
+        overview_page = client.get("/events/{}".format(self.event_a))
+        self.assertIn(b'class="nav-module "', overview_page.data)
+        self.assertIn(b'aria-expanded="false"', overview_page.data)
+
+        for dataset in ("registrants", "tickets", "buyers"):
+            self.assertEqual(
+                200,
+                client.get(
+                    "/events/{}/admin-tables/{}".format(self.event_a, dataset)
+                ).status_code,
+            )
+
+        restricted = create_app({
+            "TESTING": True,
+            "DATABASE_URL": self.database_url,
+            "STAGING_DIR": self.staging_dir,
+            "ADMIN_TABLES_ENABLED": False,
+            "AUTHENTICATION_DISABLED": True,
+            "WTF_CSRF_ENABLED": False,
+        })
+        restricted_client = restricted.test_client()
+        self.assertEqual(
+            403,
+            restricted_client.get(
+                "/events/{}/admin-tables/registrants".format(self.event_a)
+            ).status_code,
+        )
+        overview = restricted_client.get("/events/{}".format(self.event_a))
+        self.assertNotIn(b">Admin Tables</span>", overview.data)
+
+    def test_admin_tables_preserve_complete_rows_and_expose_all_source_columns(self):
+        self._process(self.event_a)
+        client = self.app.test_client()
+        registrants = client.get(
+            "/events/{}/admin-tables/registrants/data?per_page=25".format(self.event_a)
+        ).get_json()
+        tickets = client.get(
+            "/events/{}/admin-tables/tickets/data?per_page=25".format(self.event_a)
+        ).get_json()
+        buyers = client.get(
+            "/events/{}/admin-tables/buyers/data?per_page=25".format(self.event_a)
+        ).get_json()
+
+        self.assertEqual(5, registrants["pagination"]["total"])
+        self.assertEqual(6, tickets["pagination"]["total"])
+        self.assertEqual(2, buyers["pagination"]["total"])
+        registrant_labels = {column["label"] for column in registrants["columns"]}
+        buyer_labels = {column["label"] for column in buyers["columns"]}
+        self.assertIn("Email Address", registrant_labels)
+        self.assertIn("Mobile Number", registrant_labels)
+        self.assertIn("Gross Amount", buyer_labels)
+        self.assertIn("Amount Paid", buyer_labels)
+        self.assertTrue(any(column["default"] for column in registrants["columns"]))
+        self.assertTrue(all("expression" not in column for column in registrants["columns"]))
+
+        with self.app.app_context():
+            preserved = get_db().execute(
+                "SELECT source_data_json FROM buyers WHERE batch_id = ? ORDER BY id LIMIT 1",
+                (registrants["rows"][0]["batch_id"],),
+            ).fetchone()[0]
+            self.assertEqual("100", json.loads(preserved)["Gross Amount"])
+
+    def test_admin_table_search_filters_sort_pagination_and_event_batch_scope(self):
+        batch_a_1 = self._process(self.event_a)
+        self._write_fixture(registrant_limit=2)
+        batch_a_2 = self._process(self.event_a)
+        self._write_fixture(registrant_limit=1)
+        batch_b = self._process(self.event_b)
+        client = self.app.test_client()
+
+        active = client.get(
+            "/events/{}/admin-tables/registrants/data?per_page=25".format(self.event_a)
+        ).get_json()
+        self.assertEqual(batch_a_2, active["batch"])
+        self.assertEqual(2, active["pagination"]["total"])
+
+        all_batches = client.get(
+            "/events/{}/admin-tables/registrants/data?batch=all&per_page=25".format(self.event_a)
+        ).get_json()
+        self.assertEqual(7, all_batches["pagination"]["total"])
+        self.assertNotIn(batch_b, {row["batch_id"] for row in all_batches["rows"]})
+
+        filters = json.dumps([
+            {"field": "gender_raw", "operator": "equals", "value": "Female"},
+            {"field": "checked_in", "operator": "equals", "value": "yes"},
+        ])
+        filtered = client.get(
+            "/events/{}/admin-tables/registrants/data".format(self.event_a),
+            query_string={
+                "batch": batch_a_1,
+                "search": "Registrant",
+                "filters": filters,
+                "sort": "registration_code",
+                "direction": "desc",
+                "page": 1,
+                "per_page": 25,
+            },
+        ).get_json()
+        self.assertEqual(1, filtered["pagination"]["total"])
+        self.assertEqual("Female", filtered["rows"][0]["gender_raw"])
+        self.assertTrue(filtered["rows"][0]["checked_in"])
+
+        bracket_filter = client.get(
+            "/events/{}/admin-tables/registrants/data?filters%5Bregistration_type%5D=participant".format(self.event_a)
+        ).get_json()
+        self.assertEqual(2, bracket_filter["pagination"]["total"])
+        date_filter = client.get(
+            "/events/{}/admin-tables/tickets/data".format(self.event_a),
+            query_string={
+                "batch": batch_a_1,
+                "filters": json.dumps([{
+                    "field": "check_in_at", "operator": "exact", "value": "2025-09-05"
+                }]),
+            },
+        ).get_json()
+        self.assertEqual(4, date_filter["pagination"]["total"])
+        numeric_filter = client.get(
+            "/events/{}/admin-tables/buyers/data".format(self.event_a),
+            query_string={
+                "batch": batch_a_1,
+                "filters": json.dumps([{
+                    "field": "quantity", "operator": "greater_than", "value": "0"
+                }]),
+            },
+        ).get_json()
+        self.assertEqual(2, numeric_filter["pagination"]["total"])
+        invalid_scope = client.get(
+            "/events/{}/admin-tables/registrants/data?batch={}".format(self.event_a, batch_b)
+        )
+        self.assertEqual(400, invalid_scope.status_code)
+
+    def test_curated_admin_view_and_complete_registration_source_lineage(self):
+        with open(self.paths["registrants"], "r", encoding="utf-8", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        rows[1]["Last Name"] = rows[0]["Last Name"]
+        rows[1]["Birth Month"] = rows[0]["Birth Month"] = "January"
+        rows[1]["Birth Year"] = rows[0]["Birth Year"] = "1995"
+        rows[1]["Gender"] = rows[0]["Gender"] = "Male"
+        write_csv(self.paths["registrants"], REGISTRANT_FIELDS, rows)
+        batch_id = self._process(self.event_a)
+        client = self.app.test_client()
+
+        page = client.get(
+            "/events/{}/admin-tables/registrants?view=curated".format(self.event_a)
+        )
+        self.assertEqual(200, page.status_code)
+        self.assertIn(b'data-dataset="curated"', page.data)
+
+        curated = client.get(
+            "/events/{}/admin-tables/curated/data?sort=source_registrant_count&direction=desc".format(self.event_a)
+        ).get_json()
+        self.assertEqual(4, curated["pagination"]["total"])
+        merged = curated["rows"][0]
+        self.assertEqual(2, merged["source_registrant_count"])
+        detail = client.get(
+            "/events/{}/admin-tables/registrants/curated/{}/sources?batch={}".format(
+                self.event_a, merged["id"], batch_id
+            )
+        ).get_json()
+        self.assertEqual(2, len(detail["sources"]))
+        self.assertTrue(all(source["event_id"] == self.event_a for source in detail["sources"]))
+        self.assertTrue(all(source["batch_id"] == batch_id for source in detail["sources"]))
+        self.assertIn("Email Address", detail["sources"][0]["source_values"])
+        self.assertIn("Mobile Number", detail["sources"][0]["source_values"])
+        self.assertIn("registration_code", detail["sources"][0]["normalized_values"])
+
+        self._process(self.event_b)
+        self.assertEqual(
+            404,
+            client.get(
+                "/events/{}/admin-tables/registrants/curated/{}/sources".format(
+                    self.event_b, merged["id"]
+                )
+            ).status_code,
+        )
 
 
 class MigrationTests(unittest.TestCase):
-    def test_legacy_active_batch_is_backfilled_without_data_loss(self):
+    def test_normal_runtime_requires_mysql_database_url(self):
         with tempfile.TemporaryDirectory() as temp:
-            database = str(Path(temp) / "legacy.sqlite3")
-            connection = sqlite3.connect(database)
-            connection.executescript("""
-                CREATE TABLE import_batches (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    event_slug TEXT,
-                    event_name TEXT,
-                    status TEXT NOT NULL,
-                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    processed_at TEXT,
-                    activated_at TEXT,
-                    error_message TEXT
-                );
-                INSERT INTO import_batches (event_slug, event_name, status)
-                VALUES ('legacy-event', 'Legacy Event', 'active');
-            """)
-            connection.close()
+            with self.assertRaises(DatabaseConfigurationError):
+                create_app(
+                    {
+                        "DATABASE_URL": "sqlite+pysqlite:///{}".format(Path(temp) / "runtime.sqlite3"),
+                        "STAGING_DIR": str(Path(temp) / "staging"),
+                    }
+                )
+
+    def test_startup_does_not_create_or_upgrade_schema(self):
+        with tempfile.TemporaryDirectory() as temp:
+            database = str(Path(temp) / "empty.sqlite3")
             app = create_app({
                 "TESTING": True,
-                "DATABASE": database,
+                "DATABASE_URL": "sqlite+pysqlite:///{}".format(database),
                 "STAGING_DIR": str(Path(temp) / "staging"),
             })
             with app.app_context():
-                event = get_db().execute("SELECT * FROM events").fetchone()
-                batch = get_db().execute("SELECT * FROM import_batches").fetchone()
-                self.assertEqual("Legacy Event", event["name"])
-                self.assertEqual(event["id"], batch["event_id"])
-                self.assertEqual("active", batch["status"])
-                self.assertEqual("ok", get_db().execute("PRAGMA integrity_check").fetchone()[0])
+                self.assertEqual([], inspect(get_engine()).get_table_names())
+
+    def test_sqlite_copy_preserves_ids_unicode_relationships_and_rejects_rerun(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source_path = Path(temp) / "source.sqlite3"
+            source_engine = create_engine("sqlite+pysqlite:///{}".format(source_path))
+            sqlalchemy_event.listen(source_engine, "connect", enable_sqlite_foreign_keys)
+            Base.metadata.create_all(source_engine)
+            with source_engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "INSERT INTO events (id, name, event_date, participant_target) "
+                        "VALUES (7, 'Événement 家庭', '2026-09-05', 100)"
+                    )
+                )
+                connection.execute(
+                    text("INSERT INTO events (id, name) VALUES (8, 'Second Event')")
+                )
+                connection.execute(
+                    text(
+                        "INSERT INTO import_batches "
+                        "(id, event_id, event_slug, event_name, status, activated_at) "
+                        "VALUES (10, 7, 'unicode-event', 'Événement 家庭', 'superseded', "
+                        "'2026-08-20 10:00:00')"
+                    )
+                )
+                connection.execute(
+                    text(
+                        "INSERT INTO import_batches "
+                        "(id, event_id, event_slug, event_name, status, active_event_id, activated_at) "
+                        "VALUES (11, 7, 'unicode-event', 'Événement 家庭', 'active', 7, "
+                        "'2026-08-24 10:00:00')"
+                    )
+                )
+                connection.execute(
+                    text(
+                        "INSERT INTO import_batches (id, event_id, status, error_message) "
+                        "VALUES (12, 8, 'failed', 'Representative failure')"
+                    )
+                )
+                for file_id, export_type in enumerate(("tickets", "buyers", "registrants"), 20):
+                    connection.execute(
+                        text(
+                            "INSERT INTO import_files "
+                            "(id, batch_id, export_type, filename, staged_path, status) "
+                            "VALUES (:id, 11, :kind, :filename, :path, 'valid')"
+                        ),
+                        {
+                            "id": file_id,
+                            "kind": export_type,
+                            "filename": export_type + ".csv",
+                            "path": "/private/" + export_type + ".csv",
+                        },
+                    )
+                connection.execute(
+                    text(
+                        "INSERT INTO buyers (id, batch_id, buyer_reference, quantity) "
+                        "VALUES (31, 11, 'BUY-1', 1)"
+                    )
+                )
+                connection.execute(
+                    text(
+                        "INSERT INTO tickets (id, batch_id, ticket_code, buyer_reference) "
+                        "VALUES (41, 11, 'TICKET-1', 'BUY-1')"
+                    )
+                )
+                connection.execute(
+                    text(
+                        "INSERT INTO registrants "
+                        "(id, batch_id, registration_code, ticket_code, first_name, last_name, "
+                        "gender_raw, birth_date_raw, affiliation, satellite_name, "
+                        "registration_type, ticket_matched, checked_in) VALUES "
+                        "(51, 11, 'REG-1', 'TICKET-1', 'José', '李', 'Male', 'raw-value', "
+                        "'Local Satellite', 'CCF 東京', 'participant', 1, 1)"
+                    )
+                )
+                connection.execute(
+                    text(
+                        "INSERT INTO validation_issues "
+                        "(id, batch_id, severity, category, entity_type, message) "
+                        "VALUES (61, 11, 'warning', 'sample_warning', 'registrants', 'Babala ⚠')"
+                    )
+                )
+                connection.execute(
+                    text(
+                        "INSERT INTO validation_issues "
+                        "(id, batch_id, severity, category, entity_type, source_row, message) "
+                        "VALUES (62, 11, 'error', 'sample_error', 'tickets', 2, 'Invalid sample')"
+                    )
+                )
+            source_engine.dispose()
+
+            destination = create_engine("sqlite+pysqlite:///:memory:")
+            sqlalchemy_event.listen(destination, "connect", enable_sqlite_foreign_keys)
+            Base.metadata.create_all(destination)
+            report = migrate(source_path, destination, require_mysql=False, progress=lambda _line: None)
+            self.assertEqual(8, report["events"]["max_id"])
+            self.assertEqual(51, report["registrants"]["max_id"])
+            with destination.connect() as connection:
+                row = connection.execute(
+                    text("SELECT first_name, last_name, satellite_name, birth_date_raw FROM registrants")
+                ).one()
+                self.assertEqual(("José", "李", "CCF 東京", "raw-value"), tuple(row))
+            with destination.begin() as connection:
+                inserted = connection.execute(text("INSERT INTO events (name) VALUES ('After migration')"))
+                self.assertGreater(inserted.lastrowid, 8)
+            with self.assertRaises(MigrationError):
+                migrate(source_path, destination, require_mysql=False, progress=lambda _line: None)
 
 
 class ProvidedDatasetTests(unittest.TestCase):
@@ -903,16 +1688,22 @@ class ProvidedDatasetTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             app = create_app({
                 "TESTING": True,
-                "DATABASE": str(Path(temp) / "provided.sqlite3"),
+                "DATABASE_URL": "sqlite+pysqlite:///{}".format(Path(temp) / "provided.sqlite3"),
                 "STAGING_DIR": str(Path(temp) / "staging"),
+                "AUTHENTICATION_DISABLED": True,
+                "WTF_CSRF_ENABLED": False,
             })
+            create_test_schema(app)
             validation = validate_batch({
                 export_type: (str(path), path.name) for export_type, path in required.items()
             })
             self.assertTrue(validation.valid)
             with app.app_context():
                 event_id = get_db().execute(
-                    "INSERT INTO events (name) VALUES ('B1G Converge 2025')"
+                    """
+                    INSERT INTO events (name, event_date, participant_target)
+                    VALUES ('B1G Converge 2025', '2025-09-05', 5000)
+                    """
                 ).lastrowid
                 get_db().commit()
                 batch_id = store_validation(get_db(), validation, event_id)
@@ -925,24 +1716,43 @@ class ProvidedDatasetTests(unittest.TestCase):
                 self.assertEqual(1506, metrics["satellites"])
                 self.assertEqual(440, metrics["non_ccf"])
                 self.assertEqual(1108, metrics["unknown"])
-                profile = participant_profile_metrics(get_db(), batch_id)
+                dashboard = event_dashboard_metrics(get_db(), event_id)
+                self.assertEqual(4312, dashboard["overview"]["participants"])
+                self.assertEqual(0, dashboard["overview"]["volunteers"])
+                self.assertEqual(4312, dashboard["overview"]["total_registrations"])
+                self.assertEqual(4334, dashboard["overview"]["raw_registrations"])
+                self.assertEqual(22, dashboard["overview"]["duplicate_records_merged"])
+                self.assertAlmostEqual(86.24, dashboard["overview"]["progress_percentage"])
+                self.assertTrue(all(dashboard["reconciliation"].values()))
+                profile = dashboard["participant_profile"]
                 gender = {item["label"]: item["count"] for item in profile["gender"]["items"]}
-                self.assertEqual({"Male": 786, "Female": 2440, "Prefer not to say": 0, "Other": 0, "Unknown": 1108}, gender)
-                self.assertEqual(3226, profile["age"]["valid"])
-                self.assertEqual(1108, profile["age"]["missing"])
-                self.assertEqual(0, profile["age"]["invalid"])
+                self.assertEqual({"Male": 783, "Female": 2421, "Unknown": 1108}, gender)
+                life_stage = {item["label"]: item["count"] for item in profile["life_stage"]["items"]}
+                self.assertEqual(
+                    {"Single": 3024, "Single Parent": 71, "Married": 95, "Unknown": 1122},
+                    life_stage,
+                )
+                self.assertEqual(1108, profile["age"]["unknown"])
                 age = {item["label"]: item["count"] for item in profile["age"]["items"]}
-                self.assertEqual(2207, age["25–34"])
+                self.assertEqual(
+                    {
+                        "Below 20": 20, "20–25": 640, "26–30": 1262,
+                        "31–35": 808, "36–40": 280, "41+": 194,
+                        "Unknown": 1108,
+                    },
+                    age,
+                )
                 satellites = satellite_metrics(get_db(), batch_id)
-                self.assertEqual(1498, satellites["local_count"])
+                self.assertEqual(1492, satellites["local_count"])
                 self.assertEqual(8, satellites["international_count"])
             overview_page = app.test_client().get("/events/{}".format(event_id))
             self.assertEqual(200, overview_page.status_code)
             self.assertIn(b"4,334", overview_page.data)
-            self.assertIn(b"29.5%", overview_page.data)
-            self.assertIn(b"1,506", overview_page.data)
-            self.assertIn(b"2,440", overview_page.data)
-            self.assertIn(b"3,226", overview_page.data)
+            self.assertIn(b"4,312", overview_page.data)
+            self.assertIn(b"2,421", overview_page.data)
+            self.assertIn(b"3,024", overview_page.data)
+            self.assertIn(b"1,262", overview_page.data)
+            self.assertIn(b"86.2%", overview_page.data)
             self.assertNotIn(b"Checked-In Attendees", overview_page.data)
             self.assertNotIn(b"Attendance Rate", overview_page.data)
 

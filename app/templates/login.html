@@ -1,0 +1,20 @@
+{% extends "auth_base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Login · CCF Event Intelligence{% endblock %}
+{% block content %}
+<span class="auth-form-icon">{{ icon('lock', 23) }}</span>
+<p class="eyebrow">Operator access</p>
+<h2>Welcome back</h2>
+<p class="auth-intro">Sign in to access event dashboards and administration.</p>
+<form method="post" class="auth-form" novalidate>
+    {{ form.hidden_tag() }}
+    <label for="username">Username</label>
+    {{ form.username(id='username', autocomplete='username', autofocus=true, placeholder='Your username') }}
+    {% for error in form.username.errors %}<p class="form-error">{{ error }}</p>{% endfor %}
+    <label for="password">Password</label>
+    {{ form.password(id='password', autocomplete='current-password', placeholder='Your password') }}
+    {% for error in form.password.errors %}<p class="form-error">{{ error }}</p>{% endfor %}
+    {{ form.submit(class_='button primary auth-submit') }}
+</form>
+<p class="auth-switch">Need an account? <a href="{{ url_for('auth.register') }}">Register</a></p>
+{% endblock %}

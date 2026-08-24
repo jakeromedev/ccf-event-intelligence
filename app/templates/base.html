@@ -6,39 +6,89 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}CCF Event Dashboard{% endblock %}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v='20260820-quality-modal') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v='20260822-admin-nav-3') }}">
 </head>
 <body>
-    <aside class="sidebar">
+    <aside class="sidebar" id="application-sidebar">
         <a class="brand" href="{{ url_for('dashboard.events') }}" aria-label="CCF Event Dashboard events">
             <span class="brand-mark"><img src="{{ url_for('static', filename='CCF-Logo-2017-01.png') }}" alt="" aria-hidden="true"></span>
-            <span class="brand-copy"><strong>Dashboard</strong><small>Event insights</small></span>
+            <span class="brand-copy"><strong>CCF EVENT</strong><small>INTELLIGENCE</small></span>
         </a>
 
         {% if event %}
-            <div class="workspace-label">
-                <span>Selected event</span>
-                <strong title="{{ event['name'] }}">{{ event['name'] }}</strong>
-                <small>{{ 'Active dataset' if active_batch else 'Upload required' }}</small>
-            </div>
             <nav aria-label="Event workspace navigation">
                 <a class="nav-link {% if request.endpoint == 'dashboard.event_overview' %}active{% endif %}" href="{{ url_for('dashboard.event_overview', event_id=event['id']) }}">{{ icon('overview') }}<span>Overview</span></a>
                 <a class="nav-link {% if request.endpoint in ('dashboard.event_satellites', 'dashboard.event_satellite_registrants') %}active{% endif %}" href="{{ url_for('dashboard.event_satellites', event_id=event['id']) }}">{{ icon('satellites') }}<span>Satellites</span></a>
                 <a class="nav-link {% if request.endpoint == 'dashboard.event_quality' %}active{% endif %}" href="{{ url_for('dashboard.event_quality', event_id=event['id']) }}">{{ icon('quality') }}<span>Data Quality</span></a>
                 <a class="nav-link {% if request.endpoint == 'dashboard.event_imports' %}active{% endif %}" href="{{ url_for('dashboard.event_imports', event_id=event['id']) }}">{{ icon('imports') }}<span>Imports</span></a>
+                {% if admin_tables_allowed %}
+                    {% set admin_tables_active = request.endpoint in ('dashboard.event_admin_table', 'dashboard.event_admin_table_data', 'dashboard.event_admin_registration_sources') %}
+                    <div class="nav-module {{ 'active expanded' if admin_tables_active else '' }}" data-nav-group>
+                        <button class="nav-link nav-module-link {{ 'active' if admin_tables_active else '' }}" type="button" aria-expanded="{{ 'true' if admin_tables_active else 'false' }}" aria-controls="admin-tables-submenu" data-nav-group-toggle>
+                            <span class="nav-module-icon">{{ icon('table', 18) }}</span>
+                            <span>Admin Tables</span>
+                            <span class="nav-module-chevron">{{ icon('chevron-down', 14) }}</span>
+                        </button>
+                        <div class="nav-submenu" id="admin-tables-submenu" aria-label="Admin Tables" aria-hidden="{{ 'false' if admin_tables_active else 'true' }}">
+                            <div class="nav-submenu-inner">
+                                <a class="{{ 'active' if request.view_args and request.view_args.get('dataset') == 'registrants' else '' }}" href="{{ url_for('dashboard.event_admin_table', event_id=event['id'], dataset='registrants') }}"><span></span>Registrants</a>
+                                <a class="{{ 'active' if request.view_args and request.view_args.get('dataset') == 'tickets' else '' }}" href="{{ url_for('dashboard.event_admin_table', event_id=event['id'], dataset='tickets') }}"><span></span>Generated Tickets</a>
+                                <a class="{{ 'active' if request.view_args and request.view_args.get('dataset') == 'buyers' else '' }}" href="{{ url_for('dashboard.event_admin_table', event_id=event['id'], dataset='buyers') }}"><span></span>Buyers</a>
+                            </div>
+                        </div>
+                    </div>
+                {% endif %}
+                {% if current_user.is_authenticated and current_user.is_admin %}
+                    <a class="nav-link {% if request.endpoint in ('auth.users', 'auth.approve_user') %}active{% endif %}" href="{{ url_for('auth.users') }}">{{ icon('users') }}<span>Users</span></a>
+                {% endif %}
             </nav>
             <div class="sidebar-spacer"></div>
-            <a class="nav-link back-link" href="{{ url_for('dashboard.events') }}">{{ icon('back') }}<span>Back to Events</span></a>
+            <a class="nav-link back-link" href="{{ url_for('dashboard.events') }}"><span class="back-icon">{{ icon('back', 16) }}</span><span>Back to Events</span></a>
         {% else %}
             <nav aria-label="Application navigation">
-                <a class="nav-link active" href="{{ url_for('dashboard.events') }}">{{ icon('events') }}<span>Events</span></a>
+                <a class="nav-link {% if request.endpoint == 'dashboard.events' %}active{% endif %}" href="{{ url_for('dashboard.events') }}">{{ icon('events') }}<span>Events</span></a>
+                {% if current_user.is_authenticated and current_user.is_admin %}
+                    <a class="nav-link {% if request.endpoint in ('auth.users', 'auth.approve_user') %}active{% endif %}" href="{{ url_for('auth.users') }}">{{ icon('users') }}<span>Users</span></a>
+                {% endif %}
             </nav>
             <div class="sidebar-spacer"></div>
             <div class="sidebar-note"><span class="status-dot"></span><p><strong>Event management</strong><small>Create an event to begin.</small></p></div>
         {% endif %}
+        {% if current_user.is_authenticated %}
+            <div class="sidebar-account">
+                <span class="sidebar-account-icon">{{ icon('person', 16) }}</span>
+                <p><strong>{{ current_user.username }}</strong><small>{{ current_user.role|capitalize }}</small></p>
+                <form method="post" action="{{ url_for('auth.logout') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit">Logout</button>
+                </form>
+            </div>
+        {% endif %}
     </aside>
 
     <main class="app-main">
+        <header class="application-header">
+            <div class="application-header-context">
+                <button class="shell-menu-toggle" type="button" aria-label="Toggle navigation" aria-controls="application-sidebar" aria-expanded="true" data-sidebar-toggle>{{ icon('menu', 20) }}</button>
+                {% if event %}
+                    <a class="event-selector" href="{{ url_for('dashboard.events') }}" title="Switch Event">
+                        <strong>{{ event['name'] }}</strong>{{ icon('chevron-down', 15) }}
+                    </a>
+                {% else %}
+                    <span class="event-selector static"><strong>Events</strong></span>
+                {% endif %}
+            </div>
+            {% if event %}
+                <div class="application-header-meta" aria-label="Current dataset metadata">
+                    <span class="dataset-status {{ 'active' if active_batch else 'empty' }}"><i></i>{{ 'Dataset active' if active_batch else 'No active dataset' }}</span>
+                    {% if active_batch %}
+                        <span class="import-metadata">Imported {{ active_batch['activated_at'] }}</span>
+                        <span class="batch-metadata">Batch #{{ active_batch['id'] }}</span>
+                    {% endif %}
+                    <span class="header-help" title="Metrics use the selected Event's active dataset.">{{ icon('info', 18) }}</span>
+                </div>
+            {% endif %}
+        </header>
         {% block page_header %}{{ render_page_header('Events', event, active_batch) }}{% endblock %}
 
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -48,5 +98,6 @@
         {% block content %}{% endblock %}
     </main>
     {% block scripts %}{% endblock %}
+    <script src="{{ url_for('static', filename='shell.js', v='20260822-admin-nav-2') }}" defer></script>
 </body>
 </html>

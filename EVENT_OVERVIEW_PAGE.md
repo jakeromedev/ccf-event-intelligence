@@ -1,5 +1,10 @@
 # Event Overview Page
 
+> Historical design note: the 4,334 figures below describe raw registration-row
+> analytics. The current Event Dashboard displays both 4,334 Raw Registrations
+> and 4,312 Unique Registrants. See `CURATION_LAYER.md` for authoritative
+> current behavior.
+
 This document describes the current Event Overview presentation, data sources, calculations, privacy behavior, and responsive layout.
 
 ## Purpose

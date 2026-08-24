@@ -1,5 +1,9 @@
 # Event Overview Number Logic
 
+> Raw-data reconciliation note: this document explains the source-row total.
+> The current dashboard additionally reports 4,312 Unique Registrants alongside
+> these 4,334 Raw Registrations. See `CURATION_LAYER.md`.
+
 The dashboard is not using the event capacity of 450. It is counting the records in the three uploaded exports according to the approved Phase 1 definitions.
 
 ## How the Current Numbers Were Calculated

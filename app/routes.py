@@ -1,17 +1,29 @@
 from datetime import datetime
+from functools import wraps
 
 from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, url_for
+from flask_login import current_user
 
 from .aggregation import (
     active_batch,
+    curated_registrant_detail,
+    curation_quality,
     data_quality,
     data_quality_issue_instances,
+    event_dashboard_metrics,
     event_summaries,
-    overview_metrics,
     overview_registrants,
-    participant_profile_metrics,
+    satellite_curation_detail,
     satellite_metrics,
     satellite_registrants,
+)
+from .admin_tables import (
+    AdminTableQueryError,
+    DATASET_LABELS,
+    admin_table_data,
+    event_batches,
+    registration_sources,
+    resolve_batch_scope,
 )
 from .db import get_db
 from .import_history import IMPORT_HISTORY_STATUSES, import_history
@@ -19,6 +31,27 @@ from .importer import process_batch, stage_upload_set, store_validation, validat
 
 
 bp = Blueprint("dashboard", __name__)
+
+
+def can_access_admin_tables():
+    """Use the host application's authorization hook when one is configured."""
+    if not current_app.config.get("ADMIN_TABLES_ENABLED", True):
+        return False
+    if not current_app.config.get("AUTHENTICATION_DISABLED", False):
+        if not current_user.is_authenticated or not current_user.is_admin:
+            return False
+    authorizer = current_app.config.get("ADMIN_TABLES_AUTHORIZER")
+    return True if authorizer is None else bool(authorizer(request))
+
+
+def admin_tables_access_required(view):
+    @wraps(view)
+    def protected(*args, **kwargs):
+        if not can_access_admin_tables():
+            abort(403)
+        return view(*args, **kwargs)
+
+    return protected
 
 
 def get_event_or_404(event_id):
@@ -71,15 +104,65 @@ def event_overview(event_id):
     db = get_db()
     event = get_event_or_404(event_id)
     batch = active_batch(db, event_id)
-    metrics = overview_metrics(db, batch["id"], "registrants") if batch else None
-    profile = participant_profile_metrics(db, batch["id"]) if batch else None
+    dashboard = event_dashboard_metrics(db, event_id)
     return render_template(
         "overview.html",
         event=event,
         active_batch=batch,
-        metrics=metrics,
-        profile=profile,
+        dashboard=dashboard,
+        metrics=dashboard["overview"],
+        profile=dashboard["participant_profile"],
     )
+
+
+@bp.get("/events/<int:event_id>/dashboard")
+def event_dashboard_api(event_id):
+    dashboard = event_dashboard_metrics(get_db(), event_id)
+    if dashboard is None:
+        abort(404)
+    return jsonify(dashboard)
+
+
+@bp.post("/events/<int:event_id>/settings")
+def update_event_settings(event_id):
+    event = get_event_or_404(event_id)
+    event_date = (request.form.get("event_date") or "").strip()
+    target_raw = (request.form.get("participant_target") or "").strip()
+
+    if event_date:
+        try:
+            parsed_date = datetime.strptime(event_date, "%Y-%m-%d").date()
+            if parsed_date.isoformat() != event_date:
+                raise ValueError
+        except ValueError:
+            flash("Event Date must be a valid date.", "error")
+            return redirect(url_for("dashboard.event_overview", event_id=event_id) + "#event-settings")
+
+    participant_target = None
+    if target_raw:
+        try:
+            participant_target = int(target_raw)
+        except ValueError:
+            participant_target = -1
+        if participant_target < 0:
+            flash("Participant Target must be a non-negative whole number.", "error")
+            return redirect(url_for("dashboard.event_overview", event_id=event_id) + "#event-settings")
+        if participant_target > 1_000_000_000:
+            flash("Participant Target must be 1,000,000,000 or fewer.", "error")
+            return redirect(url_for("dashboard.event_overview", event_id=event_id) + "#event-settings")
+
+    db = get_db()
+    db.execute(
+        """
+        UPDATE events
+        SET event_date = ?, participant_target = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (parsed_date if event_date else None, participant_target, event["id"]),
+    )
+    db.commit()
+    flash("Event settings saved. Dashboard metrics have been refreshed.", "success")
+    return redirect(url_for("dashboard.event_overview", event_id=event_id) + "#event-settings")
 
 
 @bp.get("/events/<int:event_id>/overview/registrants")
@@ -90,6 +173,72 @@ def event_overview_registrants(event_id):
     if not batch:
         return jsonify({"registrants": []})
     return jsonify({"registrants": overview_registrants(db, batch["id"])})
+
+
+@bp.get("/events/<int:event_id>/admin-tables/<dataset>")
+@admin_tables_access_required
+def event_admin_table(event_id, dataset):
+    if dataset not in ("registrants", "tickets", "buyers"):
+        abort(404)
+    db = get_db()
+    event = get_event_or_404(event_id)
+    batch = active_batch(db, event_id)
+    view = request.args.get("view", "all")
+    if dataset != "registrants" or view not in ("all", "curated"):
+        view = "all"
+    selected_dataset = "curated" if dataset == "registrants" and view == "curated" else dataset
+    try:
+        selected_batch = resolve_batch_scope(
+            db, event_id, request.args.get("batch"), batch["id"] if batch else None
+        )
+    except AdminTableQueryError:
+        abort(404)
+    return render_template(
+        "admin_table.html",
+        event=event,
+        active_batch=batch,
+        dataset=dataset,
+        dataset_label=DATASET_LABELS[dataset],
+        selected_dataset=selected_dataset,
+        selected_view=view,
+        selected_batch=selected_batch,
+        batches=event_batches(db, event_id),
+    )
+
+
+@bp.get("/events/<int:event_id>/admin-tables/<dataset>/data")
+@admin_tables_access_required
+def event_admin_table_data(event_id, dataset):
+    if dataset not in ("registrants", "tickets", "buyers", "curated"):
+        abort(404)
+    db = get_db()
+    get_event_or_404(event_id)
+    batch = active_batch(db, event_id)
+    try:
+        result = admin_table_data(
+            db, dataset, event_id, batch["id"] if batch else None, request.args
+        )
+    except AdminTableQueryError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(result)
+
+
+@bp.get("/events/<int:event_id>/admin-tables/registrants/curated/<int:curated_id>/sources")
+@admin_tables_access_required
+def event_admin_registration_sources(event_id, curated_id):
+    db = get_db()
+    get_event_or_404(event_id)
+    batch = active_batch(db, event_id)
+    try:
+        batch_scope = resolve_batch_scope(
+            db, event_id, request.args.get("batch"), batch["id"] if batch else None
+        )
+    except AdminTableQueryError as exc:
+        return jsonify({"error": str(exc)}), 400
+    result = registration_sources(db, event_id, curated_id, batch_scope)
+    if result is None:
+        abort(404)
+    return jsonify(result)
 
 
 @bp.get("/events/<int:event_id>/satellites")
@@ -209,11 +358,13 @@ def event_quality(event_id):
         if batch
         else None
     )
+    curation_data = curation_quality(db, batch["id"]) if batch else None
     return render_template(
         "data_quality.html",
         event=event,
         active_batch=batch,
         quality=quality_data,
+        curation=curation_data,
     )
 
 
@@ -260,6 +411,34 @@ def event_quality_issues(event_id):
         page=page,
         per_page=per_page,
     )
+    if result is None:
+        abort(404)
+    return jsonify(result)
+
+
+@bp.get("/events/<int:event_id>/data-quality/curation/registrants/<int:curated_id>")
+def event_curated_registrant_detail(event_id, curated_id):
+    """Return one active-batch person's deduplication audit trail."""
+    db = get_db()
+    get_event_or_404(event_id)
+    batch = active_batch(db, event_id)
+    if not batch:
+        abort(404)
+    result = curated_registrant_detail(db, batch["id"], curated_id)
+    if result is None:
+        abort(404)
+    return jsonify(result)
+
+
+@bp.get("/events/<int:event_id>/data-quality/curation/satellites/<int:satellite_id>")
+def event_satellite_curation_detail(event_id, satellite_id):
+    """Return normalized and source values for one active-batch satellite."""
+    db = get_db()
+    get_event_or_404(event_id)
+    batch = active_batch(db, event_id)
+    if not batch:
+        abort(404)
+    result = satellite_curation_detail(db, batch["id"], satellite_id)
     if result is None:
         abort(404)
     return jsonify(result)
@@ -416,7 +595,7 @@ def datetime_short_filter(value):
     if not value:
         return "—"
     try:
-        parsed = datetime.fromisoformat(value)
+        parsed = value if isinstance(value, datetime) else datetime.fromisoformat(value)
     except (TypeError, ValueError):
         return value
     return parsed.strftime("%b %d, %Y · %I:%M %p").replace(" 0", " ")
