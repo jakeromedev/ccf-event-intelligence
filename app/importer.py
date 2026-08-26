@@ -704,28 +704,7 @@ def process_batch(db, batch_id):
 
         _insert_issues(db, batch_id, quality_issues)
         rebuild_batch_curation(db, batch_id)
-        remap_satellite_dataset_links(db, batch["event_id"], batch_id)
-        db.execute(
-            """
-            UPDATE import_batches SET status = 'superseded', active_event_id = NULL
-            WHERE event_id = ? AND status = 'active' AND id <> ?
-            """,
-            (batch["event_id"], batch_id),
-        )
-        db.execute(
-            """
-            UPDATE import_batches
-            SET status = 'active', active_event_id = event_id,
-                processed_at = CURRENT_TIMESTAMP,
-                activated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-            """,
-            (batch_id,),
-        )
-        db.execute(
-            "UPDATE events SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (batch["event_id"],),
-        )
+        _set_active_batch(db, batch["event_id"], batch_id)
         db.commit()
     except Exception as exc:
         db.rollback()
@@ -738,3 +717,52 @@ def process_batch(db, batch_id):
         raise
 
     return batch_id
+
+
+def _set_active_batch(db, event_id, batch_id):
+    """Switch one processed Event batch active within the caller's transaction."""
+    remap_satellite_dataset_links(db, event_id, batch_id)
+    db.execute(
+        """
+        UPDATE import_batches SET status = 'inactive', active_event_id = NULL
+        WHERE event_id = ? AND status = 'active' AND id <> ?
+        """,
+        (event_id, batch_id),
+    )
+    db.execute(
+        """
+        UPDATE import_batches
+        SET status = 'active', active_event_id = event_id,
+            processed_at = COALESCE(processed_at, CURRENT_TIMESTAMP),
+            activated_at = CURRENT_TIMESTAMP,
+            error_message = NULL
+        WHERE id = ? AND event_id = ?
+        """,
+        (batch_id, event_id),
+    )
+    db.execute(
+        "UPDATE events SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (event_id,),
+    )
+
+
+def activate_batch(db, event_id, batch_id):
+    """Make an already processed inactive batch drive its Event again."""
+    db.lock_event(event_id)
+    batch = db.execute(
+        "SELECT * FROM import_batches WHERE id = ? AND event_id = ?",
+        (batch_id, event_id),
+    ).fetchone()
+    if not batch:
+        raise LookupError("The import batch does not exist for this Event.")
+    if batch["status"] == "active":
+        return False
+    if batch["status"] != "inactive" or not batch["processed_at"]:
+        raise ValueError("Only a previously processed inactive batch can be activated.")
+    try:
+        _set_active_batch(db, event_id, batch_id)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return True

@@ -154,7 +154,7 @@ class ImportBatch(Base):
     __tablename__ = "import_batches"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('validating','invalid','validated','processing','active','failed','superseded')",
+            "status IN ('validating','invalid','validated','processing','active','inactive','failed')",
             name="ck_import_batches_status",
         ),
         CheckConstraint(

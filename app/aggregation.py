@@ -794,9 +794,28 @@ def _pagination_numbers(page, pages):
     return result
 
 
-def curation_quality(db, batch_id, limit=100):
+def _pagination_metadata(total, page, per_page):
+    pages = (total + per_page - 1) // per_page if total else 1
+    page = min(max(int(page or 1), 1), pages)
+    offset = (page - 1) * per_page
+    return {
+        "page": page,
+        "pages": pages,
+        "per_page": per_page,
+        "total": total,
+        "start": offset + 1 if total else 0,
+        "end": min(offset + per_page, total),
+        "has_previous": page > 1,
+        "has_next": page < pages,
+        "page_numbers": _pagination_numbers(page, pages),
+        "offset": offset,
+    }
+
+
+def curation_quality(db, batch_id, pages=None, per_page=10):
     """Return batch-scoped curation metrics and audit-friendly review tables."""
-    limit = min(max(int(limit or 100), 1), 250)
+    pages = pages or {}
+    per_page = per_page if per_page in (10, 25, 50) else 10
     summary = db.execute(
         """
         WITH satellite_counts AS (
@@ -827,6 +846,25 @@ def curation_quality(db, batch_id, limit=100):
         """,
         (batch_id,) * 10,
     ).fetchone()
+    summary = dict(summary)
+    pagination = {
+        "duplicate_groups": _pagination_metadata(
+            summary["duplicate_groups"], pages.get("duplicate_groups", 1), per_page
+        ),
+        "incomplete_identity": _pagination_metadata(
+            summary["incomplete_identity_records"],
+            pages.get("incomplete_identity", 1),
+            per_page,
+        ),
+        "satellites": _pagination_metadata(
+            summary["unique_satellites"], pages.get("satellites", 1), per_page
+        ),
+        "multi_satellite": _pagination_metadata(
+            summary["multiple_satellite_registrants"],
+            pages.get("multi_satellite", 1),
+            per_page,
+        ),
+    }
 
     duplicate_groups = db.execute(
         """
@@ -840,9 +878,13 @@ def curation_quality(db, batch_id, limit=100):
         WHERE cr.batch_id = ? AND cr.source_registrant_count > 1
         GROUP BY cr.id
         ORDER BY cr.source_registrant_count DESC, cr.dedupe_key
-        LIMIT ?
+        LIMIT ? OFFSET ?
         """,
-        (batch_id, limit),
+        (
+            batch_id,
+            per_page,
+            pagination["duplicate_groups"]["offset"],
+        ),
     ).fetchall()
 
     incomplete = db.execute(
@@ -856,9 +898,13 @@ def curation_quality(db, batch_id, limit=100):
         JOIN registrants raw ON raw.id = source.registrant_id
         WHERE cr.batch_id = ? AND cr.dedupe_complete = 0
         ORDER BY cr.id
-        LIMIT ?
+        LIMIT ? OFFSET ?
         """,
-        (batch_id, limit),
+        (
+            batch_id,
+            per_page,
+            pagination["incomplete_identity"]["offset"],
+        ),
     ).fetchall()
 
     satellites = db.execute(
@@ -874,9 +920,9 @@ def curation_quality(db, batch_id, limit=100):
         WHERE s.batch_id = ?
         GROUP BY s.id
         ORDER BY curated_registrants DESC, s.name COLLATE NOCASE
-        LIMIT ?
+        LIMIT ? OFFSET ?
         """,
-        (batch_id, limit),
+        (batch_id, per_page, pagination["satellites"]["offset"]),
     ).fetchall()
 
     multi_satellite = db.execute(
@@ -892,13 +938,13 @@ def curation_quality(db, batch_id, limit=100):
         GROUP BY cr.id
         HAVING COUNT(link.satellite_id) > 1
         ORDER BY satellite_count DESC, cr.last_name COLLATE NOCASE
-        LIMIT ?
+        LIMIT ? OFFSET ?
         """,
-        (batch_id, limit),
+        (batch_id, per_page, pagination["multi_satellite"]["offset"]),
     ).fetchall()
 
     return {
-        "summary": dict(summary),
+        "summary": summary,
         "duplicate_groups": [dict(row) for row in duplicate_groups],
         "incomplete_identity": [dict(row) for row in incomplete],
         "satellites": [
@@ -923,7 +969,10 @@ def curation_quality(db, batch_id, limit=100):
             }
             for row in multi_satellite
         ],
-        "display_limit": limit,
+        "pagination": {
+            key: {name: value for name, value in metadata.items() if name != "offset"}
+            for key, metadata in pagination.items()
+        },
     }
 
 

@@ -81,7 +81,7 @@ target produces an unconfigured progress state.
 | `id` | INTEGER | Primary key |
 | `event_id` | INTEGER | FK to `events`, cascade delete |
 | `event_slug`, `event_name` | VARCHAR | Source Event identity |
-| `status` | VARCHAR | `validating`, `invalid`, `validated`, `processing`, `active`, `failed`, or `superseded` |
+| `status` | VARCHAR | `validating`, `invalid`, `validated`, `processing`, `active`, `inactive`, or `failed` |
 | `created_at`, `processed_at`, `activated_at` | DATETIME | Lifecycle timestamps |
 | `error_message` | TEXT | Nullable sanitized failure message |
 
@@ -309,6 +309,11 @@ Deleting an Event cascades to its batches. Deleting a batch cascades to its raw
 and curated children. Rebuilding one batch deletes and replaces only that
 batch's derived records. Satellite Dataset mappings with matching normalized
 identities are restored around that rebuild.
+
+Processed inactive batches remain eligible for activation, allowing the active
+dashboard dataset to switch in either direction through import history. The web
+application prevents deletion of the active batch and restricts batch deletion
+to administrators.
 
 Indexes cover active-batch resolution, batch/type/check-in dashboard counts,
 common administrative status and gender filters, dedupe keys, mapping lookups

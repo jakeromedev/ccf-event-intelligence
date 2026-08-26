@@ -33,7 +33,7 @@ def main():
                 for row in db.execute(
                     """
                     SELECT id FROM import_batches
-                    WHERE event_id = ? AND status IN ('active', 'superseded')
+                    WHERE event_id = ? AND status IN ('active', 'inactive')
                     ORDER BY id
                     """,
                     (args.event_id,),

@@ -153,8 +153,9 @@
                     <button class="button" type="button" disabled>Cannot process</button>
                 {% elif selected['status'] == 'active' %}
                     <div><strong>Active dataset</strong><p>This batch currently drives the selected Event's dashboard.</p></div>
-                {% elif selected['status'] == 'superseded' %}
-                    <div><strong>Historical dataset</strong><p>This batch was replaced by a newer active import.</p></div>
+                {% elif selected['status'] == 'inactive' %}
+                    <div><strong>Available dataset</strong><p>This processed batch can be made active again without re-uploading its files.</p></div>
+                    <form action="{{ url_for('dashboard.activate_import', event_id=event['id'], batch_id=selected['id']) }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button primary" type="submit">Make Active</button></form>
                 {% elif selected['status'] == 'failed' %}
                     <div><strong>Processing failed</strong><p>The previous active dataset was preserved.</p></div>
                 {% else %}
@@ -214,7 +215,23 @@
                     <td><span class="batch-status {{ batch['status'] }}">{{ batch['status'] }}</span></td>
                     <td><span class="history-issue-count {{ 'has-errors' if batch['error_count'] else 'has-warnings' if batch['warning_count'] else '' }}">{{ batch['issue_count']|number if batch['issue_count'] else '—' }}</span></td>
                     <td>{{ batch['activated_at']|datetime_short if batch['activated_at'] else '—' }}</td>
-                    <td class="import-history-action"><a class="button secondary compact" href="{{ url_for('dashboard.event_imports', event_id=event['id'], batch=batch['id'], q=history.filters.query, status=history.filters.status, page=history.pagination.page, per_page=history.pagination.per_page, sort=history.filters.sort, direction=history.filters.direction) }}">View Details</a></td>
+                    <td class="import-history-action">
+                        <div class="import-history-actions">
+                            <a class="button secondary compact" href="{{ url_for('dashboard.event_imports', event_id=event['id'], batch=batch['id'], q=history.filters.query, status=history.filters.status, page=history.pagination.page, per_page=history.pagination.per_page, sort=history.filters.sort, direction=history.filters.direction) }}">View</a>
+                            {% if batch['status'] == 'inactive' %}
+                                <form action="{{ url_for('dashboard.activate_import', event_id=event['id'], batch_id=batch['id']) }}" method="post">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button class="button primary compact" type="submit">Activate</button>
+                                </form>
+                            {% endif %}
+                            {% if can_manage_import_batches and batch['status'] not in ('active', 'processing', 'validating') %}
+                                <form action="{{ url_for('dashboard.delete_import', event_id=event['id'], batch_id=batch['id']) }}" method="post" onsubmit="return confirm('Permanently delete Batch #{{ batch['id'] }} and all of its stored data?');">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button class="button danger compact" type="submit">Delete</button>
+                                </form>
+                            {% endif %}
+                        </div>
+                    </td>
                 </tr>
             {% else %}
                 <tr><td colspan="9" class="empty-table">

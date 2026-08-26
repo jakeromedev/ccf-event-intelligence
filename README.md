@@ -10,6 +10,7 @@ A privacy-conscious, event-based dashboard for importing CCF Generated Tickets, 
 - Deterministic, batch-scoped unique-person curation with complete raw-source traceability
 - Conservative satellite normalization with source-variation auditing and multi-satellite support
 - Event management with isolated import history and one active batch per Event
+- Switchable processed import batches with administrator-controlled batch deletion
 - Event-scoped Event Date and Participant Target settings
 - Unique participant, unique volunteer, raw-registration, target, progress, and remaining-slot metrics
 - Participant-only Gender, Life Stage, and event-date Age distributions with Unknown reconciliation

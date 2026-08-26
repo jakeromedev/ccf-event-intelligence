@@ -91,7 +91,7 @@ The module never searches for a globally active batch and never combines
 issues from different Events.
 
 The Data Quality page describes the active dashboard dataset. Issues attached
-to invalid, validated, failed, or superseded batches remain available through
+to invalid, validated, failed, or inactive batches remain available through
 the selected Event's Imports page and import history, but are not mixed into
 the active batch's Data Quality page.
 

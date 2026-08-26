@@ -3,12 +3,12 @@
 {% from "_page_header.html" import render_page_header %}
 
 {% macro quality_url(page_number) -%}
-{{ url_for('dashboard.event_quality', event_id=event['id'], q=quality.filters.query, severity=quality.filters.severity, category=quality.filters.category, entity=quality.filters.entity, page=page_number, per_page=quality.pagination.per_page, sort=quality.filters.sort, direction=quality.filters.direction) }}#quality-issues
+{{ url_for('dashboard.event_quality', event_id=event['id'], q=quality.filters.query, severity=quality.filters.severity, category=quality.filters.category, entity=quality.filters.entity, page=page_number, per_page=quality.pagination.per_page, sort=quality.filters.sort, direction=quality.filters.direction, duplicate_page=curation.pagination.duplicate_groups.page, incomplete_page=curation.pagination.incomplete_identity.page, satellite_page=curation.pagination.satellites.page, multiple_page=curation.pagination.multi_satellite.page) }}#quality-issues
 {%- endmacro %}
 
 {% macro sort_url(field) -%}
 {% set next_direction = 'asc' if quality.filters.sort != field or quality.filters.direction == 'desc' else 'desc' %}
-{{ url_for('dashboard.event_quality', event_id=event['id'], q=quality.filters.query, severity=quality.filters.severity, category=quality.filters.category, entity=quality.filters.entity, page=1, per_page=quality.pagination.per_page, sort=field, direction=next_direction) }}#quality-issues
+{{ url_for('dashboard.event_quality', event_id=event['id'], q=quality.filters.query, severity=quality.filters.severity, category=quality.filters.category, entity=quality.filters.entity, page=1, per_page=quality.pagination.per_page, sort=field, direction=next_direction, duplicate_page=curation.pagination.duplicate_groups.page, incomplete_page=curation.pagination.incomplete_identity.page, satellite_page=curation.pagination.satellites.page, multiple_page=curation.pagination.multi_satellite.page) }}#quality-issues
 {%- endmacro %}
 
 {% macro sort_indicator(field) -%}
@@ -17,6 +17,30 @@
 
 {% macro curated_identity(item) -%}
 {{ item.last_name or 'Last name unavailable' }} / {{ item.birth_month or '—' }} / {{ item.birth_year or '—' }} / {{ item.gender|title if item.gender else '—' }}
+{%- endmacro %}
+
+{% macro curation_url(table, page_number, anchor) -%}
+{% set duplicate_page = page_number if table == 'duplicate_groups' else curation.pagination.duplicate_groups.page %}
+{% set incomplete_page = page_number if table == 'incomplete_identity' else curation.pagination.incomplete_identity.page %}
+{% set satellite_page = page_number if table == 'satellites' else curation.pagination.satellites.page %}
+{% set multiple_page = page_number if table == 'multi_satellite' else curation.pagination.multi_satellite.page %}
+{{ url_for('dashboard.event_quality', event_id=event['id'], q=quality.filters.query, severity=quality.filters.severity, category=quality.filters.category, entity=quality.filters.entity, page=quality.pagination.page, per_page=quality.pagination.per_page, sort=quality.filters.sort, direction=quality.filters.direction, duplicate_page=duplicate_page, incomplete_page=incomplete_page, satellite_page=satellite_page, multiple_page=multiple_page) }}#{{ anchor }}
+{%- endmacro %}
+
+{% macro curation_pagination(table, anchor, description) -%}
+{% set pagination = curation.pagination[table] %}
+<footer class="curation-pagination satellite-pagination">
+    <p>Showing {{ pagination.start|number }}–{{ pagination.end|number }} of {{ pagination.total|number }} {{ description }}</p>
+    {% if pagination.pages > 1 %}
+        <nav aria-label="{{ description|title }} pages">
+            {% if pagination.has_previous %}<a href="{{ curation_url(table, pagination.page - 1, anchor) }}">Previous</a>{% else %}<span class="disabled">Previous</span>{% endif %}
+            {% for page_number in pagination.page_numbers %}
+                {% if page_number %}<a class="{{ 'selected' if page_number == pagination.page else '' }}" href="{{ curation_url(table, page_number, anchor) }}">{{ page_number }}</a>{% else %}<span class="ellipsis">…</span>{% endif %}
+            {% endfor %}
+            {% if pagination.has_next %}<a href="{{ curation_url(table, pagination.page + 1, anchor) }}">Next</a>{% else %}<span class="disabled">Next</span>{% endif %}
+        </nav>
+    {% endif %}
+</footer>
 {%- endmacro %}
 
 {% block title %}Data Quality · CCF Event Dashboard{% endblock %}
@@ -84,6 +108,7 @@
                 </tbody>
             </table>
         </div>
+        {{ curation_pagination('duplicate_groups', 'duplicate-groups', 'duplicate groups') }}
     </section>
 
     <section class="curation-panel panel" id="incomplete-identities">
@@ -109,6 +134,7 @@
                 </tbody>
             </table>
         </div>
+        {{ curation_pagination('incomplete_identity', 'incomplete-identities', 'incomplete identities') }}
     </section>
 
     <section class="curation-panel panel" id="satellite-curation">
@@ -134,6 +160,7 @@
                 </tbody>
             </table>
         </div>
+        {{ curation_pagination('satellites', 'satellite-curation', 'satellites') }}
     </section>
 
     <section class="curation-panel panel" id="multiple-satellites">
@@ -148,6 +175,7 @@
             {% endfor %}
             </tbody>
         </table></div>
+        {{ curation_pagination('multi_satellite', 'multiple-satellites', 'registrants') }}
     </section>
 
     <section class="quality-summary-heading">
@@ -184,6 +212,10 @@
         <form class="quality-filter-bar" method="get" action="{{ url_for('dashboard.event_quality', event_id=event['id']) }}#quality-issues">
             <input type="hidden" name="sort" value="{{ quality.filters.sort }}">
             <input type="hidden" name="direction" value="{{ quality.filters.direction }}">
+            <input type="hidden" name="duplicate_page" value="{{ curation.pagination.duplicate_groups.page }}">
+            <input type="hidden" name="incomplete_page" value="{{ curation.pagination.incomplete_identity.page }}">
+            <input type="hidden" name="satellite_page" value="{{ curation.pagination.satellites.page }}">
+            <input type="hidden" name="multiple_page" value="{{ curation.pagination.multi_satellite.page }}">
             <label class="quality-search">
                 <span class="visually-hidden">Search issues</span>
                 <input type="search" name="q" maxlength="100" value="{{ quality.filters.query }}" placeholder="Search issues...">

@@ -1,10 +1,12 @@
 from datetime import datetime
 from functools import wraps
+from pathlib import Path
 
 from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user
 from sqlalchemy.exc import IntegrityError
 
+from .auth import admin_required
 from .aggregation import (
     active_batch,
     curated_registrant_detail,
@@ -28,7 +30,7 @@ from .admin_tables import (
 )
 from .db import get_db
 from .import_history import IMPORT_HISTORY_STATUSES, import_history
-from .importer import process_batch, stage_upload_set, store_validation, validate_batch
+from .importer import activate_batch, process_batch, stage_upload_set, store_validation, validate_batch
 from .satellite_datasets import (
     create_satellite_dataset,
     delete_satellite_dataset,
@@ -84,6 +86,36 @@ def _satellite_dataset_redirect(event_id, dataset_id=None):
     if dataset_id is not None:
         parameters["edit_dataset"] = dataset_id
     return redirect(url_for("dashboard.event_overview", event_id=event_id, **parameters))
+
+
+def _remove_staged_batch_files(staged_paths):
+    """Remove only batch files contained by the configured staging directory."""
+    staging_root = Path(current_app.config["STAGING_DIR"]).resolve()
+    parent_directories = set()
+    for stored_path in staged_paths:
+        candidate = Path(stored_path).resolve()
+        try:
+            candidate.relative_to(staging_root)
+        except ValueError:
+            current_app.logger.warning(
+                "Skipped staged-file cleanup outside STAGING_DIR: %s", candidate
+            )
+            continue
+        try:
+            candidate.unlink(missing_ok=True)
+            parent_directories.add(candidate.parent)
+        except OSError:
+            current_app.logger.exception(
+                "Import batch was deleted, but staged-file cleanup failed for %s",
+                candidate,
+            )
+    for directory in sorted(parent_directories, key=lambda path: len(path.parts), reverse=True):
+        if directory == staging_root:
+            continue
+        try:
+            directory.rmdir()
+        except OSError:
+            pass
 
 
 @bp.get("/")
@@ -441,7 +473,25 @@ def event_quality(event_id):
         if batch
         else None
     )
-    curation_data = curation_quality(db, batch["id"]) if batch else None
+    curation_pages = {
+        "duplicate_groups": max(
+            request.args.get("duplicate_page", default=1, type=int) or 1, 1
+        ),
+        "incomplete_identity": max(
+            request.args.get("incomplete_page", default=1, type=int) or 1, 1
+        ),
+        "satellites": max(
+            request.args.get("satellite_page", default=1, type=int) or 1, 1
+        ),
+        "multi_satellite": max(
+            request.args.get("multiple_page", default=1, type=int) or 1, 1
+        ),
+    }
+    curation_data = (
+        curation_quality(db, batch["id"], pages=curation_pages, per_page=10)
+        if batch
+        else None
+    )
     return render_template(
         "data_quality.html",
         event=event,
@@ -605,6 +655,9 @@ def event_imports(event_id):
         files=files,
         issue_counts=issue_counts,
         issue_totals=issue_totals,
+        can_manage_import_batches=(
+            current_user.is_authenticated and current_user.is_admin
+        ),
     )
 
 
@@ -654,6 +707,87 @@ def process_import(event_id, batch_id):
 
     flash("Import processed successfully and is now this event's active dataset.", "success")
     return redirect(url_for("dashboard.event_overview", event_id=event_id))
+
+
+@bp.post("/events/<int:event_id>/imports/<int:batch_id>/activate")
+def activate_import(event_id, batch_id):
+    get_event_or_404(event_id)
+    db = get_db()
+    batch = db.execute(
+        "SELECT id FROM import_batches WHERE id = ? AND event_id = ?",
+        (batch_id, event_id),
+    ).fetchone()
+    if not batch:
+        abort(404)
+    try:
+        changed = activate_batch(db, event_id, batch_id)
+    except ValueError as exc:
+        flash(str(exc), "error")
+    except Exception:
+        current_app.logger.exception("Import batch activation failed.")
+        flash("The import batch could not be activated. The current dataset was preserved.", "error")
+    else:
+        flash(
+            "Batch #{} is already active.".format(batch_id)
+            if not changed
+            else "Batch #{} is now this Event's active dataset.".format(batch_id),
+            "success",
+        )
+    return redirect(
+        url_for("dashboard.event_imports", event_id=event_id, batch=batch_id)
+        + "#import-history"
+    )
+
+
+@bp.post("/events/<int:event_id>/imports/<int:batch_id>/delete")
+@admin_required
+def delete_import(event_id, batch_id):
+    get_event_or_404(event_id)
+    db = get_db()
+    batch = db.execute(
+        "SELECT * FROM import_batches WHERE id = ? AND event_id = ?",
+        (batch_id, event_id),
+    ).fetchone()
+    if not batch:
+        abort(404)
+    if batch["status"] == "active":
+        flash("Activate another batch before deleting the active dataset.", "error")
+        return redirect(
+            url_for("dashboard.event_imports", event_id=event_id, batch=batch_id)
+            + "#import-history"
+        )
+    if batch["status"] in ("processing", "validating"):
+        flash("A batch cannot be deleted while it is being processed or validated.", "error")
+        return redirect(
+            url_for("dashboard.event_imports", event_id=event_id, batch=batch_id)
+            + "#import-history"
+        )
+
+    staged_paths = [
+        row["staged_path"]
+        for row in db.execute(
+            "SELECT staged_path FROM import_files WHERE batch_id = ?", (batch_id,)
+        ).fetchall()
+        if row["staged_path"]
+    ]
+    try:
+        db.execute(
+            "DELETE FROM import_batches WHERE id = ? AND event_id = ?",
+            (batch_id, event_id),
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        current_app.logger.exception("Import batch deletion failed.")
+        flash("Batch #{} could not be deleted.".format(batch_id), "error")
+        return redirect(
+            url_for("dashboard.event_imports", event_id=event_id, batch=batch_id)
+            + "#import-history"
+        )
+
+    _remove_staged_batch_files(staged_paths)
+    flash("Batch #{} and its stored data were deleted.".format(batch_id), "success")
+    return redirect(url_for("dashboard.event_imports", event_id=event_id) + "#import-history")
 
 
 @bp.get("/satellites")

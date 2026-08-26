@@ -3,7 +3,7 @@ IMPORT_HISTORY_STATUSES = (
     "validated",
     "invalid",
     "failed",
-    "superseded",
+    "inactive",
     "processing",
     "validating",
 )

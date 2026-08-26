@@ -147,6 +147,12 @@ def _coerce_row(table, table_object, row):
             value = row["event_id"] if row["status"] == "active" else None
         else:
             value = row[column.name]
+        if (
+            table == "import_batches"
+            and column.name == "status"
+            and value == "superseded"
+        ):
+            value = "inactive"
         if isinstance(column.type, DateTime):
             value = _parse_datetime(value, table, column.name)
         elif isinstance(column.type, Date):

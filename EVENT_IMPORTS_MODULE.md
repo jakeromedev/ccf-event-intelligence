@@ -39,7 +39,7 @@ Open an Event's Imports page
   → review file totals, errors, and warnings
   → process a validated batch
   → normalized records are inserted in one transaction
-  → the previous active batch for that Event is superseded
+  → the previous active batch for that Event becomes inactive and remains switchable
   → the new batch becomes active
 ```
 
@@ -53,6 +53,8 @@ If validation or processing fails, the Event's previous active dataset remains a
 | `GET` | `/events/<event_id>/imports?batch=<batch_id>` | Shows one batch's file and issue summary; returns `404` if the batch belongs to another Event |
 | `POST` | `/events/<event_id>/imports/validate` | Requires all three uploads, stages them, validates them, and stores the result |
 | `POST` | `/events/<event_id>/imports/<batch_id>/process` | Processes and activates a validated batch owned by the Event |
+| `POST` | `/events/<event_id>/imports/<batch_id>/activate` | Switches a previously processed inactive batch back to active |
+| `POST` | `/events/<event_id>/imports/<batch_id>/delete` | Permanently deletes a non-active batch and its stored data; administrator only |
 
 The legacy unscoped `/imports` URL redirects to the Events page.
 
@@ -200,8 +202,8 @@ Possible persisted states are:
 | `validated` | Validation passed and the batch is eligible for processing |
 | `processing` | Normalized records are being inserted |
 | `active` | The batch currently drives the selected Event's dashboard |
+| `inactive` | A processed batch that can be switched back to active without re-uploading |
 | `failed` | Processing raised an exception |
-| `superseded` | A newer batch became active for the same Event |
 
 The database enforces at most one active batch per Event with a unique stored
 generated `active_event_id` that is non-NULL only for `active` rows.
@@ -231,7 +233,7 @@ Only a batch with status `validated` can be processed. Processing:
 4. Inserts normalized buyer, ticket, and registrant rows.
 5. Classifies affiliation and computes ticket/check-in flags.
 6. Adds processing-time data-quality warnings.
-7. Marks the Event's existing active batch `superseded`.
+7. Marks the Event's existing active batch `inactive`.
 8. Marks the new batch `active` and records processing/activation timestamps.
 9. Commits the complete transaction.
 
@@ -272,6 +274,8 @@ The Imports page provides:
 - a per-file validation summary;
 - compact totals for errors, warnings, and relationship issues;
 - a Process and Activate action only for `validated` batches;
+- an Activate action for every processed `inactive` batch;
+- administrator-only deletion for non-active, non-processing batches;
 - a disabled processing action for `invalid` batches;
 - Event-scoped import history with batch, source Event, compact file/record totals, status, issues, and timestamps;
 - case-insensitive search and supported-status filtering;

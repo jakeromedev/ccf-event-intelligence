@@ -306,6 +306,89 @@ class AuthenticationTests(unittest.TestCase):
                 ),
             )
 
+    def test_only_admin_can_delete_non_active_import_batches(self):
+        _, admin_password = self.initialize_admin()
+        self.create_user("normal-operator")
+        with self.app.app_context():
+            db = get_db()
+            event_id = db.execute(
+                "INSERT INTO events (name) VALUES ('Deletion Test Event')"
+            ).lastrowid
+            inactive_batch = db.execute(
+                """
+                INSERT INTO import_batches (
+                    event_id, event_slug, event_name, status, processed_at, activated_at
+                ) VALUES (?, 'deletion-test', 'Deletion Test Event', 'inactive',
+                          CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """,
+                (event_id,),
+            ).lastrowid
+            active_batch_id = db.execute(
+                """
+                INSERT INTO import_batches (
+                    event_id, event_slug, event_name, status, active_event_id,
+                    processed_at, activated_at
+                ) VALUES (?, 'deletion-test', 'Deletion Test Event', 'active', ?,
+                          CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """,
+                (event_id, event_id),
+            ).lastrowid
+            staged_file = Path(self.app.config["STAGING_DIR"]) / "delete-me" / "tickets.csv"
+            staged_file.parent.mkdir(parents=True, exist_ok=True)
+            staged_file.write_text("header\n", encoding="utf-8")
+            db.execute(
+                """
+                INSERT INTO import_files (
+                    batch_id, export_type, filename, staged_path, status
+                ) VALUES (?, 'tickets', 'tickets.csv', ?, 'valid')
+                """,
+                (inactive_batch, str(staged_file)),
+            )
+            db.commit()
+
+        imports_path = "/events/{}/imports".format(event_id)
+        self.login("normal-operator", "StrongPassword12!")
+        normal_page = self.client.get(imports_path)
+        self.assertNotIn(b">Delete</button>", normal_page.data)
+        token = self.csrf(imports_path)
+        denied = self.client.post(
+            "/events/{}/imports/{}/delete".format(event_id, inactive_batch),
+            data={"csrf_token": token},
+        )
+        self.assertEqual(403, denied.status_code)
+        self.logout()
+
+        self.login("admin", admin_password)
+        admin_page = self.client.get(imports_path)
+        self.assertIn(b">Delete</button>", admin_page.data)
+        token = self.csrf(imports_path)
+        active_denied = self.client.post(
+            "/events/{}/imports/{}/delete".format(event_id, active_batch_id),
+            data={"csrf_token": token},
+            follow_redirects=True,
+        )
+        self.assertIn(b"Activate another batch before deleting", active_denied.data)
+
+        deleted = self.client.post(
+            "/events/{}/imports/{}/delete".format(event_id, inactive_batch),
+            data={"csrf_token": token},
+            follow_redirects=True,
+        )
+        self.assertIn(b"and its stored data were deleted", deleted.data)
+        self.assertFalse(staged_file.exists())
+        with self.app.app_context():
+            db = get_db()
+            self.assertIsNone(
+                db.execute(
+                    "SELECT id FROM import_batches WHERE id = ?", (inactive_batch,)
+                ).fetchone()
+            )
+            self.assertIsNotNone(
+                db.execute(
+                    "SELECT id FROM import_batches WHERE id = ?", (active_batch_id,)
+                ).fetchone()
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

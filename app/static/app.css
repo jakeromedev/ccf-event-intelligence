@@ -329,7 +329,7 @@ td small { display: block; margin-top: 3px; color: var(--muted); }
 .slot-status.validating, .batch-status.processing, .batch-status.validating { color: var(--warning); background: var(--warning-soft); }
 .slot-status.invalid, .batch-status.invalid, .batch-status.failed { color: var(--danger); background: var(--danger-soft); }
 .batch-status.validated { color: var(--teal-deep); background: var(--teal-soft); }
-.batch-status.superseded { color: #687a83; background: #edf3f4; }
+.batch-status.inactive { color: #687a83; background: #edf3f4; }
 .batch-status.upload-required { color: var(--warning); background: var(--warning-soft); }
 .button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 9px 16px; border: 1px solid transparent; border-radius: 9px; font-size: 10px; font-weight: 600; cursor: pointer; transition: .18s ease; }
 .button.primary { color: #fff; background: linear-gradient(135deg, var(--teal), var(--teal-dark)); box-shadow: 0 6px 16px rgba(0,125,138,.17); }
@@ -979,7 +979,7 @@ button.quality-summary-card:focus-visible { outline: 3px solid rgba(0, 166, 178,
 .import-history-table th:nth-child(6) { width: 105px; }
 .import-history-table th:nth-child(7) { width: 70px; }
 .import-history-table th:nth-child(8) { width: 142px; }
-.import-history-table th:nth-child(9) { width: 108px; }
+.import-history-table th:nth-child(9) { width: 210px; }
 .import-history-table th a { display: inline-flex; align-items: center; gap: 4px; }
 .import-history-table th small { display: block; margin-top: 2px; font-size: 6px; letter-spacing: .02em; }
 .import-history-table td { padding: 9px 11px; font-size: 9px; }
@@ -993,7 +993,9 @@ button.quality-summary-card:focus-visible { outline: 3px solid rgba(0, 166, 178,
 .history-issue-count.has-warnings { color: var(--warning); }
 .history-issue-count.has-errors { color: var(--danger); }
 .import-history-action { text-align: right; }
-.import-history-action .button { min-height: 30px; white-space: nowrap; }
+.import-history-actions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
+.import-history-actions form { margin: 0; }
+.import-history-action .button { min-height: 30px; padding-inline: 10px; white-space: nowrap; }
 .import-history-table .empty-table strong,
 .import-history-table .empty-table span,
 .import-history-table .empty-table a { display: block; }

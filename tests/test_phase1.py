@@ -757,7 +757,7 @@ class EventIntegrationTests(unittest.TestCase):
             ).fetchone()
             self.assertEqual(second_batch, mapping["satellite_batch_id"])
             self.assertEqual(
-                "superseded",
+                "inactive",
                 db.execute("SELECT status FROM import_batches WHERE id = ?", (first_batch,)).fetchone()[0],
             )
 
@@ -1011,7 +1011,7 @@ class EventIntegrationTests(unittest.TestCase):
             self.assertEqual(0, overview["remaining_slots"])
             self.assertTrue(overview["target_exceeded"])
 
-    def test_new_event_a_batch_supersedes_only_event_a(self):
+    def test_new_event_a_batch_inactivates_only_event_a(self):
         first_a = self._process(self.event_a)
         active_b = self._process(self.event_b)
         self._write_fixture(registrant_limit=2)
@@ -1021,10 +1021,53 @@ class EventIntegrationTests(unittest.TestCase):
                 row["id"]: row["status"]
                 for row in get_db().execute("SELECT id, status FROM import_batches")
             }
-            self.assertEqual("superseded", statuses[first_a])
+            self.assertEqual("inactive", statuses[first_a])
             self.assertEqual("active", statuses[second_a])
             self.assertEqual("active", statuses[active_b])
             self.assertEqual(active_b, active_batch(get_db(), self.event_b)["id"])
+
+    def test_inactive_processed_batches_can_be_switched_active_again(self):
+        first_batch = self._process(self.event_a)
+        self._write_fixture(registrant_limit=2)
+        second_batch = self._process(self.event_a)
+
+        with self.app.app_context():
+            self.assertEqual(
+                2,
+                event_dashboard_metrics(get_db(), self.event_a)["overview"]["participants"],
+            )
+        client = self.app.test_client()
+        switched = client.post(
+            "/events/{}/imports/{}/activate".format(self.event_a, first_batch)
+        )
+        self.assertEqual(302, switched.status_code)
+
+        with self.app.app_context():
+            statuses = {
+                row["id"]: row["status"]
+                for row in get_db().execute(
+                    "SELECT id, status FROM import_batches WHERE event_id = ?",
+                    (self.event_a,),
+                )
+            }
+            self.assertEqual("active", statuses[first_batch])
+            self.assertEqual("inactive", statuses[second_batch])
+            self.assertEqual(first_batch, active_batch(get_db(), self.event_a)["id"])
+            self.assertEqual(
+                5,
+                event_dashboard_metrics(get_db(), self.event_a)["overview"]["participants"],
+            )
+
+        self.assertEqual(
+            404,
+            client.post(
+                "/events/{}/imports/{}/activate".format(self.event_b, first_batch)
+            ).status_code,
+        )
+        page = client.get("/events/{}/imports".format(self.event_a))
+        self.assertIn(b'<span class="batch-status inactive">inactive</span>', page.data)
+        self.assertIn(b">Activate</button>", page.data)
+        self.assertNotIn(b"superseded", page.data.lower())
 
     def test_failed_event_a_processing_keeps_both_previous_active_batches(self):
         active_a = self._process(self.event_a)
@@ -1280,6 +1323,46 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertIn(b"No data-quality issues were recorded", clean_page.data)
         self.assertIn(b">Clean<", clean_page.data)
 
+    def test_data_quality_curation_tables_paginate_ten_rows_independently(self):
+        batch_id = self._process(self.event_a)
+        self._add_satellite_ranking_fixture(batch_id)
+
+        with self.app.app_context():
+            first_page = curation_quality(get_db(), batch_id)
+            satellite_pagination = first_page["pagination"]["satellites"]
+            self.assertGreater(satellite_pagination["total"], 10)
+            self.assertEqual(10, satellite_pagination["per_page"])
+            self.assertEqual(10, len(first_page["satellites"]))
+            self.assertTrue(satellite_pagination["has_next"])
+
+            second_page = curation_quality(
+                get_db(), batch_id, pages={"satellites": 2}
+            )
+            self.assertEqual(2, second_page["pagination"]["satellites"]["page"])
+            self.assertNotEqual(
+                [item["id"] for item in first_page["satellites"]],
+                [item["id"] for item in second_page["satellites"]],
+            )
+            for metadata in first_page["pagination"].values():
+                self.assertEqual(10, metadata["per_page"])
+
+        client = self.app.test_client()
+        default_page = client.get(
+            "/events/{}/data-quality".format(self.event_a)
+        )
+        self.assertEqual(200, default_page.status_code)
+        self.assertEqual(
+            10, default_page.data.count(b'data-curation-kind="satellite"')
+        )
+        self.assertIn(b"satellite_page=2", default_page.data)
+        self.assertIn(b"#satellite-curation", default_page.data)
+
+        second_page = client.get(
+            "/events/{}/data-quality?satellite_page=2".format(self.event_a)
+        )
+        self.assertEqual(200, second_page.status_code)
+        self.assertIn(b'value="2"', second_page.data)
+
     def test_data_quality_summary_cards_open_scoped_filterable_issue_details(self):
         batch_a = self._process(self.event_a)
         self._process(self.event_b)
@@ -1396,7 +1479,7 @@ class EventIntegrationTests(unittest.TestCase):
 
     def test_import_history_filter_search_sort_and_pagination(self):
         with self.app.app_context():
-            statuses = ("validated", "invalid", "failed", "superseded", "processing", "validating")
+            statuses = ("validated", "invalid", "failed", "inactive", "processing", "validating")
             batch_ids = []
             for index in range(1, 15):
                 status = statuses[(index - 1) % len(statuses)]
@@ -1476,7 +1559,7 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertIn(b"q=source", page.data)
         self.assertIn(b"sort=batch_id", page.data)
         self.assertIn(b"direction=asc", page.data)
-        self.assertEqual(4, page.data.count(b"View Details"))
+        self.assertEqual(4, page.data.count(b">View</a>"))
         self.assertNotIn(b"Private Other Event", page.data)
 
         filtered = client.get(
@@ -1854,7 +1937,7 @@ class MigrationTests(unittest.TestCase):
                     text(
                         "INSERT INTO import_batches "
                         "(id, event_id, event_slug, event_name, status, activated_at) "
-                        "VALUES (10, 7, 'unicode-event', 'Événement 家庭', 'superseded', "
+                        "VALUES (10, 7, 'unicode-event', 'Événement 家庭', 'inactive', "
                         "'2026-08-20 10:00:00')"
                     )
                 )
