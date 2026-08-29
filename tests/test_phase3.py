@@ -240,6 +240,69 @@ class AnalyticsIntegrationTests(unittest.TestCase):
             self.assertEqual(5, complementary["population"]["registered"]["count"])
             self.assertIsNone(complementary["population"]["checked_in"]["count"])
             self.assertIsNone(complementary["population"]["not_checked_in"]["count"])
+            combined = event_analytics(
+                get_db(),
+                self.event_a,
+                {"gender": "female", "payment_status": "Payment Validated"},
+                threshold=2,
+            )
+            self.assertIsNone(combined["population"]["registered"]["count"])
+            self.assertIsNone(combined["population"]["attendance_percentage"])
+
+    def test_privacy_applies_to_active_trend_and_comparison_apis(self):
+        self._process(self.event_a)
+        self._process(self.event_b)
+        self.app.config["ANALYTICS_MIN_GROUP_SIZE"] = 6
+        client = self.app.test_client()
+
+        active = client.get(
+            "/api/events/{}/analytics".format(self.event_a)
+        ).get_json()
+        self.assertIsNone(active["population"]["registered"]["count"])
+        self.assertIsNone(active["population"]["checked_in"]["count"])
+        self.assertIsNone(active["population"]["not_checked_in"]["count"])
+        self.assertIsNone(active["population"]["attendance_percentage"])
+        for distribution in active["distributions"].values():
+            for item in distribution["items"]:
+                self.assertIsNone(item["count"])
+                self.assertIsNone(item["percentage"])
+
+        trends = client.get(
+            "/api/events/{}/analytics/trends".format(self.event_a)
+        ).get_json()
+        self.assertTrue(trends["items"])
+        for item in trends["items"]:
+            self.assertIsNone(item["registered"]["count"])
+            self.assertIsNone(item["checked_in"]["count"])
+            self.assertIsNone(item["attendance_percentage"])
+            self.assertIsNone(item["registered_bar_percentage"])
+
+        comparison = client.get(
+            "/api/analytics/compare?events={},{}".format(self.event_a, self.event_b)
+        ).get_json()
+        for item in comparison["events"]:
+            self.assertIsNone(item["population"]["registered"]["count"])
+            self.assertIsNone(item["population"]["checked_in"]["count"])
+            self.assertIsNone(item["population"]["not_checked_in"]["count"])
+            self.assertIsNone(item["population"]["attendance_percentage"])
+
+    def test_unapproved_download_surfaces_remain_absent(self):
+        self._process(self.event_a)
+        client = self.app.test_client()
+        for path in (
+            "/events/{}/analytics/export".format(self.event_a),
+            "/api/events/{}/analytics/export".format(self.event_a),
+            "/events/{}/reports".format(self.event_a),
+            "/api/events/{}/reports".format(self.event_a),
+            "/events/{}/analytics/export/rows".format(self.event_a),
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(404, client.get(path).status_code)
+        endpoints = {rule.endpoint for rule in self.app.url_map.iter_rules()}
+        self.assertFalse(any("export" in endpoint for endpoint in endpoints))
+        page = client.get("/events/{}/analytics".format(self.event_a))
+        self.assertNotIn(b"Download", page.data)
+        self.assertNotIn(b"text/csv", page.data)
 
     def test_api_is_aggregate_event_scoped_and_contains_no_raw_pii(self):
         self._process(self.event_a)

@@ -81,7 +81,9 @@ boundary as the normal Event dashboard. They expose aggregates only and require
 explicit Event scope. The current application has no per-user Event ACL, so an
 approved operator can view every normal Event dashboard. Phase 3 introduces no
 row-level export permission: downloadable reports remain disabled pending the
-separate decision in `PHASE_3_DECISIONS.md`. Admin Tables remains administrator-only.
+separate decision in `PHASE_3_DECISIONS.md`. `REPORTING.md` records the required
+future server-side permission and safety contract. Admin Tables remains
+administrator-only and does not imply export authority.
 
 ## Security controls
 

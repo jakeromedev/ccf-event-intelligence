@@ -195,3 +195,4 @@ their identity provider through `ADMIN_TABLES_AUTHORIZER`.
 - [Target-environment security validation](TARGET_SECURITY_VALIDATION.md)
 - [Phase 3 decision register](PHASE_3_DECISIONS.md)
 - [Advanced Analytics metric reference](ANALYTICS_REFERENCE.md)
+- [Phase 3 reporting and export governance](REPORTING.md)

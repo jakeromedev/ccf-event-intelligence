@@ -24,17 +24,21 @@ matched a checked-in Generated Ticket.
 
 ## Implemented metric definitions
 
-| Metric | Definition | Source fields | Unknown/conflict behavior |
-| --- | --- | --- | --- |
-| Registered Participants | Count of eligible curated participants in the selected snapshot after filters. | `curated_registrants.registration_type` | Not applicable. |
-| Checked In | Eligible curated participants with Phase 1 `checked_in = true`. | `curated_registrants.checked_in`, derived from Generated Tickets `Check-in Date Time` | Missing check-in is Not Checked In. |
-| Not Checked In | Registered Participants minus Checked In. | Same as above. | Always reconciles; never negative. |
-| Attendance Rate | `Checked In / Registered Participants × 100`; withheld for suppressed numerator/denominator and absent when denominator is zero. | Same as above. | No division by zero. |
-| Payment Status | Distribution of Generated Ticket `Payment Status`; Buyer `Payment Status` is fallback only when Ticket status is blank. | Generated Tickets `Payment Status`; Buyers `Payment Status` | Blank is Unknown; disagreeing merged sources are Conflicting / multiple values. |
-| Payment Method | Distribution of the matched Buyer's payment method. | Buyers `Payment Method` | Blank/unmatched Buyer is Unknown; merged-source disagreement is Conflicting / multiple values. |
-| Occupation | Frequency of the structured Registrant occupation answer. No occupation taxonomy is inferred. | Registrants `Occupation` | Blank is Unknown; `Others` remains a source category. |
-| Dgroup | Dgroup Leader when membership=Yes and leadership=Yes; Dgroup Member when membership=Yes; Not in Dgroup when membership=No and leadership is not Yes. | Registrants `Are You Part Of A Discipleship Group`; `Are You Leading A Discipleship Group` | Both blank is Unknown; logically inconsistent answers are Conflicting / multiple values. |
-| Home Area | Frequency of the structured Home Area answer. Full addresses and free-text address parsing are not used. | Registrants `Home Area` | Blank is Unknown; `Others` remains a source category. |
+Every metric below uses the eligible curated-participant population defined
+above and applies the configured suppression policy to public counts and
+percentages.
+
+| Metric | Definition / formula | Source export and field | Normalization and Unknown behavior | Suppression | Limitations |
+| --- | --- | --- | --- | --- | --- |
+| Registered Participants | Count of eligible curated participants after filters. | Derived curation — `curated_registrants.registration_type` | Only `participant`; not applicable to Unknown. | A non-zero filtered total below threshold is withheld. | Curated identity is Event/batch scoped, not global. |
+| Checked In | Count with Phase 1 curated `checked_in = true`. | Generated Tickets — `Check-in Date Time`, through `curated_registrants.checked_in` | Missing check-in is Not Checked In; any checked-in source makes the curated person checked in. | Small and complementary values are withheld. | Uses the imported snapshot, not live gate state. |
+| Not Checked In | `Registered Participants - Checked In`. | Same as Checked In | Never negative; zero denominator is safe. | Withheld with its complement when subtraction could disclose a small value. | Same snapshot limitation as Checked In. |
+| Attendance Rate | `Checked In / Registered Participants × 100`; absent at zero denominator. | Same as Checked In | No separate attendance definition. | Withheld if numerator or denominator is suppressed. | Rounded only for presentation. |
+| Payment Status | Count/eligible total by status. Ticket value is authoritative for this descriptive distribution; Buyer status is fallback only when Ticket is blank. | Generated Tickets — `Payment Status`; Buyers — `Payment Status` fallback | Trim/case normalization of observed statuses; blank is Unknown; merged-source disagreement is Conflicting / multiple values. | Small labels combine; count/percentage may be withheld. | `Payment Validated` is not renamed Paid and has no approved revenue meaning. |
+| Payment Method | Count/eligible total by matched Buyer method. | Buyers — `Payment Method` | Conservative casing/spacing for observed methods; unmatched/blank is Unknown; merged-source disagreement is Conflicting / multiple values. | Small labels combine; count/percentage may be withheld. | Buyer-level method may cover several tickets. |
+| Occupation | Count/eligible total by structured occupation answer; no inferred taxonomy. | Registrants — `Occupation` | Trim, whitespace/slash, and case normalization only; blank is Unknown; `Others` is retained. | Small labels combine; count/percentage may be withheld. | Free-text detail and `Occupation Others` are not exposed. |
+| Dgroup | Leader when member=Yes and leader=Yes; Member when member=Yes; Not in Dgroup when member=No and leader is not Yes. | Registrants — `Are You Part Of A Discipleship Group`, `Are You Leading A Discipleship Group` | Explicit Yes/No only; both blank is Unknown; inconsistent/merged disagreement is Conflicting / multiple values. | Small labels combine; count/percentage may be withheld. | No membership inference from leader name, church, or other fields. |
+| Home Area | Count/eligible total by structured Home Area. | Registrants — `Home Area` | Trim/case normalization; blank is Unknown; `Others` retained. | Small labels combine; count/percentage may be withheld. | Full addresses, `Home Area Others`, and geocoding are excluded. |
 
 Payment labels retain the source business language. In particular, `Payment
 Validated` is not renamed `Paid`, because that business equivalence is not yet
@@ -137,13 +141,20 @@ and row-level downloads are not implemented. They are decision-gated in
 `PHASE_3_DECISIONS.md`. The presence of raw monetary columns is not an approved
 formula or currency definition.
 
+The inspected monetary candidate fields and required decision contract are in
+`PHASE_3_DECISIONS.md`. Actual and required future reporting behavior is in
+`REPORTING.md`. No monetary metric or download endpoint is part of the current
+API contract.
+
 ## Reconciliation and testing
 
 The service returns explicit reconciliation flags for distribution totals and
 `checked_in <= registered`. Automated coverage verifies conservative
 normalization, Unknown values, combined filters, rejected invalid filters,
 small-group suppression, absence of raw PII in APIs, Event isolation,
-chronological snapshot behavior, and explicit Event comparison.
+chronological snapshot behavior, explicit Event comparison, suppression on
+active/trend/comparison endpoints, complementary-differencing protection, and
+the absence of unapproved download routes.
 
 No Phase 3 schema change is required: all classifications are derived at query
 time from immutable imported data and the existing curation layer.

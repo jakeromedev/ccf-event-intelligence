@@ -22,12 +22,12 @@ the module documentation.
 |---|---|---|
 | Phase 1 | Complete | Event imports, curation, dashboard analytics, Data Quality, Admin Tables, and authentication |
 | Phase 2 | Ready for Production Acceptance | Engineering and hosted release gates pass; product decisions and target-environment acceptance remain open |
-| Phase 3 | Proposed | Advanced analytics, reporting, exports, and historical comparisons |
+| Phase 3 | In Progress | Advanced analytics, reporting, exports, and historical comparisons |
 | Phase 4 | Future/conditional | Data remediation workflows, advanced import modes, and scale automation |
 
-Phase 2 and later are proposed scopes. They are not approved schedules or
-delivery commitments until their decision items, owners, and acceptance
-criteria are agreed upon.
+Phase 3 engineering is in progress, but its unresolved product decisions are
+not approved schedules or delivery commitments. Phase 4 remains proposed and
+conditional.
 
 ---
 
@@ -270,6 +270,38 @@ revenue, downloads, final privacy policy, and product priorities remain decision
 - Ruff, Python compilation, production configuration/schema validation, local
   Gunicorn readiness, and graceful SIGTERM passed.
 - Hosted CI evidence is recorded only after the pushed workflow run completes.
+
+### Phase 3 completion-iteration evidence — 2026-08-30
+
+- The supplied monetary fields were audited without assigning accounting
+  meaning: Generated Tickets exposes `Price`, `Price Type`, `Price Name`, and
+  `Payment Status`; Buyers exposes `Gross Amount`, `Service Charge`, `Net
+  Amount`, `Amount Paid`, statuses/methods/references, and a blank discount
+  reference. No currency, refund amount/status, or explicit waiver amount was
+  found. The structured approval contract is in `PHASE_3_DECISIONS.md`.
+- Revenue remains disabled because Expected Amount, Paid Amount, Revenue,
+  discrepancy, refund, discount/waiver, and currency rules are not approved.
+- Downloadable aggregate and row-level reports remain disabled because export
+  roles and privacy policy are not approved. `REPORTING.md` documents the
+  required authorization, shared-service reconciliation, minimization,
+  filename, spreadsheet-injection, audit, and ownership controls.
+- Automated privacy coverage now exercises combined filters, active analytics,
+  historical trends, and cross-Event comparisons. A separate regression test
+  confirms that common download paths and UI controls remain absent while the
+  decision gate is open. These tests do not claim that an unimplemented export
+  has passed export-security acceptance.
+- SQLite: 82 tests passed locally on 2026-08-30.
+- Disposable MySQL 8.4: the same 82 tests passed locally on 2026-08-30.
+- A fresh disposable MySQL schema upgraded through all four revisions to
+  `a9d3c7e5f102`; `alembic check` reported no new operations.
+- Ruff, Python compilation, production configuration/schema validation,
+  Gunicorn liveness/readiness, and graceful `SIGTERM` shutdown passed locally.
+- The previously pushed Phase 3 analytics foundation commit `d963c35` passed
+  hosted CI run `33264910728`. Hosted CI evidence for this iteration must be
+  recorded after its commit is pushed and the workflow actually completes.
+- No checklist box changed in this iteration: remaining Revenue, export, final
+  privacy-policy, and priority items are still product decisions rather than
+  engineering assumptions.
 
 ---
 
