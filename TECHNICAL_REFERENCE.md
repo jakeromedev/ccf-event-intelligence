@@ -52,6 +52,7 @@ committed template; `.env` files and local credentials are ignored by Git.
 | `CCF_PROXY_X_FOR`, `CCF_PROXY_X_PROTO`, `CCF_PROXY_X_HOST`, `CCF_PROXY_X_PORT`, `CCF_PROXY_X_PREFIX` | When behind trusted proxy | `0` | Exact trusted proxy hop counts; arbitrary forwarded headers are ignored at zero. |
 | `CCF_LOG_LEVEL`, `CCF_LOG_FORMAT` | No | Environment-driven | Staging/production default to `INFO` JSON stdout. |
 | `CCF_STANDARD_USER_MUTATIONS_ALLOWED` | After policy approval | Development/testing true; staging/production false | Controls standard-user Event settings/Satellite Dataset/import mutation; never changes admin-only deletion/Admin Tables/users. |
+| `CCF_ANALYTICS_MIN_GROUP_SIZE` | Policy approval pending | `5` | Withholds exact non-zero analytical groups below 1–100 configured records; the default is an engineering value, not approved policy. |
 | `CCF_REQUIRE_SCHEMA_CURRENT` | Production/staging mandatory | Enabled there | Verifies MySQL and exact Alembic head at startup/readiness. |
 | `CCF_DASHBOARD_PORT` | No | `5050` | Port used by `run.py`. |
 | `CCF_DASHBOARD_DEBUG` | Development only | `0` | Production refuses debug mode. |
@@ -74,6 +75,15 @@ See `.env.example` for the complete placeholder-only configuration. Production
 also refuses disabled authentication/CSRF/schema checks. The secret, database,
 staging path, cookie policy, logging, proxy trust, pool sizing, and limits are
 environment-driven.
+
+Phase 3 aggregate analytics live in `app/analytics.py` and are presented through
+a dedicated Event workspace plus aggregate JSON APIs. This service owns Event
+and active-batch scoping, source-field normalization, composable validated
+filters, privacy suppression, historical snapshot queries, and explicit
+cross-Event comparisons. `ANALYTICS_REFERENCE.md` is the metric contract and
+`PHASE_3_DECISIONS.md` records unresolved revenue, export, priority, and privacy
+policy decisions. No Phase 3 database migration is required for the current
+derived analytics.
 
 ## Database
 

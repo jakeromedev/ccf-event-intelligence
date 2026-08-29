@@ -3,7 +3,9 @@
 A privacy-conscious, event-based dashboard whose Phase 1 MVP is complete and
 whose Phase 2 production-readiness foundations are implemented. Production
 acceptance remains gated by the unresolved decisions and target-environment
-verification in `PHASE_2_DECISIONS.md` and `PRODUCTION_ACCEPTANCE.md`.
+verification in `PHASE_2_DECISIONS.md` and `PRODUCTION_ACCEPTANCE.md`. Phase 3
+engineering is in progress with source-supported aggregate analytics; revenue,
+downloads, final privacy policy, and analytics priority remain decision-gated.
 
 ## Runtime architecture
 
@@ -38,6 +40,21 @@ isolated tests and reading the retained historical source during one-time transf
 - Separate import-quality and curation-quality reporting with duplicate/source drill-downs
 - Permission-protected Admin Tables for Registrants, Generated Tickets, and Buyers
 - Server-side Admin Table search, filters, sorting, pagination, column controls, and curated-source inspection
+
+## Phase 3 analytics implemented
+
+- Dedicated Event analytics workspace with bookmarkable, individually removable filters
+- Payment Status and Payment Method distributions using conservative source normalization
+- Occupation, Dgroup, and structured Home Area distributions
+- Registration-versus-check-in comparisons across source-supported dimensions
+- Historical active/inactive batch snapshot charts and accessible tables
+- Explicit aggregate comparison across 2–10 Events without global person matching
+- Configurable small-group suppression with secondary/complementary disclosure protection
+- Aggregate-only authenticated APIs; no Phase 3 row-level data endpoint
+
+See [Advanced Analytics metric reference](ANALYTICS_REFERENCE.md) for exact
+definitions and [Phase 3 decision register](PHASE_3_DECISIONS.md) for the
+revenue, export, priority, and privacy decisions that remain unresolved.
 
 ## MySQL development setup
 
@@ -176,3 +193,5 @@ their identity provider through `ADMIN_TABLES_AUTHORIZER`.
 - [Production acceptance and UAT](PRODUCTION_ACCEPTANCE.md)
 - [Phase 2 verification record](PHASE_2_VERIFICATION.md)
 - [Target-environment security validation](TARGET_SECURITY_VALIDATION.md)
+- [Phase 3 decision register](PHASE_3_DECISIONS.md)
+- [Advanced Analytics metric reference](ANALYTICS_REFERENCE.md)

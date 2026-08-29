@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% from "_page_header.html" import render_page_header %}
+
+{% macro count_value(value) -%}
+{{ value.display }}
+{%- endmacro %}
+
+{% block title %}Analytics · CCF Event Dashboard{% endblock %}
+
+{% block page_header %}
+{{ render_page_header('Advanced Analytics', event, active_batch, 'Composable, privacy-aware analytics over the active Event snapshot.', variant='workspace', header_class='analytics-header') }}
+{% endblock %}
+
+{% block content %}
+{% if not active_batch %}
+    {% include "_empty.html" %}
+{% else %}
+<aside class="analytics-privacy panel">
+    <strong>Privacy protection active</strong>
+    <span>Exact non-zero groups smaller than {{ analytics.privacy.minimum_group_size }} are withheld and small categories are combined.</span>
+</aside>
+
+<form class="analytics-filters panel" method="get">
+    <header><div><p class="eyebrow">Interactive filters</p><h2>Refine this Event</h2></div><a href="{{ url_for('dashboard.event_analytics_page', event_id=event['id']) }}">Clear all</a></header>
+    <div class="analytics-filter-grid">
+    {% for key, option in analytics.filter_options.items() %}
+        <label><span>{{ option.label }}</span>
+            <select name="{{ key }}">
+                <option value="">All</option>
+                {% for item in option['items'] %}<option value="{{ item.value }}" {{ 'selected' if analytics.filters.get(key) == item.value else '' }}>{{ item.label }}</option>{% endfor %}
+            </select>
+        </label>
+    {% endfor %}
+    </div>
+    <footer><button class="button primary" type="submit">Apply filters</button></footer>
+</form>
+
+{% if analytics.filters %}
+<div class="analytics-active-filters" aria-label="Active filters">
+    <strong>Active</strong>
+    {% for key, value in analytics.filters.items() %}
+        <a href="{{ removal_urls[key] }}" title="Remove {{ analytics.filter_options[key].label }} filter">{{ analytics.filter_options[key].label }}: {{ value }} <span>×</span></a>
+    {% endfor %}
+</div>
+{% endif %}
+
+<section class="analytics-summary-grid" aria-label="Filtered participation summary">
+    <article><span>Registered Participants</span><strong>{{ count_value(analytics.population.registered) }}</strong></article>
+    <article><span>Checked In</span><strong>{{ count_value(analytics.population.checked_in) }}</strong></article>
+    <article><span>Not Checked In</span><strong>{{ count_value(analytics.population.not_checked_in) }}</strong></article>
+    <article><span>Attendance Rate</span><strong>{{ analytics.population.attendance_percentage|percent if analytics.population.attendance_percentage is not none else 'Withheld' }}</strong></article>
+</section>
+
+<section class="analytics-section">
+    <header><div><p class="eyebrow">Payment and profile</p><h2>Participant distributions</h2></div><span>Revenue is not shown until its formula and currency are approved.</span></header>
+    <div class="analytics-panel-grid">
+    {% for key, title, description in (
+        ('payment_status', 'Payment Status', 'Ticket status; Buyer status is used only when the Ticket value is blank.'),
+        ('payment_method', 'Payment Method', 'Buyer export method, normalized only for casing and spacing.'),
+        ('occupation', 'Occupation', 'Registrant occupation labels without inferred categories.'),
+        ('dgroup', 'Dgroup', 'Membership and leadership from explicit Registrant answers.'),
+        ('home_area', 'Home Area', 'Structured Home Area field; full addresses are never used.')
+    ) %}
+    {% set distribution = analytics.distributions[key] %}
+    <article class="analytics-panel panel">
+        <header><h3>{{ title }}</h3><p>{{ description }}</p></header>
+        <div class="analytics-bars">
+        {% for item in distribution['items'] %}
+            <div><span class="analytics-bar-label">{{ item.label }}</span><span class="analytics-bar-track"><i style="width: {{ item.percentage if item.percentage is not none else 0 }}%"></i></span><strong>{{ item.display }}</strong><small>{{ item.percentage|percent if item.percentage is not none else 'Withheld' }}</small></div>
+        {% else %}<p class="analytics-empty">No participants match the active filters.</p>{% endfor %}
+        </div>
+        <table class="visually-hidden"><caption>{{ title }}</caption><thead><tr><th>Category</th><th>Count</th><th>Percentage</th></tr></thead><tbody>{% for item in distribution['items'] %}<tr><td>{{ item.label }}</td><td>{{ item.display }}</td><td>{{ item.percentage|percent if item.percentage is not none else 'Withheld' }}</td></tr>{% endfor %}</tbody></table>
+    </article>
+    {% endfor %}
+    </div>
+</section>
+
+<section class="analytics-section">
+    <header><div><p class="eyebrow">Participation</p><h2>Registration vs check-in</h2></div><span>Uses the Phase 1 curated participant and check-in definitions.</span></header>
+    <div class="analytics-attendance-tabs">
+    {% for key, title in (('gender','Gender'),('life_stage','Life Stage'),('payment_status','Payment Status'),('dgroup','Dgroup'),('home_area','Home Area'),('satellite_names','Satellite')) %}
+    <article class="analytics-panel panel">
+        <header><h3>By {{ title }}</h3></header>
+        <div class="table-wrap"><table class="analytics-table"><thead><tr><th>{{ title }}</th><th>Registered</th><th>Checked In</th><th>Not Checked In</th><th>Attendance</th></tr></thead><tbody>
+        {% for item in analytics.attendance[key] %}<tr><td>{{ item.label }}</td><td>{{ item.registered_display or item.registered }}</td><td>{{ item.checked_in.display }}</td><td>{{ item.not_checked_in.display }}</td><td>{{ item.attendance_percentage|percent if item.attendance_percentage is not none else 'Withheld' }}</td></tr>{% else %}<tr><td colspan="5">No data</td></tr>{% endfor %}
+        </tbody></table></div>
+    </article>
+    {% endfor %}
+    </div>
+</section>
+
+<section class="analytics-section" id="historical-trends">
+    <header><div><p class="eyebrow">Historical Trends</p><h2>Event snapshot history</h2></div><a class="button" href="{{ url_for('dashboard.analytics_compare_page') }}">Compare Events</a></header>
+    <article class="analytics-panel panel">
+        <p class="analytics-note">Each batch is an independent snapshot. Values are compared across batches and are never summed as separate people.</p>
+        <div class="analytics-trend-chart" role="img" aria-label="Registered participants by historical batch">
+        {% for item in trends['items'] %}
+            <div><span>Batch #{{ item.batch_id }}</span><i><b style="width: {{ item.registered_bar_percentage or 0 }}%"></b></i><strong>{{ item.registered.display }}</strong></div>
+        {% endfor %}
+        </div>
+        <div class="table-wrap"><table class="analytics-table"><thead><tr><th>Batch</th><th>Imported</th><th>Status</th><th>Registered</th><th>Checked In</th><th>Attendance</th></tr></thead><tbody>
+        {% for item in trends['items'] %}<tr><td>#{{ item.batch_id }}</td><td>{{ item.created_at|datetime_short }}</td><td>{{ item.status|title }}</td><td>{{ item.registered.display }}</td><td>{{ item.checked_in.display }}</td><td>{{ item.attendance_percentage|percent if item.attendance_percentage is not none else 'Withheld' }}</td></tr>{% else %}<tr><td colspan="6">No historical snapshots are available.</td></tr>{% endfor %}
+        </tbody></table></div>
+    </article>
+</section>
+{% endif %}
+{% endblock %}

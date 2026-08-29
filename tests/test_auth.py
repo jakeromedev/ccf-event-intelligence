@@ -240,6 +240,34 @@ class AuthenticationTests(unittest.TestCase):
         self.assertIn(b"You have been logged out", logged_out.data)
         self.assertEqual(302, self.client.get("/events").status_code)
 
+    def test_analytics_pages_and_aggregate_apis_require_approved_authentication(self):
+        with self.app.app_context():
+            db = get_db()
+            event_a = db.execute("INSERT INTO events (name) VALUES ('Analytics A')").lastrowid
+            event_b = db.execute("INSERT INTO events (name) VALUES ('Analytics B')").lastrowid
+            db.commit()
+        for path in (
+            "/events/{}/analytics".format(event_a),
+            "/api/events/{}/analytics".format(event_a),
+            "/api/events/{}/analytics/trends".format(event_a),
+            "/analytics/compare?events={},{}".format(event_a, event_b),
+            "/api/analytics/compare?events={},{}".format(event_a, event_b),
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(302, self.client.get(path).status_code)
+
+        self.create_user("analytics-operator")
+        self.login("analytics-operator", "StrongPassword12!")
+        self.assertEqual(
+            200, self.client.get("/api/events/{}/analytics".format(event_a)).status_code
+        )
+        self.assertEqual(
+            200,
+            self.client.get(
+                "/api/analytics/compare?events={},{}".format(event_a, event_b)
+            ).status_code,
+        )
+
     def test_secure_session_cookie_and_external_redirect_rejection(self):
         self.create_user("secure-operator")
         self.app.config["SESSION_COOKIE_SECURE"] = True

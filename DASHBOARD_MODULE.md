@@ -25,8 +25,10 @@ The rendered dashboard contains:
 - Participant-only Gender, Life Stage, and Age distributions
 - Active-dataset and last-updated context
 
-Satellite analytics, Data Quality, Imports, and Admin Tables are neighboring
-event-workspace modules and are documented separately.
+Advanced Analytics, Satellite analytics, Data Quality, Imports, and Admin Tables
+are neighboring event-workspace modules and are documented separately. The
+Phase 3 analytics definitions, filters, privacy suppression, historical
+snapshots, and Event comparison contract are in `ANALYTICS_REFERENCE.md`.
 
 ## Implementation Map
 
@@ -34,6 +36,7 @@ event-workspace modules and are documented separately.
 |---|---|
 | Dashboard page and HTTP endpoints | `app/routes.py` |
 | Metric aggregation and reconciliation | `app/aggregation.py` |
+| Phase 3 aggregate analytics and filters | `app/analytics.py` |
 | Demographic and registration-type normalization | `app/normalization.py` |
 | Unique-person curation | `app/curation.py` |
 | Dashboard template | `app/templates/overview.html` |

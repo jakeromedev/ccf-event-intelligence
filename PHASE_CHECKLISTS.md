@@ -211,6 +211,9 @@ automated UAT.
 
 ## Phase 3 — Advanced Analytics and Reporting
 
+Status: **In Progress**. Source-supported aggregate analytics are implemented;
+revenue, downloads, final privacy policy, and product priorities remain decision-gated.
+
 ### Product-definition gate
 
 - [ ] **Decision required:** Prioritize Payment, Revenue, Occupation, Dgroup, Home Area,
@@ -218,18 +221,20 @@ automated UAT.
 - [ ] **Decision required:** Approve authoritative Revenue and payment-discrepancy formulas.
 - [ ] **Decision required:** Define who may export row-level or aggregate reports.
 - [ ] Define privacy thresholds and suppression rules for small analytical groups.
+  Engineering suppression is configurable and tested; final organizational threshold
+  and differencing policy remain `Decision Required` in `PHASE_3_DECISIONS.md`.
 
 ### Analytics
 
-- [ ] Add Payment Status and payment-method analytics.
+- [x] Add Payment Status and payment-method analytics.
 - [ ] Add validated Revenue, expected amount, paid amount, and discrepancy reporting.
-- [ ] Add Occupation analytics where reliable source fields exist.
-- [ ] Add Dgroup membership and leadership analytics where reliable source fields exist.
-- [ ] Add Home Area and other approved participant filters.
-- [ ] Add combined interactive filters across satellite and demographic dimensions.
-- [ ] Add registration-versus-check-in comparisons by approved dimensions.
-- [ ] Add historical batch trends for an Event.
-- [ ] Add comparative analytics across Events.
+- [x] Add Occupation analytics where reliable source fields exist.
+- [x] Add Dgroup membership and leadership analytics where reliable source fields exist.
+- [x] Add Home Area and other source-supported participant filters.
+- [x] Add combined interactive filters across satellite and demographic dimensions.
+- [x] Add registration-versus-check-in comparisons by source-supported dimensions.
+- [x] Add historical batch trends for an Event.
+- [x] Add comparative analytics across Events.
 
 ### Reporting
 
@@ -241,9 +246,30 @@ automated UAT.
 ### Phase 3 exit criteria
 
 - [ ] Every new metric has an approved definition and reconciliation test.
-- [ ] Historical and cross-Event queries preserve Event and batch ownership boundaries.
+- [x] Historical and cross-Event queries preserve Event and batch ownership boundaries.
 - [ ] Export authorization and privacy behavior are covered by automated tests.
-- [ ] User-facing metric definitions and limitations are documented.
+- [x] User-facing metric definitions and limitations are documented.
+
+### Phase 3 implementation evidence — 2026-08-29
+
+- Central analytics/filter/suppression service: `app/analytics.py`.
+- Aggregate APIs and dedicated Analytics/Compare views use the same service.
+- Implemented source-derived dimensions: Payment Status, Payment Method, Occupation,
+  Dgroup, Home Area, attendance comparisons, Event snapshot trends, and explicit
+  aggregate Event comparison.
+- No monetary formula, aggregate download, or row-level export was implemented while
+  its product decision remains open.
+- SQLite: 80 tests passed on 2026-08-29.
+- Disposable MySQL: the same 80 tests passed on 2026-08-29.
+- Supplied-data reconciliation: 4,312 curated participants and 3,854 unique
+  checked-in participants; every implemented distribution reconciled to 4,312.
+- Supplied-data MySQL analytics query: 374.6 ms locally for 4,312 participants;
+  no cache or Phase 4 worker infrastructure was introduced.
+- Alembic upgraded an empty disposable MySQL database to `a9d3c7e5f102` and
+  `alembic check` reported no new upgrade operations.
+- Ruff, Python compilation, production configuration/schema validation, local
+  Gunicorn readiness, and graceful SIGTERM passed.
+- Hosted CI evidence is recorded only after the pushed workflow run completes.
 
 ---
 

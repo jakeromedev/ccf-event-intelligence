@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% from "_page_header.html" import render_page_header %}
+
+{% block title %}Compare Events · CCF Event Dashboard{% endblock %}
+{% block page_header %}{{ render_page_header('Compare Events', description='Explicit, aggregate-only comparison across selected Events.') }}{% endblock %}
+{% block content %}
+<section class="analytics-compare-layout">
+    <form class="analytics-panel panel analytics-compare-form" method="get">
+        <header><p class="eyebrow">Event scope</p><h2>Select 2–10 Events</h2><p>Selections are always explicit. Cross-Event person matching is not performed.</p></header>
+        <div>{% for item in events %}<label><input type="checkbox" name="event_choice" value="{{ item.id }}" {{ 'checked' if item.id in selected else '' }}><span>{{ item.name }}</span></label>{% endfor %}</div>
+        <input type="hidden" name="events" value="{{ selected|join(',') }}" data-comparison-events>
+        <button class="button primary" type="submit">Compare selected Events</button>
+    </form>
+    <section>
+        {% if comparison_error %}<div class="flash error">{{ comparison_error }}</div>{% endif %}
+        {% if comparison %}
+        <article class="analytics-panel panel">
+            <header><h2>Participation comparison</h2><p>Exact non-zero groups below {{ comparison.privacy.minimum_group_size }} are withheld.</p></header>
+            <div class="table-wrap"><table class="analytics-table"><thead><tr><th>Event</th><th>Active Batch</th><th>Registered</th><th>Checked In</th><th>Not Checked In</th><th>Attendance</th></tr></thead><tbody>
+            {% for item in comparison.events %}<tr><td>{{ item.event.name }}</td><td>{{ '#' ~ item.active_batch_id if item.active_batch_id else '—' }}</td><td>{{ item.population.registered.display }}</td><td>{{ item.population.checked_in.display }}</td><td>{{ item.population.not_checked_in.display }}</td><td>{{ item.population.attendance_percentage|percent if item.population.attendance_percentage is not none else 'Withheld' }}</td></tr>{% endfor %}
+            </tbody></table></div>
+        </article>
+        {% else %}<div class="analytics-empty-state panel"><strong>Select Events to compare</strong><span>Only Event-level aggregates are compared. Event-scoped curated IDs are never treated as global identities.</span></div>{% endif %}
+    </section>
+</section>
+<script>
+document.querySelector('.analytics-compare-form').addEventListener('submit', function () {
+    const selected = Array.from(this.querySelectorAll('[name="event_choice"]:checked')).map(input => input.value);
+    this.querySelector('[data-comparison-events]').value = selected.join(',');
+    this.querySelectorAll('[name="event_choice"]').forEach(input => input.disabled = true);
+});
+</script>
+{% endblock %}

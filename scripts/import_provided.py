@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,6 +18,12 @@ FILES = {
     "buyers": ROOT / "Aug20_26_0427PM_event_buyers.csv",
     "registrants": ROOT / "Aug20_26_0432PM_event_registrants.csv",
 }
+
+
+def json_default(value):
+    if isinstance(value, Decimal):
+        return float(value)
+    raise TypeError("Object of type {} is not JSON serializable".format(type(value).__name__))
 
 
 def main():
@@ -63,6 +70,7 @@ def main():
                     "quality": {item["category"]: item["count"] for item in quality["cards"]},
                 },
                 indent=2,
+                default=json_default,
             )
         )
 

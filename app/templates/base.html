@@ -18,6 +18,7 @@
         {% if event %}
             <nav aria-label="Event workspace navigation">
                 <a class="nav-link {% if request.endpoint == 'dashboard.event_overview' %}active{% endif %}" href="{{ url_for('dashboard.event_overview', event_id=event['id']) }}">{{ icon('overview') }}<span>Overview</span></a>
+                <a class="nav-link {% if request.endpoint == 'dashboard.event_analytics_page' %}active{% endif %}" href="{{ url_for('dashboard.event_analytics_page', event_id=event['id']) }}">{{ icon('overview') }}<span>Analytics</span></a>
                 <a class="nav-link {% if request.endpoint in ('dashboard.event_satellites', 'dashboard.event_satellite_registrants') %}active{% endif %}" href="{{ url_for('dashboard.event_satellites', event_id=event['id']) }}">{{ icon('satellites') }}<span>Satellites</span></a>
                 <a class="nav-link {% if request.endpoint == 'dashboard.event_quality' %}active{% endif %}" href="{{ url_for('dashboard.event_quality', event_id=event['id']) }}">{{ icon('quality') }}<span>Data Quality</span></a>
                 <a class="nav-link {% if request.endpoint == 'dashboard.event_imports' %}active{% endif %}" href="{{ url_for('dashboard.event_imports', event_id=event['id']) }}">{{ icon('imports') }}<span>Imports</span></a>

@@ -76,6 +76,13 @@ Existing event dashboards, imports, Data Quality endpoints, settings, and APIs
 all require an approved authenticated account. Existing PII-bearing Admin
 Tables additionally require the administrator role.
 
+Phase 3 Analytics pages and aggregate APIs follow the same approved-user access
+boundary as the normal Event dashboard. They expose aggregates only and require
+explicit Event scope. The current application has no per-user Event ACL, so an
+approved operator can view every normal Event dashboard. Phase 3 introduces no
+row-level export permission: downloadable reports remain disabled pending the
+separate decision in `PHASE_3_DECISIONS.md`. Admin Tables remains administrator-only.
+
 ## Security controls
 
 - Argon2id password hashing; plaintext passwords are never persisted or logged.

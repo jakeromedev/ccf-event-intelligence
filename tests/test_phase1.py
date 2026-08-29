@@ -24,6 +24,7 @@ from app.aggregation import (
     satellite_curation_detail,
     satellite_metrics,
 )
+from app.analytics import event_analytics
 from app.classifier import classify_affiliation
 from app.curation import (
     normalize_birth_month,
@@ -67,7 +68,7 @@ TICKET_FIELDS = [
 ]
 BUYER_FIELDS = [
     "Id", "Slug", "Event Name", "Buyer Reference Number", "Payment Status",
-    "Quantity", "Gross Amount", "Amount Paid",
+    "Payment Method", "Quantity", "Gross Amount", "Amount Paid",
 ]
 REGISTRANT_FIELDS = [
     "ID", "Event Name", "Event Slug", "Registration Code", "Ticket Code", "Ticket Status",
@@ -75,6 +76,8 @@ REGISTRANT_FIELDS = [
     "Gender", "Life Stage", "Date of Birth", "Birth Month", "Birth Year",
     "Are You From A Local Or International Satellite", "Which Local Satellite",
     "Which International Satellite", "Upload Your Accomplished Attestation Form Here",
+    "Occupation", "Home Area", "Are You Part Of A Discipleship Group",
+    "Are You Leading A Discipleship Group",
 ]
 REGISTRANT_B1G_FIELDS = [
     "ID", "Event Name", "Event Slug", "Registration Code", "Ticket Code", "Ticket Status",
@@ -248,17 +251,17 @@ class EventIntegrationTests(unittest.TestCase):
         self.temp.cleanup()
 
     def _write_fixture(self, registrant_limit=None, volunteer_identifier=None):
-        buyer = lambda identifier, reference: {
+        buyer = lambda identifier, reference, method="Debit or Credit Card": {
             "Id": identifier, "Slug": "event-1", "Event Name": "Event One",
             "Buyer Reference Number": reference, "Payment Status": "Payment Validated",
-            "Quantity": "1", "Gross Amount": "100", "Amount Paid": "100",
+            "Payment Method": method, "Quantity": "1", "Gross Amount": "100", "Amount Paid": "100",
         }
         ticket = lambda identifier, code, buyer_ref, checked="": {
             "Id": identifier, "Slug": "event-1", "Event Name": "Event One", "Ticket Code": code,
             "Control Number": identifier, "Ticket Status": "Assigned", "Payment Status": "Payment Validated",
             "Buyer Reference Number": buyer_ref, "Check-in Date Time": checked,
         }
-        registrant = lambda identifier, code, attending, scope="", local="", international="", gender="", life_stage="Single", birth_date="", birth_month="", birth_year="", attestation="": {
+        registrant = lambda identifier, code, attending, scope="", local="", international="", gender="", life_stage="Single", birth_date="", birth_month="", birth_year="", attestation="", occupation="", home_area="", dgroup_member="", dgroup_leader="": {
             "ID": identifier, "Event Name": "Event One", "Event Slug": "event-1",
             "Registration Code": "R-{}".format(identifier), "Ticket Code": code, "Ticket Status": "Assigned",
             "Ticket Name": "Event Volunteer" if identifier == volunteer_identifier else "Event Participant",
@@ -269,6 +272,9 @@ class EventIntegrationTests(unittest.TestCase):
             "Are You From A Local Or International Satellite": scope,
             "Which Local Satellite": local, "Which International Satellite": international,
             "Upload Your Accomplished Attestation Form Here": attestation,
+            "Occupation": occupation, "Home Area": home_area,
+            "Are You Part Of A Discipleship Group": dgroup_member,
+            "Are You Leading A Discipleship Group": dgroup_leader,
         }
         write_csv(self.paths["buyers"], BUYER_FIELDS, [buyer("1", "B-1"), buyer("2", "B-ORPHAN")])
         write_csv(self.paths["tickets"], TICKET_FIELDS, [
@@ -280,10 +286,10 @@ class EventIntegrationTests(unittest.TestCase):
             ticket("6", "T-NOREG", "B-1"),
         ])
         rows = [
-            registrant("1", "T-MAIN", "Yes", "Local Satellite", "CCF Main", gender="Male", birth_month="January", birth_year="2000", attestation="https://files.example.com/attestation-1.pdf"),
-            registrant("2", "T-LOCAL", "Yes", "Local Satellite", "Eastwood", gender="Female", birth_month="October", birth_year="1990"),
-            registrant("3", "T-INTL", "Yes", "International Satellite", international="Singapore", gender="Prefer not to say", birth_month="June", birth_year="1980"),
-            registrant("4", "T-NON", "No", "Local Satellite", "CCF Main", gender="Nonbinary", birth_month="May", birth_year="1970"),
+            registrant("1", "T-MAIN", "Yes", "Local Satellite", "CCF Main", gender="Male", birth_month="January", birth_year="2000", attestation="https://files.example.com/attestation-1.pdf", occupation="IT/Technology Related", home_area="Quezon City", dgroup_member="Yes", dgroup_leader="Yes"),
+            registrant("2", "T-LOCAL", "Yes", "Local Satellite", "Eastwood", gender="Female", birth_month="October", birth_year="1990", occupation="Accounting/Finance Related", home_area="Pasig", dgroup_member="Yes", dgroup_leader="No"),
+            registrant("3", "T-INTL", "Yes", "International Satellite", international="Singapore", gender="Prefer not to say", birth_month="June", birth_year="1980", occupation="IT / Technology Related", home_area="Manila", dgroup_member="No", dgroup_leader="No"),
+            registrant("4", "T-NON", "No", "Local Satellite", "CCF Main", gender="Nonbinary", birth_month="May", birth_year="1970", occupation="Others", home_area="Others"),
             registrant("5", "T-UNKNOWN", "", attestation="javascript:alert(1)"),
         ]
         write_csv(self.paths["registrants"], REGISTRANT_FIELDS, rows[:registrant_limit])
@@ -2111,6 +2117,15 @@ class ProvidedDatasetTests(unittest.TestCase):
                 satellites = satellite_metrics(get_db(), batch_id)
                 self.assertEqual(1492, satellites["local_count"])
                 self.assertEqual(8, satellites["international_count"])
+                analytics = event_analytics(get_db(), event_id, threshold=1)
+                self.assertEqual(4312, analytics["population"]["registered"]["count"])
+                self.assertEqual(3854, analytics["population"]["checked_in"]["count"])
+                self.assertTrue(analytics["reconciliation"]["distribution_totals"])
+                for distribution in analytics["distributions"].values():
+                    self.assertEqual(
+                        4312,
+                        sum(item["count"] for item in distribution["items"]),
+                    )
             overview_page = app.test_client().get("/events/{}".format(event_id))
             self.assertEqual(200, overview_page.status_code)
             self.assertIn(b"4,334", overview_page.data)

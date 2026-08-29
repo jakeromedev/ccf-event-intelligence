@@ -338,3 +338,17 @@ SQLite data and IDs. An explicit derived-data rebuild remains available:
 ```
 
 Rebuild is transactional, deterministic, and idempotent.
+
+## Phase 3 derived analytics
+
+The current Phase 3 aggregate analytics require no schema changes. Payment
+method, Occupation, Dgroup, and Home Area values are extracted from immutable
+`source_data_json`; payment status and check-in use the existing normalized raw
+columns; person semantics come from the existing curated tables. Conservative
+classifications are derived by `app/analytics.py` and do not overwrite source
+records. Historical queries read each Event-owned batch as a separate snapshot,
+and cross-Event comparison never treats scoped curated IDs as global identities.
+
+If a later approved revenue or export-audit design requires persistence, it
+must be introduced through a new Alembic migration with both MySQL and SQLite
+test compatibility. No such schema has been approved or added in this iteration.

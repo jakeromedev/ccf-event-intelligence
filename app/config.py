@@ -104,6 +104,9 @@ def configure_app(app, test_config=None):
         ),
         ADMIN_TABLES_ENABLED=environment_flag("CCF_ADMIN_TABLES_ENABLED", True),
         ADMIN_TABLES_AUTHORIZER=None,
+        ANALYTICS_MIN_GROUP_SIZE=environment_integer(
+            "CCF_ANALYTICS_MIN_GROUP_SIZE", 5, minimum=1, maximum=100
+        ),
         STANDARD_USER_MUTATIONS_ALLOWED=environment_flag(
             "CCF_STANDARD_USER_MUTATIONS_ALLOWED",
             environment in {"development", "testing"},

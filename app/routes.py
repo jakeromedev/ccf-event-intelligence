@@ -8,6 +8,7 @@ from flask_login import current_user
 from sqlalchemy.exc import IntegrityError
 
 from .auth import admin_required, event_mutation_required
+from .analytics import AnalyticsFilterError, compare_events, event_analytics, historical_trends
 from .aggregation import (
     active_batch,
     curated_registrant_detail,
@@ -183,6 +184,125 @@ def event_dashboard_api(event_id):
     if dashboard is None:
         abort(404)
     return jsonify(dashboard)
+
+
+def _analytics_threshold():
+    return current_app.config["ANALYTICS_MIN_GROUP_SIZE"]
+
+
+def _analytics_filters():
+    return {
+        key: request.args.get(key, "")
+        for key in (
+            "gender",
+            "life_stage",
+            "age_group",
+            "payment_status",
+            "payment_method",
+            "occupation",
+            "dgroup",
+            "home_area",
+            "check_in",
+            "satellite",
+            "satellite_dataset",
+        )
+        if request.args.get(key)
+    }
+
+
+@bp.get("/events/<int:event_id>/analytics")
+def event_analytics_page(event_id):
+    db = get_db()
+    event = get_event_or_404(event_id)
+    try:
+        analytics = event_analytics(
+            db, event_id, _analytics_filters(), _analytics_threshold()
+        )
+    except AnalyticsFilterError as error:
+        abort(400, str(error))
+    removal_urls = {}
+    for dimension in analytics["filters"]:
+        remaining = dict(analytics["filters"])
+        remaining.pop(dimension)
+        removal_urls[dimension] = url_for(
+            "dashboard.event_analytics_page", event_id=event_id, **remaining
+        )
+    return render_template(
+        "analytics.html",
+        event=event,
+        active_batch=active_batch(db, event_id),
+        analytics=analytics,
+        trends=historical_trends(db, event_id, _analytics_threshold()),
+        removal_urls=removal_urls,
+    )
+
+
+@bp.get("/api/events/<int:event_id>/analytics")
+def event_analytics_api(event_id):
+    try:
+        analytics = event_analytics(
+            get_db(), event_id, _analytics_filters(), _analytics_threshold()
+        )
+    except AnalyticsFilterError as error:
+        return jsonify({"status": "error", "message": str(error)}), 400
+    if analytics is None:
+        abort(404)
+    return jsonify(analytics)
+
+
+@bp.get("/api/events/<int:event_id>/analytics/trends")
+def event_analytics_trends_api(event_id):
+    trends = historical_trends(get_db(), event_id, _analytics_threshold())
+    if trends is None:
+        abort(404)
+    return jsonify(trends)
+
+
+def _comparison_event_ids():
+    raw = request.args.get("events", "")
+    try:
+        return [int(value) for value in raw.split(",") if value.strip()]
+    except ValueError as error:
+        raise AnalyticsFilterError("Event selections must be numeric IDs.") from error
+
+
+@bp.get("/analytics/compare")
+def analytics_compare_page():
+    db = get_db()
+    try:
+        selected = _comparison_event_ids()
+    except AnalyticsFilterError as exception:
+        selected = []
+        comparison_error = str(exception)
+    else:
+        comparison_error = None
+    comparison = None
+    if selected:
+        try:
+            comparison = compare_events(db, selected, _analytics_threshold())
+        except AnalyticsFilterError as exception:
+            comparison_error = str(exception)
+    events_list = db.execute("SELECT id, name FROM events ORDER BY LOWER(name), id").fetchall()
+    return render_template(
+        "analytics_compare.html",
+        event=None,
+        active_batch=None,
+        events=events_list,
+        selected=selected,
+        comparison=comparison,
+        comparison_error=comparison_error,
+    ), 400 if comparison_error else 200
+
+
+@bp.get("/api/analytics/compare")
+def analytics_compare_api():
+    try:
+        comparison = compare_events(
+            get_db(), _comparison_event_ids(), _analytics_threshold()
+        )
+    except AnalyticsFilterError as error:
+        return jsonify({"status": "error", "message": str(error)}), 400
+    return jsonify(comparison)
 
 
 @bp.post("/events/<int:event_id>/settings")
