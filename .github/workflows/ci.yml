@@ -85,6 +85,23 @@ jobs:
 
   container-build:
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-password
+          MYSQL_DATABASE: ccf_events_test
+          MYSQL_USER: ccf_test
+          MYSQL_PASSWORD: ci-test-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uccf_test -pci-test-password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    env:
+      DATABASE_URL: mysql+pymysql://ccf_test:ci-test-password@127.0.0.1:3306/ccf_events_test
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -105,3 +122,50 @@ jobs:
             test ! -e /app/run.py
             test ! -d /app/tests
           '
+          if docker history --no-trunc ccf-systems-dashboard:ci | grep -F 'ci-only-container-secret'; then
+            echo 'Runtime secret was found in an image layer.' >&2
+            exit 1
+          fi
+      - name: Migrate disposable database through the image
+        run: >-
+          docker run --rm --network host
+          --entrypoint alembic
+          --env DATABASE_URL
+          ccf-systems-dashboard:ci
+          upgrade head
+      - name: Run and gracefully stop the production image
+        env:
+          CCF_DASHBOARD_SECRET: ci-only-container-secret-with-more-than-32-characters
+        run: |
+          docker run --detach --name ccf-ci-runtime --network host \
+            --env DATABASE_URL \
+            --env CCF_DASHBOARD_SECRET \
+            --env CCF_SESSION_COOKIE_SECURE=1 \
+            --env CCF_TRUSTED_HOSTS=127.0.0.1,localhost \
+            --env PORT=8082 \
+            --env WEB_CONCURRENCY=1 \
+            --health-start-period=1s \
+            --health-interval=2s \
+            --health-timeout=2s \
+            --health-retries=10 \
+            ccf-systems-dashboard:ci
+          trap 'docker rm --force ccf-ci-runtime >/dev/null 2>&1 || true' EXIT
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+            health=$(docker inspect ccf-ci-runtime --format '{{.State.Health.Status}}')
+            if [ "$health" = healthy ]; then break; fi
+            if [ "$health" = unhealthy ] || [ "$attempt" = 15 ]; then
+              docker logs ccf-ci-runtime
+              exit 1
+            fi
+            sleep 1
+          done
+          test "$(docker exec ccf-ci-runtime id -u)" = 10001
+          curl --fail --silent --header 'Host: 127.0.0.1' http://127.0.0.1:8082/health/live
+          curl --fail --silent --header 'Host: 127.0.0.1' http://127.0.0.1:8082/health/ready
+          docker logs ccf-ci-runtime 2>&1 | grep 'application_ready'
+          docker logs ccf-ci-runtime 2>&1 | grep 'application_configured'
+          docker stop --time 35 ccf-ci-runtime
+          test "$(docker inspect ccf-ci-runtime --format '{{.State.ExitCode}}')" = 0
+          docker logs ccf-ci-runtime 2>&1 | grep 'application_stopped'
+          docker rm ccf-ci-runtime
+          trap - EXIT
