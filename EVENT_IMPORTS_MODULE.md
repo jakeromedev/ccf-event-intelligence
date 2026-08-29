@@ -289,19 +289,25 @@ Client-side readiness is only a usability feature. The server independently requ
 
 - Raw uploaded files remain in the staging directory and may contain personal information.
 - `instance/` is excluded from version control.
-- Route exception logs intentionally avoid logging CSV contents.
+- Structured operational events use Event/batch IDs, counts, status, duration,
+  and error categories without logging CSV contents or profile values.
 - Validation issue messages use source identifiers rather than names, email addresses, or mobile numbers.
 - Normalized registrants retain names but not email/mobile values.
-- The Flask routes shown here do not implement module-level authentication, authorization roles, or CSRF tokens. Deployment must restrict dashboard access appropriately before handling production personal data.
-- Staged-file retention and batch deletion/cleanup are not currently automated.
+- Global approved-user authentication and CSRF protect the module. Import
+  mutation is configurable and defaults to administrator-only in staging and
+  production while the standard-user permission decision remains unresolved.
+- Administrator-only deletion removes an eligible batch and safely cleans only
+  staged files contained by the configured staging root. Active, validating,
+  and processing batches remain protected. Retention duration remains a
+  governance decision; no time-based automatic deletion is performed.
 
 ## Configuration
 
 | Setting | Default |
 |---|---|
 | `DATABASE_URL` | Required; `mysql+pymysql://user:password@host:3306/database` |
-| `STAGING_DIR` | `instance/staged_imports` |
-| `MAX_CONTENT_LENGTH` | 32 MB per HTTP request |
+| `CCF_STAGING_DIR` | `instance/staged_imports` |
+| `CCF_MAX_UPLOAD_MB` | 32 MB per HTTP request |
 
 ## Command-line import
 

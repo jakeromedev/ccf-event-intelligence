@@ -1,8 +1,14 @@
 # CCF Event Dashboard — Phase 1 Implementation
 
-> Historical implementation record: SQLite-specific sections below describe the
-> original MVP. The current runtime uses SQLAlchemy, MySQL, and Alembic; see
-> `README.md` and `CURRENT_DATABASE_STRUCTURE.md` for current operations.
+> **Archived historical implementation record.** SQLite-specific architecture,
+> file trees, test counts, limitations, and setup commands below describe the
+> original local MVP and are not current operating instructions. The current
+> application uses Flask, SQLAlchemy, MySQL, Alembic, authentication, curation,
+> demographics, and safe batch cleanup. See `README.md`,
+> `TECHNICAL_REFERENCE.md`, and `CURRENT_DATABASE_STRUCTURE.md`. SQLite remains
+> only for isolated automated tests and reading a retained one-time migration
+> source. This file is retained as design history rather than rewritten as a
+> second, potentially contradictory technical reference.
 
 ## Document Purpose
 
@@ -33,14 +39,16 @@ Phase 1 is intentionally focused on reliable three-file imports, registrant and 
 ### Technology Stack
 
 - **Backend and web framework:** Python 3.9+ and Flask 3.1
-- **Database:** SQLite
+- **Historical database:** SQLite (superseded by MySQL + SQLAlchemy + Alembic)
 - **Templating:** Jinja templates
 - **Frontend:** Server-rendered HTML, custom responsive CSS, and minimal vanilla JavaScript
 - **CSV processing:** Python standard-library `csv` module
 - **Validation:** Application domain services with server-side checks
 - **Testing:** Python standard-library `unittest`
 
-The earlier proposal recommended Next.js and PostgreSQL for a larger production system. The implementation uses Flask and SQLite because the project began empty and the available environment did not contain Node.js. This keeps the Phase 1 MVP small and locally runnable while preserving service boundaries that can later be migrated to PostgreSQL or another frontend stack.
+The original MVP used Flask and SQLite because the project began empty and the
+available environment did not contain Node.js. That SQLite runtime was later
+superseded by the current MySQL architecture.
 
 ### Main Application Layers
 
@@ -1052,7 +1060,9 @@ Implemented Phase 1 safeguards:
 - The server binds only to `127.0.0.1` by default.
 - Flask debug mode is disabled by default.
 
-Authentication and role-based authorization remain intentionally deferred, but the route/service structure permits adding them later.
+Authentication and role-based authorization were deferred at the time of this
+historical record. They are now implemented with approved-user access, a single
+administrator, Argon2id, CSRF, session hardening, lockout, and safe redirects.
 
 ---
 
@@ -1161,24 +1171,27 @@ Resolution:
 
 ## 19. Intentionally Deferred Beyond Phase 1
 
-The following were not implemented:
+At the time of this archived implementation snapshot, the following were not
+implemented. Demographics, authentication, MySQL migration, satellite
+normalization, and production WSGI foundations have since been implemented as
+documented in the current references:
 
-- Demographic analytics
-- Gender dashboards
-- Age analytics
-- Life-stage analytics
+- Demographic analytics *(now implemented)*
+- Gender dashboards *(now implemented)*
+- Age analytics *(now implemented)*
+- Life-stage analytics *(now implemented)*
 - Occupation analytics
 - Dgroup analytics
 - Revenue dashboard
 - Payment analytics dashboard
 - Advanced report builder
 - Exportable reports
-- Advanced authentication and role management
+- Authentication and role management *(now implemented for current roles)*
 - Complex historical comparisons
 - Multi-event comparative analytics
 - Advanced satellite alias/canonical-name management
-- PostgreSQL deployment migration
-- Dedicated production WSGI server and deployment configuration
+- Production database migration *(implemented with MySQL, SQLAlchemy, Alembic)*
+- Dedicated production WSGI server and deployment configuration *(Gunicorn/container now provided)*
 - Background import workers
 
 These remain Phase 2 or later concerns.
@@ -1189,11 +1202,11 @@ These remain Phase 2 or later concerns.
 
 Phase 1 is implemented and operational.
 
-- The three provided CSV exports are loaded in the local SQLite database.
+- The three provided CSV exports were loaded in the historical local SQLite database.
 - The validated batch is active.
 - All approved metrics match the previously analyzed values.
 - All automated tests pass.
-- SQLite integrity verification passes.
+- SQLite integrity verification passed for that archived database snapshot.
 - The dashboard is configured for `http://127.0.0.1:5050/` by default.
 
 ---

@@ -1847,6 +1847,9 @@ body.sidebar-collapsed .nav-module-link > .nav-module-icon { width: 32px; height
 .admin-data-table th button span { color: #94a8b0; }
 .admin-data-table td { min-width: 135px; max-width: 220px; height: 41px; padding: 9px 12px; overflow: hidden; color: #29434f; border-bottom: 1px solid #edf2f3; background: #fff; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .admin-data-table tbody tr:hover td { background: #f8fcfc; }
+.admin-cell-link { color: #057f8c; font-weight: 750; text-decoration: underline; text-decoration-color: #9ed3d8; text-underline-offset: 3px; }
+.admin-cell-link:hover { color: #005f6a; text-decoration-color: currentColor; }
+.admin-cell-link:focus-visible { border-radius: 3px; outline: 2px solid rgba(5,127,140,.3); outline-offset: 2px; }
 .admin-data-table .sticky-key { position: sticky; z-index: 2; left: 0; min-width: 145px; border-right: 1px solid #e1eaec; box-shadow: 5px 0 8px rgba(11,56,67,.025); }
 .admin-data-table th.sticky-key { z-index: 4; background: #f5f9fa; }
 .admin-actions-column { position: sticky !important; z-index: 2 !important; right: 0; min-width: 110px !important; max-width: 110px !important; border-left: 1px solid #e1eaec; background: #fff !important; }

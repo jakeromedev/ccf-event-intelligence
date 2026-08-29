@@ -9,8 +9,11 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from datetime import date, datetime
+from pathlib import Path
 
 from flask import current_app, g
+from alembic.config import Config as AlembicConfig
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import Session, sessionmaker
@@ -200,6 +203,8 @@ def init_app(app):
     if make_url(url).get_backend_name() == "mysql":
         engine_options.update(
             pool_recycle=app.config.get("SQLALCHEMY_POOL_RECYCLE", 1800),
+            pool_size=app.config.get("SQLALCHEMY_POOL_SIZE", 5),
+            max_overflow=app.config.get("SQLALCHEMY_MAX_OVERFLOW", 10),
             isolation_level=app.config.get("SQLALCHEMY_ISOLATION_LEVEL", "READ COMMITTED"),
             connect_args={"charset": "utf8mb4"},
         )
@@ -222,6 +227,35 @@ def init_app(app):
 
 def get_engine() -> Engine:
     return current_app.extensions["sqlalchemy_engine"]
+
+
+def _expected_schema_heads():
+    project_root = Path(current_app.root_path).resolve().parent
+    config = AlembicConfig(str(project_root / "alembic.ini"))
+    config.set_main_option("script_location", str(project_root / "migrations"))
+    return set(ScriptDirectory.from_config(config).get_heads())
+
+
+def check_database_readiness():
+    """Return a public-safe dependency status without exposing SQL or credentials."""
+    try:
+        with get_engine().connect() as connection:
+            connection.execute(text("SELECT 1"))
+            versions = {
+                row[0]
+                for row in connection.execute(
+                    text("SELECT version_num FROM alembic_version")
+                ).fetchall()
+            }
+    except Exception:
+        return False, "database_unavailable"
+    try:
+        expected = _expected_schema_heads()
+    except Exception:
+        return False, "schema_check_unavailable"
+    if versions != expected:
+        return False, "schema_not_current"
+    return True, "ready"
 
 
 def get_db():

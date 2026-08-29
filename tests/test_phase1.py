@@ -1,7 +1,6 @@
 import csv
 import json
 import os
-import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -75,7 +74,7 @@ REGISTRANT_FIELDS = [
     "Ticket Name", "First Name", "Last Name", "Email Address", "Mobile Number", "Are You Attending Ccf",
     "Gender", "Life Stage", "Date of Birth", "Birth Month", "Birth Year",
     "Are You From A Local Or International Satellite", "Which Local Satellite",
-    "Which International Satellite",
+    "Which International Satellite", "Upload Your Accomplished Attestation Form Here",
 ]
 REGISTRANT_B1G_FIELDS = [
     "ID", "Event Name", "Event Slug", "Registration Code", "Ticket Code", "Ticket Status",
@@ -259,7 +258,7 @@ class EventIntegrationTests(unittest.TestCase):
             "Control Number": identifier, "Ticket Status": "Assigned", "Payment Status": "Payment Validated",
             "Buyer Reference Number": buyer_ref, "Check-in Date Time": checked,
         }
-        registrant = lambda identifier, code, attending, scope="", local="", international="", gender="", life_stage="Single", birth_date="", birth_month="", birth_year="": {
+        registrant = lambda identifier, code, attending, scope="", local="", international="", gender="", life_stage="Single", birth_date="", birth_month="", birth_year="", attestation="": {
             "ID": identifier, "Event Name": "Event One", "Event Slug": "event-1",
             "Registration Code": "R-{}".format(identifier), "Ticket Code": code, "Ticket Status": "Assigned",
             "Ticket Name": "Event Volunteer" if identifier == volunteer_identifier else "Event Participant",
@@ -269,6 +268,7 @@ class EventIntegrationTests(unittest.TestCase):
             "Birth Month": birth_month, "Birth Year": birth_year,
             "Are You From A Local Or International Satellite": scope,
             "Which Local Satellite": local, "Which International Satellite": international,
+            "Upload Your Accomplished Attestation Form Here": attestation,
         }
         write_csv(self.paths["buyers"], BUYER_FIELDS, [buyer("1", "B-1"), buyer("2", "B-ORPHAN")])
         write_csv(self.paths["tickets"], TICKET_FIELDS, [
@@ -280,11 +280,11 @@ class EventIntegrationTests(unittest.TestCase):
             ticket("6", "T-NOREG", "B-1"),
         ])
         rows = [
-            registrant("1", "T-MAIN", "Yes", "Local Satellite", "CCF Main", gender="Male", birth_month="January", birth_year="2000"),
+            registrant("1", "T-MAIN", "Yes", "Local Satellite", "CCF Main", gender="Male", birth_month="January", birth_year="2000", attestation="https://files.example.com/attestation-1.pdf"),
             registrant("2", "T-LOCAL", "Yes", "Local Satellite", "Eastwood", gender="Female", birth_month="October", birth_year="1990"),
             registrant("3", "T-INTL", "Yes", "International Satellite", international="Singapore", gender="Prefer not to say", birth_month="June", birth_year="1980"),
             registrant("4", "T-NON", "No", "Local Satellite", "CCF Main", gender="Nonbinary", birth_month="May", birth_year="1970"),
-            registrant("5", "T-UNKNOWN", ""),
+            registrant("5", "T-UNKNOWN", "", attestation="javascript:alert(1)"),
         ]
         write_csv(self.paths["registrants"], REGISTRANT_FIELDS, rows[:registrant_limit])
 
@@ -1770,8 +1770,25 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertIn("Mobile Number", registrant_labels)
         self.assertIn("Gross Amount", buyer_labels)
         self.assertIn("Amount Paid", buyer_labels)
+        attestation_column = next(
+            column
+            for column in registrants["columns"]
+            if column["label"] == "Upload Your Accomplished Attestation Form Here"
+        )
+        self.assertTrue(attestation_column["default"])
+        self.assertEqual("attestation_form_link", attestation_column["renderer"])
+        self.assertEqual(
+            "https://files.example.com/attestation-1.pdf",
+            registrants["rows"][0][attestation_column["key"]],
+        )
         self.assertTrue(any(column["default"] for column in registrants["columns"]))
         self.assertTrue(all("expression" not in column for column in registrants["columns"]))
+
+        admin_script = (Path(__file__).parents[1] / "app/static/admin_tables.js").read_text()
+        self.assertIn('link.textContent = "View Attestation Form"', admin_script)
+        self.assertIn('link.target = "_blank"', admin_script)
+        self.assertIn('link.rel = "noopener noreferrer"', admin_script)
+        self.assertIn('["http:", "https:"]', admin_script)
 
         with self.app.app_context():
             preserved = get_db().execute(

@@ -1,5 +1,12 @@
 # CCF Event Dashboard: CSV Analysis and Proposed Architecture
 
+> **Historical discovery/proposal document.** Statements phrased as future
+> requirements reflect the pre-implementation analysis. Current runtime,
+> security, database, curation, demographics, cleanup, and deployment behavior
+> is authoritative in `README.md`, `TECHNICAL_REFERENCE.md`, and the module
+> documentation. The current application uses MySQL + SQLAlchemy + Alembic;
+> SQLite is limited to isolated tests and historical transfer tooling.
+
 ## Executive Summary
 
 Three CSV exports were analyzed:

@@ -82,16 +82,23 @@ Tables additionally require the administrator role.
 - Global Flask-WTF CSRF validation on state-changing requests.
 - Flask-Login signed sessions with strong session protection.
 - Pre-login session data is cleared before authentication to prevent fixation.
-- Eight-hour permanent-session lifetime, `HttpOnly` and `SameSite=Lax` cookies.
-- Set `CCF_SESSION_COOKIE_SECURE=1` whenever the application is served over
-  HTTPS.
+- Eight-hour permanent-session lifetime by default, with `HttpOnly` and
+  `SameSite=Lax` cookies. Production requires `Secure`; it cannot silently fall
+  back to an insecure cookie or development secret.
 - Five failed attempts lock an account for 15 minutes; successful login and
   terminal admin reset clear the counter.
 - Safe relative-only post-login redirects prevent open redirects.
 - Database checks and case-insensitive uniqueness enforce the admin identity.
 
-For production, set a long random `CCF_DASHBOARD_SECRET`, enable secure cookies,
-terminate only over HTTPS, and run behind a production WSGI server.
+Production uses Gunicorn behind an explicitly trusted HTTPS proxy. Forwarded
+headers are ignored unless their exact proxy-hop counts are configured. The
+application validates trusted hosts, production secrets, disabled debug mode,
+secure cookies, authentication, CSRF, MySQL, and Alembic head before serving.
+Safe relative-only login redirects continue to work through the trusted proxy.
+
+While the standard-user settings/import policy is unresolved, production and
+staging default those mutations to administrator-only. This does not weaken the
+permanent administrator-only boundaries for Users, Admin Tables, or batch deletion.
 
 ## Tests
 

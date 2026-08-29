@@ -20,8 +20,19 @@ DATASET_LABELS = {
     "curated": "Curated Registrants",
 }
 
+ATTESTATION_FORM_HEADER = "Upload Your Accomplished Attestation Form Here"
 
-def _column(key, label, expression, data_type="text", group="Record", default=False, searchable=True):
+
+def _column(
+    key,
+    label,
+    expression,
+    data_type="text",
+    group="Record",
+    default=False,
+    searchable=True,
+    renderer=None,
+):
     operators = {
         "text": TEXT_OPERATORS,
         "select": SELECT_OPERATORS,
@@ -29,7 +40,7 @@ def _column(key, label, expression, data_type="text", group="Record", default=Fa
         "date": DATE_OPERATORS,
         "number": NUMBER_OPERATORS,
     }[data_type]
-    return {
+    column = {
         "key": key,
         "label": label,
         "expression": expression,
@@ -40,6 +51,9 @@ def _column(key, label, expression, data_type="text", group="Record", default=Fa
         "sortable": True,
         "operators": list(operators),
     }
+    if renderer:
+        column["renderer"] = renderer
+    return column
 
 
 COMMON_COLUMNS = [
@@ -248,6 +262,10 @@ def columns_for(db, dataset, event_id, batch_scope):
         if header in MAPPED_SOURCE_HEADERS[dataset]:
             continue
         lower = header.casefold()
+        is_attestation_form = (
+            dataset == "registrants"
+            and header.strip().casefold() == ATTESTATION_FORM_HEADER.casefold()
+        )
         data_type = "date" if "date" in lower or lower.endswith(" at") else "number" if any(
             token in lower for token in ("amount", "quantity", "number of", "how many", "year")
         ) else "text"
@@ -258,6 +276,8 @@ def columns_for(db, dataset, event_id, batch_scope):
                 _json_expression(db, header),
                 data_type,
                 "Additional Export Fields",
+                default=is_attestation_form,
+                renderer="attestation_form_link" if is_attestation_form else None,
             )
         )
     return columns

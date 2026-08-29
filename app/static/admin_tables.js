@@ -36,6 +36,7 @@
     let requestController = null;
     let searchTimer = null;
     let returnFocus = null;
+    const columnPreferenceVersion = 2;
 
     const operatorLabels = {
         contains: "Contains", equals: "Equals", starts_with: "Starts With",
@@ -80,7 +81,11 @@
     const loadPreference = () => {
         try {
             const saved = JSON.parse(window.localStorage.getItem(root.dataset.preferenceKey));
-            return Array.isArray(saved) ? saved : null;
+            if (Array.isArray(saved)) return {visible: saved, legacy: true};
+            if (saved && saved.version === columnPreferenceVersion && Array.isArray(saved.visible)) {
+                return {visible: saved.visible, legacy: false};
+            }
+            return null;
         } catch (_error) {
             return null;
         }
@@ -88,7 +93,10 @@
 
     const savePreference = () => {
         try {
-            window.localStorage.setItem(root.dataset.preferenceKey, JSON.stringify([...visibleColumns]));
+            window.localStorage.setItem(root.dataset.preferenceKey, JSON.stringify({
+                version: columnPreferenceVersion,
+                visible: [...visibleColumns],
+            }));
         } catch (_error) {
             // Local preferences are optional in restricted browser contexts.
         }
@@ -99,11 +107,17 @@
         const available = new Set(columns.map((column) => column.key));
         const saved = loadPreference();
         visibleColumns = new Set(
-            saved ? saved.filter((key) => available.has(key)) : columns.filter((column) => column.default).map((column) => column.key)
+            saved ? saved.visible.filter((key) => available.has(key)) : columns.filter((column) => column.default).map((column) => column.key)
         );
+        if (saved && saved.legacy) {
+            columns
+                .filter((column) => column.default && column.renderer === "attestation_form_link")
+                .forEach((column) => visibleColumns.add(column.key));
+        }
         if (!visibleColumns.size) {
             columns.filter((column) => column.default).forEach((column) => visibleColumns.add(column.key));
         }
+        if (saved && saved.legacy) savePreference();
         renderColumnMenu();
         populateFilterFields();
     };
@@ -236,6 +250,41 @@
         return String(value);
     };
 
+    const safeExternalUrl = (value) => {
+        if (value === null || value === undefined) return null;
+        const candidate = String(value).trim();
+        if (!candidate) return null;
+        try {
+            const parsed = new URL(candidate);
+            return ["http:", "https:"].includes(parsed.protocol) ? parsed.href : null;
+        } catch (_error) {
+            return null;
+        }
+    };
+
+    const renderCellValue = (cell, value, column) => {
+        if (column.renderer === "attestation_form_link") {
+            const url = safeExternalUrl(value);
+            if (!url) {
+                cell.textContent = "—";
+                cell.title = "—";
+                return;
+            }
+            const link = document.createElement("a");
+            link.className = "admin-cell-link";
+            link.href = url;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            link.textContent = "View Attestation Form";
+            link.setAttribute("aria-label", "View Attestation Form (opens in a new tab)");
+            cell.append(link);
+            return;
+        }
+        const displayed = displayValue(value, column);
+        cell.textContent = displayed;
+        cell.title = displayed;
+    };
+
     const renderTable = (payload) => {
         const displayed = columns.filter((column) => visibleColumns.has(column.key));
         tableHead.replaceChildren();
@@ -272,9 +321,7 @@
             displayed.forEach((column, index) => {
                 const td = document.createElement("td");
                 if (index === 0) td.className = "sticky-key";
-                const value = displayValue(row[column.key], column);
-                td.textContent = value;
-                td.title = value;
+                renderCellValue(td, row[column.key], column);
                 tr.append(td);
             });
             if (root.dataset.dataset === "curated") {

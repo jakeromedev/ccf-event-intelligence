@@ -7,6 +7,7 @@ Usage:
 import argparse
 import json
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 
@@ -39,6 +40,12 @@ def reconciliation_report(dashboard, curation=None):
     }
 
 
+def json_value(value):
+    if isinstance(value, Decimal):
+        return float(value)
+    raise TypeError("Unsupported report value: {}".format(type(value).__name__))
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Reconcile event-scoped Phase 1 dashboard metrics."
@@ -58,7 +65,7 @@ def main():
         parser.error("Event {} does not exist.".format(args.event_id))
 
     report = reconciliation_report(dashboard, curation)
-    print(json.dumps(report, indent=2, sort_keys=True))
+    print(json.dumps(report, indent=2, sort_keys=True, default=json_value))
     if not all(report["reconciliation"].values()):
         print("Phase 1 reconciliation failed.", file=sys.stderr)
         return 1

@@ -340,15 +340,18 @@ The module does not silently include records that cannot be classified.
 
 ## Current Phase 1 Limitations
 
-- Satellite-name spelling and capitalization are not normalized beyond preserving the imported value.
-- Similar names such as abbreviations, punctuation variants, or spelling variations may appear as separate ranking rows.
+- Satellite casing, whitespace, and optional `CCF` prefixes are conservatively
+  normalized; all original variations remain auditable. Broader abbreviations,
+  punctuation variants, and ambiguous spellings are intentionally not merged
+  without approved alias governance.
 - The module does not merge historical import batches.
 - It does not compare different Events.
 - It does not offer demographic filters.
 - It does not provide downloadable reports.
 - Top summary cards are overall satellite totals and do not change with the Local/International ranking filter.
 
-These limitations preserve source transparency and avoid silently merging or reclassifying satellite data.
+These limitations preserve source transparency and avoid aggressive or
+unapproved merging while retaining the implemented conservative normalization.
 
 ## Main Implementation Files
 

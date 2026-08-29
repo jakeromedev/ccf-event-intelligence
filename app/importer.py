@@ -1,8 +1,6 @@
 import csv
 import json
-import os
 import uuid
-from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -356,8 +354,6 @@ def validate_batch(staged):
     ticket_refs = {clean(row.get("Buyer Reference Number")) for row in ticket_rows}
     ticket_refs.discard("")
     ticket_codes = {clean(row.get("Ticket Code")) for row in ticket_rows}
-    registrant_codes = {clean(row.get("Ticket Code")) for row in registrant_rows}
-
     for row_number, row in enumerate(ticket_rows, start=2):
         buyer_reference = clean(row.get("Buyer Reference Number"))
         if buyer_reference and buyer_reference not in buyer_refs:

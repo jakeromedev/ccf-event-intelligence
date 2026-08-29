@@ -41,13 +41,15 @@ allow-listed before SQL is built.
 
 The browser stores column visibility only in local storage. Search, filters,
 sorting, pagination, page size, view, and batch context remain in the URL.
+The registrant attestation-form source field is visible by default and renders
+valid HTTP(S) values as a concise external link; empty, malformed, and
+non-HTTP(S) values render as the standard empty-state dash.
 
 ## Authorization and privacy
 
 Page, data, and source-lineage routes all use the same backend authorization
-decorator. The current application has no user/session model and historically
-runs as a trusted administrative tool, so access is enabled by default.
-Deployments can set:
+decorator. In normal runtime, an approved administrator session is required.
+The feature can be disabled or further restricted through:
 
 ```python
 ADMIN_TABLES_ENABLED = False

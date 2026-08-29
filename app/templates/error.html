@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{% block title %}Service error · CCF Events Intelligence{% endblock %}
+
+{% block content %}
+<section class="panel empty-state">
+    <h1>We could not complete that request.</h1>
+    <p>The service recorded the failure without exposing application or personal data.</p>
+    {% if request_id %}<p>Reference: <code>{{ request_id }}</code></p>{% endif %}
+</section>
+{% endblock %}

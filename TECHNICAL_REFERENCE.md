@@ -12,11 +12,12 @@
 | ORM and SQL | SQLAlchemy 2.0.43 |
 | Database migrations | Alembic 1.16.5 |
 | Runtime database | MySQL 8.0.16 or newer through PyMySQL 1.1.2 |
+| Production WSGI runtime | Gunicorn 23.0 (`gthread`) in the supplied OCI container |
 | Local database distribution | Project-local native MySQL 8.4 installation under `instance/` |
 | Authentication | Flask-Login 0.6.3, Flask-WTF 1.2.2, and Argon2 password hashing |
 | Test framework | Python standard-library `unittest` |
-| Application entry point | `run.py` |
-| Default address | `http://127.0.0.1:5050` |
+| Development entry point | `run.py` at `http://127.0.0.1:5050` |
+| Production entry point | `ops/docker-entrypoint.sh` → configuration/schema check → Gunicorn |
 
 All Python dependencies are pinned in `requirements.txt`:
 
@@ -28,6 +29,7 @@ argon2-cffi==25.1.0
 SQLAlchemy==2.0.43
 Alembic==1.16.5
 PyMySQL[rsa]==1.1.2
+gunicorn==23.0.0
 ```
 
 ## Runtime configuration
@@ -37,23 +39,41 @@ committed template; `.env` files and local credentials are ignored by Git.
 
 | Variable | Required | Default | Purpose |
 | --- | --- | --- | --- |
+| `CCF_ENV` | Production: yes | `development` | `development`, `testing`, `staging`, or `production`. |
 | `DATABASE_URL` | Yes | None | SQLAlchemy connection URL. Normal runtime accepts only a MySQL URL. |
-| `CCF_DASHBOARD_SECRET` | Required outside local development | `dev-only-change-me` | Flask signing and CSRF secret. |
-| `CCF_SESSION_COOKIE_SECURE` | Required for HTTPS | Disabled | Adds the `Secure` flag to the session cookie when set to `1`, `true`, `yes`, or `on`. |
+| `CCF_DASHBOARD_SECRET` | Production: yes | Development-only placeholder | Flask signing and CSRF secret; production requires 32+ non-placeholder characters. |
+| `CCF_SESSION_COOKIE_SECURE` | Production: yes | Enabled in production | Adds the `Secure` cookie flag; production refuses false. |
+| `CCF_SESSION_COOKIE_SAMESITE` | No | `Lax` | `Lax`, `Strict`, or secure-only `None`. |
+| `CCF_SESSION_HOURS` | No | `8` | Session lifetime, constrained to 1–24 hours. |
+| `CCF_CSRF_TIME_LIMIT_SECONDS` | No | `7200` | CSRF token lifetime. |
+| `CCF_STAGING_DIR` | Production: yes | `instance/staged_imports` | Environment-specific private upload staging directory. |
+| `CCF_MAX_UPLOAD_MB` | No | `32` | Environment-specific request limit. |
+| `CCF_TRUSTED_HOSTS` | Production: yes | None | Comma-separated externally valid host names. |
+| `CCF_PROXY_X_FOR`, `CCF_PROXY_X_PROTO`, `CCF_PROXY_X_HOST`, `CCF_PROXY_X_PORT`, `CCF_PROXY_X_PREFIX` | When behind trusted proxy | `0` | Exact trusted proxy hop counts; arbitrary forwarded headers are ignored at zero. |
+| `CCF_LOG_LEVEL`, `CCF_LOG_FORMAT` | No | Environment-driven | Staging/production default to `INFO` JSON stdout. |
+| `CCF_STANDARD_USER_MUTATIONS_ALLOWED` | After policy approval | Development/testing true; staging/production false | Controls standard-user Event settings/Satellite Dataset/import mutation; never changes admin-only deletion/Admin Tables/users. |
+| `CCF_REQUIRE_SCHEMA_CURRENT` | Production/staging mandatory | Enabled there | Verifies MySQL and exact Alembic head at startup/readiness. |
 | `CCF_DASHBOARD_PORT` | No | `5050` | Port used by `run.py`. |
-| `CCF_DASHBOARD_DEBUG` | No | `0` | Enables Flask debug mode only when set to `1`. |
+| `CCF_DASHBOARD_DEBUG` | Development only | `0` | Production refuses debug mode. |
 | `MYSQL_TEST_DATABASE_URL` | Only for MySQL integration tests | None | Disposable MySQL test schema; its database name must contain `test`. |
 
 Example production-style configuration:
 
 ```sh
-export DATABASE_URL='mysql+pymysql://ccf_app:strong-password@127.0.0.1:3306/ccf_events'
-export CCF_DASHBOARD_SECRET='replace-with-a-long-random-secret'
+export CCF_ENV=production
+export DATABASE_URL='mysql+pymysql://ccf_app:SECRET@mysql/ccf_events'
+export CCF_DASHBOARD_SECRET='GENERATED-SECRET-FROM-PROTECTED-SECRET-MANAGER'
 export CCF_SESSION_COOKIE_SECURE=1
+export CCF_TRUSTED_HOSTS='dashboard.example.org'
+export CCF_PROXY_X_FOR=1
+export CCF_PROXY_X_PROTO=1
+export CCF_PROXY_X_HOST=1
 ```
 
-The application has a 32 MiB request-body limit. Staged uploads are written to
-`instance/staged_imports/`.
+See `.env.example` for the complete placeholder-only configuration. Production
+also refuses disabled authentication/CSRF/schema checks. The secret, database,
+staging path, cookie policy, logging, proxy trust, pool sizing, and limits are
+environment-driven.
 
 ## Database
 
@@ -113,10 +133,13 @@ python3 -m venv .venv
 .venv/bin/python run.py
 ```
 
-`run.py` uses Flask's built-in server and binds only to `127.0.0.1`. A production
-deployment should use an appropriate WSGI server or service manager and terminate
-HTTPS at the application server or a trusted reverse proxy. No production WSGI
-server is currently declared in `requirements.txt`.
+`run.py` remains the local-development server and binds only to `127.0.0.1`.
+Production uses Gunicorn via `Dockerfile` and `ops/docker-entrypoint.sh`.
+Gunicorn handles `SIGTERM` gracefully and emits lifecycle JSON. HTTPS terminates
+at the selected trusted reverse proxy. `ProxyFix` is enabled only for explicit
+per-header hop counts; Flask trusted-host validation and secure cookies remain
+active. The entrypoint verifies configuration, MySQL, and Alembic head but never
+runs migrations. Follow `DEPLOYMENT_RUNBOOK.md`.
 
 ## Schema migration and data transfer
 
@@ -163,8 +186,8 @@ The MySQL test setup drops and recreates application tables. Never point
 
 - Passwords are hashed with Argon2.
 - CSRF protection is enabled globally, with a two-hour token lifetime.
-- Session cookies are `HttpOnly` and `SameSite=Lax`; the `Secure` attribute is
-  controlled by `CCF_SESSION_COOKIE_SECURE`.
+- Session cookies are `HttpOnly` and `SameSite=Lax` by default; production
+  requires `Secure` and refuses unsafe secret/debug/authentication/CSRF/schema settings.
 - Authenticated sessions have an eight-hour lifetime.
 - Login is temporarily locked after five failed attempts for 15 minutes.
 - Public passwords must be 12–128 characters and use at least three of these
@@ -186,3 +209,15 @@ The following are intentionally excluded from version control:
 Back up the MySQL database before schema or data-transfer operations. Treat the
 contents of `instance/`, source CSV files, database dumps, and administrator
 credentials as sensitive data.
+
+## Production operations
+
+- `GET /health/live` checks process liveness.
+- `GET /health/ready` checks MySQL connectivity and exact Alembic head.
+- staging/production use PII-conscious JSON logs and request correlation.
+- `.github/workflows/ci.yml` runs lint/compile/SQLite tests, the complete suite
+  against disposable MySQL, Alembic checks, production configuration checks,
+  and a container build.
+- Backup/restore commands and safeguards are in `BACKUP_AND_RECOVERY.md`.
+- Deployment, rollback, monitoring, incident response, acceptance, and UAT are
+  linked from `README.md` and `PHASE_CHECKLISTS.md`.

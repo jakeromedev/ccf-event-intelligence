@@ -51,7 +51,11 @@
 {% block title %}Event Dashboard · CCF Events Intelligence{% endblock %}
 
 {% block page_header %}
+{% if event_mutations_allowed %}
 {{ render_page_header('Event Dashboard', event, active_batch, 'Overview and participant profile insights.', variant='workspace', action_form_id='event-settings-form', action_label='Save Changes') }}
+{% else %}
+{{ render_page_header('Event Dashboard', event, active_batch, 'Overview and participant profile insights.', variant='workspace') }}
+{% endif %}
 {% endblock %}
 
 {% block content %}
@@ -68,12 +72,12 @@
         <div class="phase1-settings-grid">
             <label class="phase1-field">
                 <span>Event Date</span>
-                <span class="phase1-input-wrap">{{ icon('events', 19) }}<input type="date" name="event_date" value="{{ event['event_date'] or '' }}"></span>
+                <span class="phase1-input-wrap">{{ icon('events', 19) }}<input type="date" name="event_date" value="{{ event['event_date'] or '' }}" {{ 'disabled' if not event_mutations_allowed else '' }}></span>
                 <small>Used for age calculation and time-based metrics.</small>
             </label>
             <label class="phase1-field">
                 <span>Participant Target <i class="phase1-inline-info" title="This benchmark never alters registration records.">i</i></span>
-                <span class="phase1-input-wrap">{{ icon('person', 19) }}<input type="number" min="0" max="1000000000" step="1" inputmode="numeric" name="participant_target" value="{{ event['participant_target'] if event['participant_target'] is not none else '' }}" placeholder="Not configured"></span>
+                <span class="phase1-input-wrap">{{ icon('person', 19) }}<input type="number" min="0" max="1000000000" step="1" inputmode="numeric" name="participant_target" value="{{ event['participant_target'] if event['participant_target'] is not none else '' }}" placeholder="Not configured" {{ 'disabled' if not event_mutations_allowed else '' }}></span>
                 <small>Set the target number of participant registrations.</small>
             </label>
             <aside class="phase1-target-note">
@@ -143,7 +147,7 @@
                 <h2 id="satellite-targets-title">Satellite Datasets</h2>
             </div>
         </div>
-        <button class="button secondary" type="button" data-satellite-dataset-open>{{ icon('chart', 17) }} Manage Satellite Targets</button>
+        {% if event_mutations_allowed %}<button class="button secondary" type="button" data-satellite-dataset-open>{{ icon('chart', 17) }} Manage Satellite Targets</button>{% endif %}
     </header>
     {% if dashboard.satellite_datasets %}
         <div class="satellite-target-grid">
@@ -175,7 +179,7 @@
         <div class="satellite-target-empty">
             <span class="phase1-target-icon">{{ icon('location', 28) }}</span>
             <div><strong>No satellite targets configured yet.</strong><p>Create a reusable group of Event satellites and track unique participant progress.</p></div>
-            <button class="button secondary" type="button" data-satellite-dataset-open>Configure a target</button>
+            {% if event_mutations_allowed %}<button class="button secondary" type="button" data-satellite-dataset-open>Configure a target</button>{% endif %}
         </div>
     {% endif %}
 </section>
@@ -225,7 +229,7 @@
     <small>Last updated: {{ dashboard.last_updated|datetime_short }}</small>
 </aside>
 
-<div class="satellite-dataset-modal" data-satellite-dataset-modal data-create-url="{{ url_for('dashboard.create_event_satellite_dataset', event_id=event['id']) }}" hidden>
+{% if event_mutations_allowed %}<div class="satellite-dataset-modal" data-satellite-dataset-modal data-create-url="{{ url_for('dashboard.create_event_satellite_dataset', event_id=event['id']) }}" hidden>
     <div class="satellite-dataset-backdrop" data-satellite-dataset-close></div>
     <section class="satellite-dataset-dialog" role="dialog" aria-modal="true" aria-labelledby="satellite-dataset-modal-title">
         <header class="satellite-dataset-modal-header">
@@ -308,6 +312,7 @@
     </section>
     <script type="application/json" data-satellite-dataset-json>{{ dashboard.satellite_datasets|tojson }}</script>
 </div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}

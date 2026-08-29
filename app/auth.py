@@ -121,6 +121,30 @@ def admin_required(view):
     return protected
 
 
+def event_mutations_allowed() -> bool:
+    """Return whether the current operator may change Event/import state."""
+    if current_app.config.get("AUTHENTICATION_DISABLED", False):
+        return True
+    if not current_user.is_authenticated:
+        return False
+    return bool(
+        current_user.is_admin
+        or current_app.config.get("STANDARD_USER_MUTATIONS_ALLOWED", False)
+    )
+
+
+def event_mutation_required(view):
+    """Keep undecided production mutation privileges administrator-only."""
+
+    @wraps(view)
+    def protected(*args, **kwargs):
+        if not event_mutations_allowed():
+            abort(403)
+        return view(*args, **kwargs)
+
+    return protected
+
+
 @bp.route("/login", methods=("GET", "POST"))
 def login():
     if current_user.is_authenticated:
@@ -138,8 +162,15 @@ def login():
         now = datetime.now()
         if user is None:
             verify_password_hash(DUMMY_PASSWORD_HASH, form.password.data)
+            current_app.logger.warning(
+                "authentication_failed", extra={"event": "authentication_failed", "reason": "invalid_credentials"}
+            )
             flash("Invalid username or password.", "error")
         elif user.locked_until and user.locked_until > now:
+            current_app.logger.warning(
+                "authentication_failed",
+                extra={"event": "authentication_failed", "reason": "account_locked", "user_id": user.id},
+            )
             flash("Too many login attempts. Please try again later.", "error")
         elif not user.check_password(form.password.data):
             user.failed_login_count += 1
@@ -148,6 +179,10 @@ def login():
                 user.locked_until = now + timedelta(minutes=LOGIN_LOCK_MINUTES)
             user.updated_at = now
             db.commit()
+            current_app.logger.warning(
+                "authentication_failed",
+                extra={"event": "authentication_failed", "reason": "invalid_credentials", "user_id": user.id},
+            )
             flash("Invalid username or password.", "error")
         else:
             user.failed_login_count = 0
@@ -155,6 +190,10 @@ def login():
             user.updated_at = now
             db.commit()
             if user.status != "approved":
+                current_app.logger.warning(
+                    "authentication_failed",
+                    extra={"event": "authentication_failed", "reason": "account_not_approved", "user_id": user.id},
+                )
                 flash("Your account is awaiting administrator approval.", "error")
             else:
                 # Flask's signed-cookie session has no server-side session id;
@@ -163,6 +202,10 @@ def login():
                 login_user(user, remember=False, fresh=True)
                 session["auth_version"] = user.auth_version
                 session.permanent = True
+                current_app.logger.info(
+                    "authentication_succeeded",
+                    extra={"event": "authentication_succeeded", "user_id": user.id, "role": user.role},
+                )
                 destination = _safe_next_url(form.next_url.data)
                 return redirect(destination or url_for("dashboard.events"))
 
@@ -238,6 +281,13 @@ def approve_user(user_id):
         user.approved_by = current_user.id
         user.updated_at = now
         db.commit()
+        current_app.logger.info(
+            "user_approved",
+            extra={
+                "event": "user_approved",
+                "user_id": user.id,
+            },
+        )
         flash("{} has been approved.".format(user.username), "success")
     else:
         flash("{} is already approved.".format(user.username), "success")
@@ -248,6 +298,10 @@ def init_app(app) -> None:
     login_manager.init_app(app)
     login_manager.login_view = "auth.login"
     login_manager.session_protection = "strong"
+
+    @app.context_processor
+    def authorization_context():
+        return {"event_mutations_allowed": event_mutations_allowed()}
 
     @login_manager.user_loader
     def load_user(user_id):
@@ -266,7 +320,13 @@ def init_app(app) -> None:
     def require_authenticated_operator():
         if current_app.config.get("AUTHENTICATION_DISABLED", False):
             return None
-        if request.endpoint in {"static", "auth.login", "auth.register"}:
+        if request.endpoint in {
+            "static",
+            "auth.login",
+            "auth.register",
+            "operations.liveness",
+            "operations.readiness",
+        }:
             return None
         if current_user.is_authenticated:
             return None
@@ -321,6 +381,15 @@ def init_app(app) -> None:
             raise click.ClickException(
                 "Administrator initialization failed; no password was displayed."
             ) from exc
+
+        current_app.logger.info(
+            "administrator_initialized",
+            extra={
+                "event": "administrator_initialized",
+                "user_id": admin.id,
+                "changed": existing,
+            },
+        )
 
         if existing:
             click.echo("WARNING: An admin account already exists.\n")

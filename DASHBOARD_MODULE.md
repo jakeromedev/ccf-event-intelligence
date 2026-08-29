@@ -547,9 +547,10 @@ dashboard page, settings action, and JSON endpoints. Only authenticated,
 approved users can reach them. Test deployments may explicitly enable
 `AUTHENTICATION_DISABLED`.
 
-Dashboard settings are not currently restricted to the administrator role; any
-approved authenticated user can save them. Admin Tables use a separate admin
-authorization check.
+The `CCF_STANDARD_USER_MUTATIONS_ALLOWED` policy controls Event settings and
+related import mutations. Development/testing default to the Phase 1 approved-
+user workflow. Staging/production default to administrator-only mutation until
+the product owner approves broader access. Admin Tables remain administrator-only.
 
 The rendered overview and `/dashboard` JSON response are aggregate-only. They
 do not include names, email addresses, mobile numbers, registration codes,

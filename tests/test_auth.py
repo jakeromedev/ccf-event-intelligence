@@ -2,7 +2,7 @@ import os
 import re
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import event as sqlalchemy_event, func, select
@@ -240,6 +240,45 @@ class AuthenticationTests(unittest.TestCase):
         self.assertIn(b"You have been logged out", logged_out.data)
         self.assertEqual(302, self.client.get("/events").status_code)
 
+    def test_secure_session_cookie_and_external_redirect_rejection(self):
+        self.create_user("secure-operator")
+        self.app.config["SESSION_COOKIE_SECURE"] = True
+        token = self.csrf("/login?next=https://attacker.example/steal")
+        response = self.client.post(
+            "/login",
+            data={
+                "csrf_token": token,
+                "username": "secure-operator",
+                "password": "StrongPassword12!",
+                "next_url": "https://attacker.example/steal",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(302, response.status_code)
+        self.assertTrue(response.headers["Location"].endswith("/events"))
+        cookie_headers = "\n".join(response.headers.getlist("Set-Cookie"))
+        self.assertIn("Secure", cookie_headers)
+        self.assertIn("HttpOnly", cookie_headers)
+        self.assertIn("SameSite=Lax", cookie_headers)
+
+    def test_login_lockout_blocks_correct_password_until_expiry(self):
+        user_id = self.create_user("lockout-operator")
+        for _attempt in range(5):
+            response = self.login("lockout-operator", "WrongPassword12!")
+            self.assertIn(b"Invalid username or password", response.data)
+
+        blocked = self.login("lockout-operator", "StrongPassword12!")
+        self.assertIn(b"Too many login attempts", blocked.data)
+        with self.app.app_context():
+            user = get_db().session.get(User, user_id)
+            self.assertIsNotNone(user.locked_until)
+            user.locked_until = datetime.now() - timedelta(seconds=1)
+            get_db().commit()
+
+        recovered = self.login("lockout-operator", "StrongPassword12!")
+        self.assertEqual(200, recovered.status_code)
+        self.assertIn(b"Your Events", recovered.data)
+
     def test_admin_approval_and_server_side_authorization(self):
         _, admin_password = self.initialize_admin()
         pending_id = self.create_user("awaiting-user", status="pending")
@@ -388,6 +427,73 @@ class AuthenticationTests(unittest.TestCase):
                     "SELECT id FROM import_batches WHERE id = ?", (active_batch_id,)
                 ).fetchone()
             )
+
+    def test_undecided_standard_user_event_mutations_fail_closed(self):
+        _, admin_password = self.initialize_admin()
+        self.create_user("read-only-operator")
+        with self.app.app_context():
+            event_id = get_db().execute(
+                "INSERT INTO events (name) VALUES ('Production Boundary Event')"
+            ).lastrowid
+            get_db().commit()
+        self.app.config["STANDARD_USER_MUTATIONS_ALLOWED"] = False
+
+        self.login("read-only-operator", "StrongPassword12!")
+        overview = self.client.get("/events/{}".format(event_id))
+        self.assertEqual(200, overview.status_code)
+        self.assertNotIn(b"Manage Satellite Targets", overview.data)
+        self.assertEqual(
+            200,
+            self.client.get("/events/{}/imports".format(event_id)).status_code,
+        )
+        self.assertEqual(
+            200,
+            self.client.get("/events/{}/data-quality".format(event_id)).status_code,
+        )
+        self.assertEqual(
+            200,
+            self.client.get("/events/{}/satellites".format(event_id)).status_code,
+        )
+        self.assertEqual(
+            403,
+            self.client.get(
+                "/events/{}/admin-tables/registrants".format(event_id)
+            ).status_code,
+        )
+        self.assertEqual(403, self.client.get("/admin/users").status_code)
+        token = self.csrf("/events/{}".format(event_id))
+        denied = self.client.post(
+            "/events/{}/settings".format(event_id),
+            data={"csrf_token": token, "participant_target": "100"},
+        )
+        self.assertEqual(403, denied.status_code)
+        self.assertEqual(
+            403,
+            self.client.post(
+                "/events/{}/imports/validate".format(event_id),
+                data={"csrf_token": token},
+            ).status_code,
+        )
+        self.assertEqual(
+            403,
+            self.client.post(
+                "/events/{}/satellite-datasets".format(event_id),
+                data={
+                    "csrf_token": token,
+                    "name": "Denied Dataset",
+                    "participant_target": "10",
+                },
+            ).status_code,
+        )
+        self.logout()
+
+        self.login("admin", admin_password)
+        token = self.csrf("/events/{}".format(event_id))
+        allowed = self.client.post(
+            "/events/{}/settings".format(event_id),
+            data={"csrf_token": token, "participant_target": "100"},
+        )
+        self.assertEqual(302, allowed.status_code)
 
 
 if __name__ == "__main__":

@@ -81,11 +81,13 @@ Widow/Widower responses. No values were manually adjusted to match Excel.
 
 ## Security and performance
 
-The application currently has no authentication or role/policy layer. Phase 1
-does not invent one; settings and dashboard routes therefore inherit the same
-access model as the existing event workspace. Counts are grouped in the database, and
-the participant profile is normalized in one bounded backend query. Raw records
-are not sent to the dashboard browser or dashboard API.
+Approved authentication is required for the Event workspace. Administrator-only
+boundaries protect user approval, Admin Tables, and batch deletion. Pending the
+Phase 2 product-owner permission decision, staging/production also keep Event
+settings, Satellite Dataset mutation, and import mutation administrator-only;
+development/testing preserve the Phase 1 operator workflow. Counts are grouped
+in MySQL through SQLAlchemy, and raw records are not sent to the aggregate
+dashboard browser or dashboard API.
 
 ## Deferred roadmap
 

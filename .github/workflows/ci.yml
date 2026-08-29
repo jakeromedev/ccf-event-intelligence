@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  sqlite-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --requirement requirements-dev.txt
+      - run: ruff check app migrations scripts tests run.py
+      - run: python -m compileall -q app migrations scripts tests run.py
+      - run: python -m unittest discover -s tests -v
+      - run: alembic heads
+
+  mysql-integration:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-password
+          MYSQL_DATABASE: ccf_events_test
+          MYSQL_USER: ccf_test
+          MYSQL_PASSWORD: ci-test-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uccf_test -pci-test-password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    env:
+      DATABASE_URL: mysql+pymysql://ccf_test:ci-test-password@127.0.0.1:3306/ccf_events_test
+      MYSQL_TEST_DATABASE_URL: mysql+pymysql://ccf_test:ci-test-password@127.0.0.1:3306/ccf_events_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --requirement requirements-dev.txt
+      - run: alembic upgrade head
+      - run: alembic current
+      - run: alembic check
+      - run: python -m unittest discover -s tests -v
+      - name: Validate production configuration and WSGI startup prerequisites
+        env:
+          CCF_ENV: production
+          CCF_DASHBOARD_SECRET: ci-only-validation-secret-with-more-than-32-characters
+          CCF_SESSION_COOKIE_SECURE: "1"
+          CCF_TRUSTED_HOSTS: localhost,127.0.0.1
+        run: flask --app 'app:create_app()' production-check
+      - name: Start and gracefully stop production WSGI runtime
+        env:
+          CCF_ENV: production
+          CCF_DASHBOARD_SECRET: ci-only-validation-secret-with-more-than-32-characters
+          CCF_SESSION_COOKIE_SECURE: "1"
+          CCF_TRUSTED_HOSTS: 127.0.0.1,localhost
+          PORT: "8081"
+          WEB_CONCURRENCY: "1"
+        run: |
+          gunicorn --config ops/gunicorn.conf.py 'app:create_app()' &
+          wsgi_pid=$!
+          trap 'kill -TERM "$wsgi_pid" 2>/dev/null || true' EXIT
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if curl --fail --silent --header 'Host: 127.0.0.1' http://127.0.0.1:8081/health/ready; then
+              break
+            fi
+            if [ "$attempt" = 10 ]; then exit 1; fi
+            sleep 1
+          done
+          kill -TERM "$wsgi_pid"
+          wait "$wsgi_pid"
+          trap - EXIT
+
+  container-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          push: false
+          tags: ccf-systems-dashboard:ci
+      - name: Verify production image contract
+        run: |
+          test "$(docker image inspect ccf-systems-dashboard:ci --format '{{.Config.User}}')" = "ccf"
+          docker run --rm --entrypoint sh ccf-systems-dashboard:ci -c '
+            test "$CCF_ENV" = production
+            test "$(id -u)" = 10001
+            test -w /data/staged
+            test ! -e /app/.env.example
+            test ! -e /app/run.py
+            test ! -d /app/tests
+          '

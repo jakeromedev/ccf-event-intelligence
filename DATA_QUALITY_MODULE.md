@@ -472,7 +472,9 @@ panels, tables, and responsive breakpoints used by the rest of the application.
   investigation.
 - Raw CSV content and personal contact/profile fields are intentionally not
   available in either table.
-- Satellite spelling variants are preserved rather than silently normalized.
+- Conservative satellite normalization merges casing, whitespace, and optional
+  `CCF` prefix variants while preserving every source spelling for audit.
+  Broader alias/canonical governance remains out of scope.
 
 ## Main Implementation Files
 

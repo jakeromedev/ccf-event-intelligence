@@ -1,12 +1,13 @@
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
+from time import perf_counter
 
 from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user
 from sqlalchemy.exc import IntegrityError
 
-from .auth import admin_required
+from .auth import admin_required, event_mutation_required
 from .aggregation import (
     active_batch,
     curated_registrant_detail,
@@ -98,16 +99,17 @@ def _remove_staged_batch_files(staged_paths):
             candidate.relative_to(staging_root)
         except ValueError:
             current_app.logger.warning(
-                "Skipped staged-file cleanup outside STAGING_DIR: %s", candidate
+                "staged_file_cleanup_refused",
+                extra={"event": "staged_file_cleanup_refused", "reason": "outside_staging_root"},
             )
             continue
         try:
             candidate.unlink(missing_ok=True)
             parent_directories.add(candidate.parent)
         except OSError:
-            current_app.logger.exception(
-                "Import batch was deleted, but staged-file cleanup failed for %s",
-                candidate,
+            current_app.logger.error(
+                "staged_file_cleanup_failed",
+                extra={"event": "staged_file_cleanup_failed", "error_type": "OSError"},
             )
     for directory in sorted(parent_directories, key=lambda path: len(path.parts), reverse=True):
         if directory == staging_root:
@@ -184,6 +186,7 @@ def event_dashboard_api(event_id):
 
 
 @bp.post("/events/<int:event_id>/settings")
+@event_mutation_required
 def update_event_settings(event_id):
     event = get_event_or_404(event_id)
     event_date = (request.form.get("event_date") or "").strip()
@@ -226,6 +229,7 @@ def update_event_settings(event_id):
 
 
 @bp.post("/events/<int:event_id>/satellite-datasets")
+@event_mutation_required
 def create_event_satellite_dataset(event_id):
     get_event_or_404(event_id)
     db = get_db()
@@ -245,6 +249,7 @@ def create_event_satellite_dataset(event_id):
 
 
 @bp.post("/events/<int:event_id>/satellite-datasets/<int:dataset_id>")
+@event_mutation_required
 def update_event_satellite_dataset(event_id, dataset_id):
     get_event_or_404(event_id)
     get_satellite_dataset_or_404(event_id, dataset_id)
@@ -267,6 +272,7 @@ def update_event_satellite_dataset(event_id, dataset_id):
 
 
 @bp.post("/events/<int:event_id>/satellite-datasets/<int:dataset_id>/delete")
+@event_mutation_required
 def delete_event_satellite_dataset(event_id, dataset_id):
     get_event_or_404(event_id)
     dataset = get_satellite_dataset_or_404(event_id, dataset_id)
@@ -662,22 +668,54 @@ def event_imports(event_id):
 
 
 @bp.post("/events/<int:event_id>/imports/validate")
+@event_mutation_required
 def validate_import(event_id):
     get_event_or_404(event_id)
     required = ("tickets", "buyers", "registrants")
     uploads = {slot: request.files.get(slot) for slot in required}
     if any(not upload or not upload.filename for upload in uploads.values()):
+        current_app.logger.warning(
+            "import_validation_rejected",
+            extra={
+                "event": "import_validation_rejected",
+                "event_id": event_id,
+                "reason": "incomplete_export_set",
+            },
+        )
         flash("All three required exports must be selected.", "error")
         return redirect(url_for("dashboard.event_imports", event_id=event_id))
 
+    started_at = perf_counter()
     try:
         staged = stage_upload_set(uploads, current_app.config["STAGING_DIR"])
         validation = validate_batch(staged)
         batch_id = store_validation(get_db(), validation, event_id)
-    except Exception:
-        current_app.logger.exception("Import validation failed without logging CSV contents.")
+    except Exception as error:
+        current_app.logger.error(
+            "import_validation_failed",
+            extra={
+                "event": "import_validation_failed",
+                "event_id": event_id,
+                "error_type": type(error).__name__,
+                "duration_ms": round((perf_counter() - started_at) * 1000, 2),
+            },
+        )
         flash("The import could not be validated. This event's active dashboard was not changed.", "error")
         return redirect(url_for("dashboard.event_imports", event_id=event_id))
+
+    current_app.logger.info(
+        "import_validation_completed",
+        extra={
+            "event": "import_validation_completed",
+            "event_id": event_id,
+            "batch_id": batch_id,
+            "valid": validation.valid,
+            "row_count": sum(item.total_rows for item in validation.files.values()),
+            "validation_error_count": sum(issue.severity == "error" for issue in validation.issues),
+            "validation_warning_count": sum(issue.severity == "warning" for issue in validation.issues),
+            "duration_ms": round((perf_counter() - started_at) * 1000, 2),
+        },
+    )
 
     if validation.valid:
         flash("All three exports are valid. Review the summary, then process the batch.", "success")
@@ -687,6 +725,7 @@ def validate_import(event_id):
 
 
 @bp.post("/events/<int:event_id>/imports/<int:batch_id>/process")
+@event_mutation_required
 def process_import(event_id, batch_id):
     get_event_or_404(event_id)
     db = get_db()
@@ -695,21 +734,63 @@ def process_import(event_id, batch_id):
     ).fetchone()
     if not batch:
         abort(404)
+    started_at = perf_counter()
     try:
         process_batch(db, batch_id)
     except ValueError as exc:
+        current_app.logger.warning(
+            "import_processing_rejected",
+            extra={
+                "event": "import_processing_rejected",
+                "event_id": event_id,
+                "batch_id": batch_id,
+                "reason": "invalid_batch_state",
+            },
+        )
         flash(str(exc), "error")
         return redirect(url_for("dashboard.event_imports", event_id=event_id, batch=batch_id))
-    except Exception:
-        current_app.logger.exception("Import processing failed without logging CSV contents.")
+    except Exception as error:
+        current_app.logger.error(
+            "import_processing_failed",
+            extra={
+                "event": "import_processing_failed",
+                "event_id": event_id,
+                "batch_id": batch_id,
+                "error_type": type(error).__name__,
+                "duration_ms": round((perf_counter() - started_at) * 1000, 2),
+            },
+        )
         flash("Processing failed. This event's previous active dataset remains active.", "error")
         return redirect(url_for("dashboard.event_imports", event_id=event_id, batch=batch_id))
+
+    counts = db.execute(
+        """
+        SELECT
+            (SELECT COUNT(*) FROM tickets WHERE batch_id = ?) tickets,
+            (SELECT COUNT(*) FROM buyers WHERE batch_id = ?) buyers,
+            (SELECT COUNT(*) FROM registrants WHERE batch_id = ?) registrants
+        """,
+        (batch_id, batch_id, batch_id),
+    ).fetchone()
+    current_app.logger.info(
+        "import_processing_completed",
+        extra={
+            "event": "import_processing_completed",
+            "event_id": event_id,
+            "batch_id": batch_id,
+            "ticket_rows": counts["tickets"],
+            "buyer_rows": counts["buyers"],
+            "registrant_rows": counts["registrants"],
+            "duration_ms": round((perf_counter() - started_at) * 1000, 2),
+        },
+    )
 
     flash("Import processed successfully and is now this event's active dataset.", "success")
     return redirect(url_for("dashboard.event_overview", event_id=event_id))
 
 
 @bp.post("/events/<int:event_id>/imports/<int:batch_id>/activate")
+@event_mutation_required
 def activate_import(event_id, batch_id):
     get_event_or_404(event_id)
     db = get_db()
@@ -719,14 +800,43 @@ def activate_import(event_id, batch_id):
     ).fetchone()
     if not batch:
         abort(404)
+    started_at = perf_counter()
     try:
         changed = activate_batch(db, event_id, batch_id)
     except ValueError as exc:
+        current_app.logger.warning(
+            "import_activation_rejected",
+            extra={
+                "event": "import_activation_rejected",
+                "event_id": event_id,
+                "batch_id": batch_id,
+                "reason": "invalid_batch_state",
+            },
+        )
         flash(str(exc), "error")
-    except Exception:
-        current_app.logger.exception("Import batch activation failed.")
+    except Exception as error:
+        current_app.logger.error(
+            "import_activation_failed",
+            extra={
+                "event": "import_activation_failed",
+                "event_id": event_id,
+                "batch_id": batch_id,
+                "error_type": type(error).__name__,
+                "duration_ms": round((perf_counter() - started_at) * 1000, 2),
+            },
+        )
         flash("The import batch could not be activated. The current dataset was preserved.", "error")
     else:
+        current_app.logger.info(
+            "import_activation_completed",
+            extra={
+                "event": "import_activation_completed",
+                "event_id": event_id,
+                "batch_id": batch_id,
+                "changed": changed,
+                "duration_ms": round((perf_counter() - started_at) * 1000, 2),
+            },
+        )
         flash(
             "Batch #{} is already active.".format(batch_id)
             if not changed

@@ -1,6 +1,22 @@
-# CCF Event Dashboard — Phase 1 MVP
+# CCF Systems Dashboard
 
-A privacy-conscious, event-based dashboard for importing CCF Generated Tickets, Buyers, and Registrants exports as one validated batch per Event.
+A privacy-conscious, event-based dashboard whose Phase 1 MVP is complete and
+whose Phase 2 production-readiness foundations are implemented. Production
+acceptance remains gated by the unresolved decisions and target-environment
+verification in `PHASE_2_DECISIONS.md` and `PRODUCTION_ACCEPTANCE.md`.
+
+## Runtime architecture
+
+- Application/runtime data: MySQL 8 + SQLAlchemy; schema: Alembic only.
+- Local development: `run.py` and a local MySQL database.
+- Automated tests: isolated SQLite plus the complete suite against disposable MySQL.
+- Staging/production: Gunicorn in the supplied OCI container, behind an explicit
+  trusted HTTPS reverse proxy, with secure environment-driven configuration.
+- Operations: minimal liveness/readiness, JSON logs, CI, checksummed backup/
+  guarded restore tooling, deployment/rollback/incident/UAT runbooks.
+
+SQLite is not an application or production database. It remains only for
+isolated tests and reading the retained historical source during one-time transfer.
 
 ## Phase 1 features
 
@@ -143,6 +159,7 @@ their identity provider through `ADMIN_TABLES_AUTHORIZER`.
 
 ## Module documentation
 
+- [Project Phase Checklists](PHASE_CHECKLISTS.md)
 - [Event Dashboard module](DASHBOARD_MODULE.md)
 - [Event Imports module](EVENT_IMPORTS_MODULE.md)
 - [Phase 1 Core Event Dashboard](PHASE_1_CORE_DASHBOARD.md)
@@ -151,3 +168,11 @@ their identity provider through `ADMIN_TABLES_AUTHORIZER`.
 - [Registrant and Satellite Curation](CURATION_LAYER.md)
 - [Admin Tables module](ADMIN_TABLES_MODULE.md)
 - [Authentication and user approval](AUTHENTICATION.md)
+- [Phase 2 decision register](PHASE_2_DECISIONS.md)
+- [Production deployment runbook](DEPLOYMENT_RUNBOOK.md)
+- [Rollback runbook](ROLLBACK_RUNBOOK.md)
+- [Backup and recovery](BACKUP_AND_RECOVERY.md)
+- [Operations, governance, and incident response](OPERATIONS_AND_INCIDENT_RESPONSE.md)
+- [Production acceptance and UAT](PRODUCTION_ACCEPTANCE.md)
+- [Phase 2 verification record](PHASE_2_VERIFICATION.md)
+- [Target-environment security validation](TARGET_SECURITY_VALIDATION.md)
