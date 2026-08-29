@@ -21,7 +21,7 @@ the module documentation.
 | Phase | Status | Purpose |
 |---|---|---|
 | Phase 1 | Complete | Event imports, curation, dashboard analytics, Data Quality, Admin Tables, and authentication |
-| Phase 2 | Partially Ready | Engineering foundations verified; product decisions and target-environment acceptance remain open |
+| Phase 2 | Ready for Production Acceptance | Engineering and hosted release gates pass; product decisions and target-environment acceptance remain open |
 | Phase 3 | Proposed | Advanced analytics, reporting, exports, and historical comparisons |
 | Phase 4 | Future/conditional | Data remediation workflows, advanced import modes, and scale automation |
 
@@ -152,7 +152,7 @@ required preflight work for approving Phase 2.
 - [x] Define vendor-neutral monitoring signals and recommended availability/database/import alerts.
 - [x] Exercise local application-unavailable, database-readiness, and import-failure signals without leaking secrets.
 - [ ] Exercise end-to-end alert delivery through the selected monitoring platform.
-- [ ] Execute the added CI workflow for tests, migrations, static analysis, production startup, and container build in the hosted CI environment.
+- [x] Execute the CI workflow for tests, migrations, static analysis, production startup, and container build/runtime in hosted CI.
 - [x] Run the complete 71-test integration suite against disposable MySQL in release validation.
 - [x] Complete automated administrator and approved-user authorization/UAT regression coverage.
 - [ ] Complete administrator and approved-user acceptance testing.
@@ -182,9 +182,14 @@ required preflight work for approving Phase 2.
   structured logs, database outage/recovery, observed application unavailability,
   graceful shutdown, configuration recovery, restart, and readiness recovery.
 - Local failure signals were exercised. External alert delivery was not.
-- Container build, hosted CI, target HTTPS/storage controls, actual immutable
-  application rollback, and human UAT were not executed in this environment
-  and remain unchecked.
+- GitHub Actions run [33252156921](https://github.com/jakeromedev/ccf-event-intelligence/actions/runs/33252156921)
+  at commit `8852f60` passed all three jobs:
+  SQLite quality, disposable MySQL integration, and production container build/runtime.
+- The hosted OCI job migrated disposable MySQL through the image, verified the
+  non-root UID and image exclusions, started the production entrypoint/Gunicorn,
+  passed Docker health and live/ready probes, and stopped gracefully with exit 0.
+- Target HTTPS/storage controls, actual immutable application rollback, external
+  alert delivery, and human UAT remain unchecked.
 
 ### Remaining Phase 2 classification — 2026-08-29
 
@@ -192,15 +197,15 @@ required preflight work for approving Phase 2.
 |---|---|---|
 | P2-01 through P2-10 and backup/retention policy | **Blocked — Product Decision** | Approved values, accountable owners, dates, and decision records. |
 | Target transport, proxy boundary, secrets, filesystem, database, and backup controls | **Blocked — Target Environment** | Execute `TARGET_SECURITY_VALIDATION.md` on the selected platform. |
-| Hosted CI and OCI image execution | **Blocked — External Execution** | Successful hosted workflow run and retained build/runtime evidence. |
 | Production deployment/application rollback | **Blocked — Target Environment** | Exercise approved immutable artifacts through the target platform. |
 | Backup/recovery acceptance | **Blocked — Product Decision / Target Environment** | Approved store/authority/RPO/RTO and a retained target-level restore record. |
 | Monitoring alerts | **Blocked — External Execution / Product Decision** | Approved thresholds/channels and recorded delivery/recovery tests. |
 | Administrator and approved-user UAT | **Blocked — Target Environment** | Signed human results using `PRODUCTION_ACCEPTANCE.md`. |
 | Deployed-architecture documentation | **Blocked — Target Environment** | Update the vendor-neutral documents with the approved target's actual controls. |
 
-See `PHASE_2_VERIFICATION.md` for command results, local deployment/rollback
-evidence, monitoring signal results, and scenario-by-scenario automated UAT.
+See `PHASE_2_VERIFICATION.md` for command and hosted-CI results, local
+deployment/rollback evidence, monitoring signal results, and scenario-by-scenario
+automated UAT.
 
 ---
 

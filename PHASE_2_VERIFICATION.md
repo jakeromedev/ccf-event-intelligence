@@ -29,8 +29,8 @@ policy has been approved.
 | Empty-MySQL migration | **Pass** — 16 test tables were removed from the explicitly named `ccf_events_test` schema; all four Alembic revisions upgraded to `a9d3c7e5f102`. |
 | Migration drift | **Pass** — `alembic current`, `alembic heads`, and `alembic check` agreed; no new operations were detected. |
 | Production configuration/schema check | **Pass** against the migrated disposable MySQL database. |
-| Hosted CI workflow | **Blocked — External Execution** until a GitHub Actions run is triggered and observed. |
-| OCI image build/runtime | **Blocked — External Execution** locally because Docker, Podman, and Colima are unavailable. The hosted workflow builds the image and verifies its configured user, UID, production environment, writable staging path, and excluded development files. |
+| Hosted CI workflow | **Pass — Hosted** — GitHub Actions run [33252156921](https://github.com/jakeromedev/ccf-event-intelligence/actions/runs/33252156921) at commit `8852f60` completed successfully; SQLite quality, MySQL integration, and container jobs all passed. |
+| OCI image build/runtime | **Pass — Hosted** — the image built, excluded development/sensitive-local files, contained no injected runtime secret in its history, used UID 10001, exposed a writable staging path, migrated disposable MySQL as a separate command, started the production entrypoint/Gunicorn, passed Docker health plus live/ready probes, and stopped gracefully with exit code 0. Docker, Podman, and Colima remain unavailable locally. |
 
 The two tests added in this acceptance iteration directly verify login lockout
 and expiry recovery, and controlled import-processing failure with active-batch
@@ -55,7 +55,7 @@ environment permits.
 | Structured logs | **Pass — Local Rehearsal** | Lifecycle, request, authentication, role-denial, and readiness failure events were emitted as JSON with IDs/categories/counts rather than credentials or profile data. |
 | Graceful restart | **Pass — Local Rehearsal** | `SIGTERM` produced worker/application stop events; the process became unavailable, restarted, and readiness returned HTTP 200. |
 | External HTTPS/proxy/storage controls | **Blocked — Target Environment** | Execute `TARGET_SECURITY_VALIDATION.md` after P2-02 is approved. |
-| Immutable image deployment | **Blocked — External Execution / Target Environment** | No local OCI runtime and no selected deployment platform. |
+| Immutable image execution | **Pass — Hosted** | GitHub Actions run `33252156921` exercised the production image. Deployment and rollback on an approved target remain blocked. |
 
 This proves that the runbook can drive a disposable production-mode deployment.
 It does not prove target-platform deployment repeatability.
@@ -127,13 +127,15 @@ administrator/approved-user UAT require a selected staging/production target.
 
 ### Blocked — External Execution
 
-Hosted CI, local/hosted container execution evidence, and end-to-end alert
-delivery require systems that were not available during the local rehearsal.
+End-to-end monitoring alert delivery remains blocked because no approved
+provider, threshold, notification channel, or recipient exists. Hosted CI and
+container execution are no longer blocked.
 
 ## Readiness conclusion
 
-Engineering and disposable-environment verification are substantially ready,
-and no failed application defect remains from this iteration. Phase 2 is still
-**Partially Ready** until hosted/container validation is observed and the open
-governance decisions permit target-environment acceptance. It is not Phase 2
-Complete, and this record does not authorize Phase 3.
+Engineering, disposable-environment, hosted CI, and production-container gates
+pass, and no failed application defect remains from this iteration. Phase 2 is
+**Ready for Production Acceptance**: the remaining work is accountable product
+decisions, target deployment/security/recovery/rollback evidence, external alert
+delivery, and signed human UAT. It is not Phase 2 Complete, and this record does
+not authorize Phase 3.
