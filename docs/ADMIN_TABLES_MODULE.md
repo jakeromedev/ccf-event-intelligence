@@ -10,6 +10,11 @@ three required import datasets:
 Curated Registrants is a contextual tab within Registrants. Registration
 Sources opens in a detail drawer and is not a separate navigation module.
 Satellites and internal mapping/pivot tables remain outside Admin Tables.
+The separate Registrations module provides the smaller operational registration
+view; Admin Tables remains the complete source-inspection surface.
+
+For a table-by-table map and language-neutral query pseudocode, see
+`ADMIN_TABLES_QUERY_REFERENCE.md`.
 
 ## Data scope
 

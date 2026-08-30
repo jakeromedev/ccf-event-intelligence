@@ -17,7 +17,7 @@ Event
       -> rebuildable curated rows
 ```
 
-The current schema has fourteen application tables:
+The current schema has fifteen application tables:
 
 1. `events`
 2. `import_batches`
@@ -26,13 +26,14 @@ The current schema has fourteen application tables:
 5. `buyers`
 6. `tickets`
 7. `registrants`
-8. `curated_registrants`
-9. `curated_registrant_sources`
-10. `satellites`
-11. `satellite_source_variations`
-12. `curated_registrant_satellites`
-13. `satellite_datasets`
-14. `satellite_dataset_satellites`
+8. `attestation_verifications`
+9. `curated_registrants`
+10. `curated_registrant_sources`
+11. `satellites`
+12. `satellite_source_variations`
+13. `curated_registrant_satellites`
+14. `satellite_datasets`
+15. `satellite_dataset_satellites`
 
 ## Relationship diagram
 
@@ -44,6 +45,8 @@ erDiagram
     IMPORT_BATCHES ||--o{ BUYERS : imports
     IMPORT_BATCHES ||--o{ TICKETS : imports
     IMPORT_BATCHES ||--o{ REGISTRANTS : imports
+    REGISTRANTS ||--o| ATTESTATION_VERIFICATIONS : has_current_review
+    USERS ||--o{ ATTESTATION_VERIFICATIONS : reviews
     IMPORT_BATCHES ||--o{ CURATED_REGISTRANTS : derives
     IMPORT_BATCHES ||--o{ SATELLITES : derives
     CURATED_REGISTRANTS ||--|{ CURATED_REGISTRANT_SOURCES : traces
@@ -178,6 +181,40 @@ export-only fields—including contact and payment fields—for permission-prote
 Admin Tables inspection while normalized columns continue driving application
 logic. Historical rows are backfilled from preserved staged files when those
 files remain available.
+
+The Registrations module is a composed operational view, not a copied
+registration table. It reads one `registrants` row per displayed registration,
+extracts focused contact/logistics/attestation fields from `source_data_json`,
+and left joins `tickets` on `(batch_id, ticket_code)` for Payment Status. Phase
+2 adds only the separate current-state table described below; imported rows and
+source values remain immutable.
+
+### `attestation_verifications`
+
+Stores the application-owned current attestation decision for an imported
+registration:
+
+```text
+id, registrant_id, status, updated_by_user_id, created_at, updated_at
+```
+
+Important constraints:
+
+```text
+registrant_id -> registrants.id ON DELETE CASCADE
+updated_by_user_id -> users.id ON DELETE SET NULL
+UNIQUE(registrant_id)
+status IN ('pending', 'verified', 'invalid')
+INDEX(status)
+INDEX(updated_by_user_id)
+```
+
+The absence of a row is interpreted as `pending`, with no reviewer or reviewed
+timestamp. Every actual update records the authenticated administrator and a
+server-generated timestamp. Deleting a registration or its batch cascades the
+verification row; deleting a reviewer retains the state and timestamp while
+setting reviewer ID to null. This is a current-state record, not a full audit
+history.
 
 ## Curated analytical tables
 

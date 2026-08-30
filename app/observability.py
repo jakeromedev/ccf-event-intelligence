@@ -53,6 +53,7 @@ SAFE_OPERATIONAL_FIELDS = {
     "path",
     "proxy_enabled",
     "reason",
+    "registrant_id",
     "registrant_rows",
     "request_id",
     "role",

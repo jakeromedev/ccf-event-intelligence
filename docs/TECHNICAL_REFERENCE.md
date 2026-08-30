@@ -81,10 +81,10 @@ a dedicated Event workspace plus aggregate JSON APIs. This service owns Event
 and active-batch scoping, source-field normalization, composable validated
 filters, privacy suppression, historical snapshot queries, and explicit
 cross-Event comparisons. `ANALYTICS_REFERENCE.md` is the metric contract and
-`PHASE_3_DECISIONS.md` records unresolved revenue, export, priority, and privacy
-policy decisions. `REPORTING.md` records the deliberately disabled download
-surface and approval requirements. No Phase 3 database migration is required
-for the current derived analytics.
+`PHASE_3_DECISIONS.md` records deferred financial, export, priority, and
+privacy roadmap items. `REPORTING.md` records the deliberately disabled download
+surface and future approval requirements. No Phase 3 database migration is
+required for the current derived analytics.
 
 ## Database
 

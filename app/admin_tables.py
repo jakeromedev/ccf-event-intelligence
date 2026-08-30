@@ -4,6 +4,8 @@ import hashlib
 import json
 import re
 
+from .url_safety import safe_external_url
+
 
 PER_PAGE_OPTIONS = (25, 50, 100)
 TEXT_OPERATORS = ("contains", "equals", "starts_with", "ends_with", "is_empty", "is_not_empty")
@@ -492,6 +494,17 @@ def admin_table_data(db, dataset, event_id, active_batch_id, args):
         {key: value for key, value in column.items() if key != "expression"}
         for column in columns
     ]
+    serialized_rows = []
+    renderer_columns = {
+        column["key"]: column.get("renderer") for column in columns if column.get("renderer")
+    }
+    for row in rows:
+        values = dict(row)
+        for key, renderer in renderer_columns.items():
+            if renderer == "attestation_form_link":
+                values[key] = safe_external_url(values.get(key))
+        serialized_rows.append(values)
+
     return {
         "dataset": dataset,
         "label": DATASET_LABELS[dataset],
@@ -500,7 +513,7 @@ def admin_table_data(db, dataset, event_id, active_batch_id, args):
         "column_options": _categorical_options(
             db, base_sql, options_conditions, options_params, columns
         ),
-        "rows": [dict(row) for row in rows],
+        "rows": serialized_rows,
         "query": {
             "search": query,
             "filters": filters,

@@ -1,10 +1,10 @@
 # Phase 3 Reporting and Export Governance
 
-Status: **Downloads disabled — product authorization required**
+Status: **Deferred export capabilities; interactive analytics remain authoritative**
 Last reviewed: 2026-08-30
 
-This document records the actual reporting surface and the contract required
-before downloads can be enabled. It does not grant export permission.
+This document records the actual reporting surface and the future contract
+required before downloads can be enabled. It does not grant export permission.
 
 ## Current supported reporting surface
 
@@ -14,18 +14,19 @@ before downloads can be enabled. It does not grant export permission.
 | Event analytics API | JSON | Explicit Event and active batch, with validated filters | Approved authenticated users | Aggregate only |
 | Historical trends | HTML/JSON | Explicit Event; each active/inactive batch is an independent snapshot | Approved authenticated users | Aggregate only |
 | Cross-Event comparison | HTML/JSON | Explicit selection of 2–10 Events | Approved authenticated users under the current all-Events dashboard model | Aggregate only |
-| Downloadable aggregate report | None | Not available | Decision Required | Not applicable |
-| Row-level export | None | Not available | Decision Required; most restrictive default | Not applicable |
+| Downloadable aggregate report | None | Not available | Deferred / optional | Not applicable |
+| Row-level export | None | Not available | Deferred / optional; most restrictive default | Not applicable |
 
 There is no hidden CSV/XLSX route and no Reports download control. Admin Tables
 provides administrator-only on-screen source inspection; it is not an export
 permission and does not provide a Phase 3 download endpoint.
 
-## Decisions required before aggregate CSV
+## Future optional aggregate CSV
 
-The product owner must approve the roles/capability, allowed historical and
-cross-Event scope, final privacy/differencing policy, report types/columns, and
-audit ownership/retention. If approved, CSV is the preferred first format.
+If a future product release enables downloads, the product owner must approve
+the roles/capability, allowed historical and cross-Event scope, final
+privacy/differencing policy, report types/columns, and audit ownership/
+retention. If approved, CSV is the preferred first format.
 
 The endpoint must invoke the same `app/analytics.py` result used by the screen,
 including the same Event, batch, validated filters, category labels,
@@ -83,11 +84,12 @@ remain governance decisions.
 
 ## Row-level export gate
 
-Row-level exports are not implemented. Approval must define an explicit role or
-permission, exact allowed-column schema, purpose, Event/batch scope, auditing,
-retention, and privacy/legal owner. It must not serialize Admin Tables wholesale.
-Potentially sensitive fields include identity/contact data, birth information,
-gender, location, Dgroup, payments, and attestation links; every allowed field
+Row-level exports are not implemented and are treated as deferred/optional.
+Approval would need to define an explicit role or permission, exact
+allowed-column schema, purpose, Event/batch scope, auditing, retention, and
+privacy/legal owner. It must not serialize Admin Tables wholesale. Potentially
+sensitive fields include identity/contact data, birth information, gender,
+location, Dgroup, payments, and attestation links; every allowed field
 requires a documented purpose.
 
 ## Verification while downloads remain disabled
@@ -96,4 +98,4 @@ Automated tests confirm common aggregate and row-level download paths are absent
 (HTTP 404), the Analytics UI contains no download control, and existing
 aggregate APIs remain privacy-suppressed. Export authorization, filename,
 formula-injection, audit, and report-reconciliation checklist items remain
-incomplete because no approved export exists to implement or test.
+future work because no approved export exists to implement or test.

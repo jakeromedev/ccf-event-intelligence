@@ -55,10 +55,11 @@ def create_app(test_config=None):
 
     @app.context_processor
     def administrative_access_context():
-        from .routes import can_access_admin_tables
+        from .routes import can_access_admin_tables, can_access_registrations
 
         return {
             "admin_tables_allowed": can_access_admin_tables(),
+            "registrations_allowed": can_access_registrations(),
             "max_upload_mb": app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024),
         }
 

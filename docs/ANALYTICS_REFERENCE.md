@@ -134,17 +134,19 @@ All routes are covered by the global approved-user authentication guard.
 Malformed filters return HTTP 400; missing Events return 404. No endpoint emits
 row-level registrant data.
 
-## Revenue and reporting limitations
+## Deferred financial and reporting capabilities
 
-Revenue, Expected Amount, Paid Amount, Payment Discrepancy, aggregate downloads,
-and row-level downloads are not implemented. They are decision-gated in
-`PHASE_3_DECISIONS.md`. The presence of raw monetary columns is not an approved
-formula or currency definition.
+Revenue, Expected Amount, Paid Amount, Payment Discrepancy, refunds,
+discount/waiver accounting, currency aggregation/conversion, aggregate
+downloads, and row-level downloads are intentionally out of scope for the
+approved Phase 3 analytics release. Their source-field reconnaissance and
+future decision contract remain documented in `PHASE_3_DECISIONS.md` for later
+reference.
 
-The inspected monetary candidate fields and required decision contract are in
-`PHASE_3_DECISIONS.md`. Actual and required future reporting behavior is in
-`REPORTING.md`. No monetary metric or download endpoint is part of the current
-API contract.
+The presence of raw monetary columns is preserved as source data only; it is
+not interpreted as an approved accounting formula or currency definition.
+Future optional reporting behavior is in `REPORTING.md`. No monetary metric or
+download endpoint is part of the current API contract.
 
 ## Reconciliation and testing
 

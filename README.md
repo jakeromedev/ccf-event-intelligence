@@ -3,9 +3,11 @@
 A privacy-conscious, event-based dashboard whose Phase 1 MVP is complete and
 whose Phase 2 production-readiness foundations are implemented. Production
 acceptance remains gated by the unresolved decisions and target-environment
-verification in `PHASE_2_DECISIONS.md` and `PRODUCTION_ACCEPTANCE.md`. Phase 3
-engineering is in progress with source-supported aggregate analytics; revenue,
-downloads, final privacy policy, and analytics priority remain decision-gated.
+verification in `docs/PHASE_2_DECISIONS.md` and
+`docs/PRODUCTION_ACCEPTANCE.md`. Phase 3
+aggregate analytics are complete for the approved scope; deferred financial
+analytics and download features are documented separately and do not block the
+current phase.
 
 ## Runtime architecture
 
@@ -52,9 +54,10 @@ isolated tests and reading the retained historical source during one-time transf
 - Configurable small-group suppression with secondary/complementary disclosure protection
 - Aggregate-only authenticated APIs; no Phase 3 row-level data endpoint
 
-See [Advanced Analytics metric reference](ANALYTICS_REFERENCE.md) for exact
-definitions and [Phase 3 decision register](PHASE_3_DECISIONS.md) for the
-revenue, export, priority, and privacy decisions that remain unresolved.
+See [Advanced Analytics metric reference](docs/ANALYTICS_REFERENCE.md) for exact
+definitions and [Phase 3 decision register](docs/PHASE_3_DECISIONS.md) for the
+deferred financial, export, priority, and privacy decisions retained for
+future roadmap work.
 
 ## MySQL development setup
 
@@ -105,7 +108,7 @@ prints its generated password. Running it again resets that same account's
 password, invalidates its existing sessions, and never creates another admin.
 Browser registrations always create pending standard-user accounts; the admin
 approves them from **Users** in the application navigation. See
-[Authentication and user approval](AUTHENTICATION.md) for the complete workflow
+[Authentication and user approval](docs/AUTHENTICATION.md) for the complete workflow
 and security model.
 
 The default is port `5050` because macOS AirPlay Receiver commonly reserves port `5000`. To select another port:
@@ -176,23 +179,13 @@ their identity provider through `ADMIN_TABLES_AUTHORIZER`.
 
 ## Module documentation
 
-- [Project Phase Checklists](PHASE_CHECKLISTS.md)
-- [Event Dashboard module](DASHBOARD_MODULE.md)
-- [Event Imports module](EVENT_IMPORTS_MODULE.md)
-- [Phase 1 Core Event Dashboard](PHASE_1_CORE_DASHBOARD.md)
-- [Current Database Structure](CURRENT_DATABASE_STRUCTURE.md)
-- [Age Distribution Logic](AGE_DISTRIBUTION_LOGIC.md)
-- [Registrant and Satellite Curation](CURATION_LAYER.md)
-- [Admin Tables module](ADMIN_TABLES_MODULE.md)
-- [Authentication and user approval](AUTHENTICATION.md)
-- [Phase 2 decision register](PHASE_2_DECISIONS.md)
-- [Production deployment runbook](DEPLOYMENT_RUNBOOK.md)
-- [Rollback runbook](ROLLBACK_RUNBOOK.md)
-- [Backup and recovery](BACKUP_AND_RECOVERY.md)
-- [Operations, governance, and incident response](OPERATIONS_AND_INCIDENT_RESPONSE.md)
-- [Production acceptance and UAT](PRODUCTION_ACCEPTANCE.md)
-- [Phase 2 verification record](PHASE_2_VERIFICATION.md)
-- [Target-environment security validation](TARGET_SECURITY_VALIDATION.md)
-- [Phase 3 decision register](PHASE_3_DECISIONS.md)
-- [Advanced Analytics metric reference](ANALYTICS_REFERENCE.md)
-- [Phase 3 reporting and export governance](REPORTING.md)
+- [Documentation index](docs/README.md)
+- [Project Phase Checklists](docs/PHASE_CHECKLISTS.md)
+- [Event Dashboard module](docs/DASHBOARD_MODULE.md)
+- [Event Imports module](docs/EVENT_IMPORTS_MODULE.md)
+- [Current Database Structure](docs/CURRENT_DATABASE_STRUCTURE.md)
+- [Admin Tables module](docs/ADMIN_TABLES_MODULE.md)
+- [Registrations module](docs/REGISTRATIONS_MODULE.md)
+- [Authentication and user approval](docs/AUTHENTICATION.md)
+- [Production deployment runbook](docs/DEPLOYMENT_RUNBOOK.md)
+- [Advanced Analytics metric reference](docs/ANALYTICS_REFERENCE.md)

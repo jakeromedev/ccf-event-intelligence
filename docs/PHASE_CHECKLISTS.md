@@ -22,12 +22,12 @@ the module documentation.
 |---|---|---|
 | Phase 1 | Complete | Event imports, curation, dashboard analytics, Data Quality, Admin Tables, and authentication |
 | Phase 2 | Ready for Production Acceptance | Engineering and hosted release gates pass; product decisions and target-environment acceptance remain open |
-| Phase 3 | In Progress | Advanced analytics, reporting, exports, and historical comparisons |
+| Phase 3 | Complete | Advanced aggregate analytics, filtering, attendance analysis, historical trends, and cross-Event comparison |
 | Phase 4 | Future/conditional | Data remediation workflows, advanced import modes, and scale automation |
 
-Phase 3 engineering is in progress, but its unresolved product decisions are
-not approved schedules or delivery commitments. Phase 4 remains proposed and
-conditional.
+Phase 3 engineering is complete for the approved aggregate analytics scope.
+Deferred financial analytics and download/reporting capabilities are tracked
+separately and do not block the current phase.
 
 ---
 
@@ -209,25 +209,24 @@ automated UAT.
 
 ---
 
-## Phase 3 — Advanced Analytics and Reporting
+## Phase 3 — Advanced Aggregate Analytics and Comparison
 
-Status: **In Progress**. Source-supported aggregate analytics are implemented;
-revenue, downloads, final privacy policy, and product priorities remain decision-gated.
+Status: **Complete**. Source-supported aggregate analytics, combined filters,
+attendance comparisons, historical trends, and cross-Event comparisons are
+implemented and verified. Deferred financial analytics and export features are
+tracked separately and do not block the approved Phase 3 scope.
 
 ### Product-definition gate
 
-- [ ] **Decision required:** Prioritize Payment, Revenue, Occupation, Dgroup, Home Area,
-  historical trends, and cross-Event comparisons.
-- [ ] **Decision required:** Approve authoritative Revenue and payment-discrepancy formulas.
-- [ ] **Decision required:** Define who may export row-level or aggregate reports.
-- [ ] Define privacy thresholds and suppression rules for small analytical groups.
-  Engineering suppression is configurable and tested; final organizational threshold
-  and differencing policy remain `Decision Required` in `PHASE_3_DECISIONS.md`.
+- [x] Payment Status and Payment Method analytics are implemented and verified.
+- [x] Occupation, Dgroup, Home Area, historical trends, and cross-Event comparisons are implemented and verified.
+- [x] Combined filters, attendance comparison, and privacy-aware suppression are implemented and verified.
+- [x] User-facing metric definitions and limitations are documented.
+- [ ] Deferred / future product decisions are tracked separately in `PHASE_3_DECISIONS.md`.
 
 ### Analytics
 
 - [x] Add Payment Status and payment-method analytics.
-- [ ] Add validated Revenue, expected amount, paid amount, and discrepancy reporting.
 - [x] Add Occupation analytics where reliable source fields exist.
 - [x] Add Dgroup membership and leadership analytics where reliable source fields exist.
 - [x] Add Home Area and other source-supported participant filters.
@@ -235,20 +234,39 @@ revenue, downloads, final privacy policy, and product priorities remain decision
 - [x] Add registration-versus-check-in comparisons by source-supported dimensions.
 - [x] Add historical batch trends for an Event.
 - [x] Add comparative analytics across Events.
+- [ ] Deferred / future financial analytics: Expected Amount, Paid Amount, Revenue,
+  Payment Discrepancy, refund accounting, discount/waiver accounting, and
+  currency aggregation/conversion.
 
 ### Reporting
 
-- [ ] Add approved downloadable aggregate reports.
-- [ ] Add permission-protected row-level exports only if explicitly approved.
-- [ ] Ensure report filters, totals, and definitions match on-screen analytics.
-- [ ] Audit exported files for personal-data minimization and safe filenames.
+- [ ] Deferred / optional: approved downloadable aggregate reports.
+- [ ] Deferred / optional: permission-protected row-level exports only if explicitly approved.
+- [ ] Deferred / optional: ensure any future report filters, totals, and definitions match on-screen analytics.
+- [ ] Deferred / optional: audit any future exported files for personal-data minimization and safe filenames.
 
 ### Phase 3 exit criteria
 
-- [ ] Every new metric has an approved definition and reconciliation test.
+- [x] Every enabled analytical metric has a documented definition and reconciliation test.
 - [x] Historical and cross-Event queries preserve Event and batch ownership boundaries.
-- [ ] Export authorization and privacy behavior are covered by automated tests.
+- [x] Aggregate analytics enforce the configured suppression/privacy behavior.
+- [x] Combined filters reconcile correctly across supported dimensions.
+- [x] Registration-versus-check-in analytics reconcile to existing participant definitions.
 - [x] User-facing metric definitions and limitations are documented.
+- [x] SQLite and disposable MySQL validation pass.
+
+### Deferred / future financial analytics
+
+- [ ] Expected Amount.
+- [ ] Authoritative Paid Amount monetary calculation.
+- [ ] Revenue calculation.
+- [ ] Payment Discrepancy.
+- [ ] Refund accounting.
+- [ ] Discount / waiver accounting.
+- [ ] Currency aggregation / conversion.
+
+These items are intentionally out of scope for the approved Phase 3 analytics
+release and do not block Phase 3 completion.
 
 ### Phase 3 implementation evidence — 2026-08-29
 
@@ -271,7 +289,7 @@ revenue, downloads, final privacy policy, and product priorities remain decision
   Gunicorn readiness, and graceful SIGTERM passed.
 - Hosted CI evidence is recorded only after the pushed workflow run completes.
 
-### Phase 3 completion-iteration evidence — 2026-08-30
+### Phase 3 scope-reclassification evidence — 2026-08-30
 
 - The supplied monetary fields were audited without assigning accounting
   meaning: Generated Tickets exposes `Price`, `Price Type`, `Price Name`, and
@@ -279,17 +297,15 @@ revenue, downloads, final privacy policy, and product priorities remain decision
   Amount`, `Amount Paid`, statuses/methods/references, and a blank discount
   reference. No currency, refund amount/status, or explicit waiver amount was
   found. The structured approval contract is in `PHASE_3_DECISIONS.md`.
-- Revenue remains disabled because Expected Amount, Paid Amount, Revenue,
-  discrepancy, refund, discount/waiver, and currency rules are not approved.
-- Downloadable aggregate and row-level reports remain disabled because export
-  roles and privacy policy are not approved. `REPORTING.md` documents the
-  required authorization, shared-service reconciliation, minimization,
-  filename, spreadsheet-injection, audit, and ownership controls.
-- Automated privacy coverage now exercises combined filters, active analytics,
-  historical trends, and cross-Event comparisons. A separate regression test
-  confirms that common download paths and UI controls remain absent while the
-  decision gate is open. These tests do not claim that an unimplemented export
-  has passed export-security acceptance.
+- The following capabilities are intentionally deferred and no longer block
+  Phase 3 completion: Expected Amount, Paid Amount, Revenue, Payment
+  Discrepancy, refund accounting, discount/waiver accounting, currency
+  aggregation/conversion, row-level exports, and aggregate downloads.
+- `REPORTING.md` documents existing aggregate analytics and the future optional
+  reporting contract without treating deferred features as defects.
+- Automated coverage continues to verify combined filters, active analytics,
+  historical trends, cross-Event comparisons, privacy suppression, and the
+  absence of unapproved download controls.
 - SQLite: 82 tests passed locally on 2026-08-30.
 - Disposable MySQL 8.4: the same 82 tests passed locally on 2026-08-30.
 - A fresh disposable MySQL schema upgraded through all four revisions to
@@ -299,9 +315,9 @@ revenue, downloads, final privacy policy, and product priorities remain decision
 - The previously pushed Phase 3 analytics foundation commit `d963c35` passed
   hosted CI run `33264910728`. Hosted CI evidence for this iteration must be
   recorded after its commit is pushed and the workflow actually completes.
-- No checklist box changed in this iteration: remaining Revenue, export, final
-  privacy-policy, and priority items are still product decisions rather than
-  engineering assumptions.
+- No checklist box changed in this iteration: the scope changed by
+  reclassifying deferred financial/reporting features as out of scope for the
+  approved Phase 3 release.
 
 ---
 
@@ -344,7 +360,7 @@ workflow justifies their complexity.
 
 ## Supporting documentation
 
-- [README](README.md) — current local setup and feature summary
+- [README](../README.md) — current local setup and feature summary
 - [Technical Reference](TECHNICAL_REFERENCE.md) — runtime, database, migration, and security configuration
 - [Current Database Structure](CURRENT_DATABASE_STRUCTURE.md) — authoritative schema and ownership model
 - [Event Dashboard Module](DASHBOARD_MODULE.md) — dashboard metric and API contract

@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% from "_page_header.html" import render_page_header %}
+
+{% block title %}Registrations · CCF Event Intelligence{% endblock %}
+
+{% block page_header %}
+{{ render_page_header('Registrations', event, active_batch, 'Review operational registration, logistics, attestation, and payment-status information.', variant='workspace', header_class='admin-tables-header') }}
+{% endblock %}
+
+{% block content %}
+<section class="admin-table-panel registrations-panel" data-registrations-table
+    data-event-id="{{ event['id'] }}"
+    data-data-url="{{ url_for('dashboard.event_registrations_data', event_id=event['id']) }}"
+    data-update-url="{{ url_for('dashboard.update_registration_attestation', event_id=event['id'], registrant_id=0) }}"
+    data-csrf-token="{{ csrf_token() }}"
+    data-can-edit-attestation="{{ 'true' if attestation_edit_allowed else 'false' }}">
+    <header class="admin-table-heading">
+        <div>
+            <p class="admin-breadcrumb">Event Operations <span>/</span> Registrations</p>
+            <h1>Registration Records</h1>
+            <p>One row per imported registration. Records are not deduplicated.</p>
+        </div>
+        <label class="admin-batch-selector">
+            <span>Batch</span>
+            <select data-batch-select>
+                <option value="active" {{ 'selected' if selected_batch == (active_batch['id'] if active_batch else none) else '' }}>Active Batch{% if active_batch %} (#{{ active_batch['id'] }}){% endif %}</option>
+                <option value="all" {{ 'selected' if selected_batch == 'all' else '' }}>All Batches</option>
+                {% for batch in batches %}
+                    <option value="{{ batch.id }}" {{ 'selected' if selected_batch == batch.id and (not active_batch or batch.id != active_batch['id']) else '' }}>Batch #{{ batch.id }} · {{ batch.status|capitalize }}</option>
+                {% endfor %}
+            </select>
+        </label>
+    </header>
+
+    <div class="registrations-summary-grid" aria-label="Registration requirement summary">
+        <div><span>Total Registrations</span><strong data-summary="total_registrations">—</strong></div>
+        <div><span>Attestation Pending</span><strong data-summary="attestation_pending">—</strong></div>
+        <div><span>Attestation Verified</span><strong data-summary="attestation_verified">—</strong></div>
+        <div><span>Attestation Invalid</span><strong data-summary="attestation_invalid">—</strong></div>
+        <div><span>Payment Validated</span><strong data-summary="payment_validated">—</strong></div>
+    </div>
+
+    <div class="registrations-quick-filters" aria-label="Attestation status quick filters">
+        <span>Attestation:</span>
+        <button type="button" data-attestation-quick="all">All</button>
+        <button type="button" data-attestation-quick="pending">Pending</button>
+        <button type="button" data-attestation-quick="verified">Verified</button>
+        <button type="button" data-attestation-quick="invalid">Invalid</button>
+    </div>
+
+    <p class="registrations-update-feedback" data-update-feedback role="status" aria-live="polite" hidden></p>
+
+    <div class="admin-table-toolbar">
+        <label class="admin-search">
+            {{ icon('search', 18) }}
+            <span class="sr-only">Search registrations</span>
+            <input type="search" placeholder="Search code, name, email, or mobile…" autocomplete="off" data-global-search>
+        </label>
+        <div class="admin-toolbar-actions">
+            <button type="button" class="button secondary admin-reset-sort" data-reset-sort hidden>Reset Sort</button>
+            <button type="button" class="button secondary" data-filter-toggle>{{ icon('filter', 17) }} Filters <span class="toolbar-count" data-filter-count hidden>0</span></button>
+        </div>
+    </div>
+
+    <div class="admin-filter-builder" data-filter-builder hidden>
+        <div class="admin-filter-fields">
+            <label><span>Column</span><select data-filter-field></select></label>
+            <label><span>Condition</span><select data-filter-operator></select></label>
+            <label class="admin-filter-value"><span>Value</span><select data-filter-value></select></label>
+            <button type="button" class="button primary" data-add-filter>Add Filter</button>
+        </div>
+        <p>Combine filters within the selected Event and Batch.</p>
+    </div>
+
+    <div class="admin-active-filters" data-active-filters hidden>
+        <span>Filters:</span><div data-filter-chips></div>
+        <button type="button" data-clear-filters>Clear All Filters</button>
+    </div>
+
+    <div class="registrations-scope-note">
+        <span>{{ icon('lock', 14) }}</span>
+        Personal information is restricted to authorized administrators and is never exported from this page.
+    </div>
+
+    <div class="admin-table-state" data-table-state>Loading registrations…</div>
+    <div class="admin-table-scroll" data-table-wrap hidden>
+        <table class="admin-data-table registrations-data-table">
+            <thead data-table-head></thead>
+            <tbody data-table-body></tbody>
+        </table>
+    </div>
+
+    <footer class="admin-table-footer" data-table-footer hidden>
+        <p data-table-summary></p>
+        <div class="admin-pagination-controls">
+            <label>Rows per page
+                <select data-page-size>{% for size in (25, 50, 100) %}<option value="{{ size }}" {{ 'selected' if size == 50 else '' }}>{{ size }}</option>{% endfor %}</select>
+            </label>
+            <nav data-pagination aria-label="Registration table pages"></nav>
+        </div>
+    </footer>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='registrations.js', v='20260830-phase1') }}" defer></script>
+{% endblock %}

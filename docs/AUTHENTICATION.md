@@ -75,6 +75,18 @@ Approval and user-management endpoints enforce the admin role on the server.
 Existing event dashboards, imports, Data Quality endpoints, settings, and APIs
 all require an approved authenticated account. Existing PII-bearing Admin
 Tables additionally require the administrator role.
+The PII-bearing Registrations page, data endpoint, and Phase 2 attestation
+verification endpoint use an administrator-only role boundary. The PATCH route
+also requires an attributable authenticated administrator and global CSRF
+validation; enabling authentication-disabled local reads does not permit an
+anonymous verification update.
+
+The Phase 3 permission review retains the same administrator-only boundary for
+viewing and editing. The current role model has no dedicated Registrations
+reviewer permission, and Phase 3 does not broaden access by coupling it to the
+separate standard-user Event/import mutation setting. A future split between
+view and edit permissions requires an explicit authorization design and
+product-owner approval.
 
 Phase 3 Analytics pages and aggregate APIs follow the same approved-user access
 boundary as the normal Event dashboard. They expose aggregates only and require

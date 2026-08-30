@@ -33,6 +33,7 @@ from .admin_tables import (
 from .db import get_db
 from .import_history import IMPORT_HISTORY_STATUSES, import_history
 from .importer import activate_batch, process_batch, stage_upload_set, store_validation, validate_batch
+from .registrations import registrations_data, update_attestation_verification
 from .satellite_datasets import (
     create_satellite_dataset,
     delete_satellite_dataset,
@@ -64,6 +65,28 @@ def admin_tables_access_required(view):
         return view(*args, **kwargs)
 
     return protected
+
+
+def can_access_registrations():
+    """Keep the new PII-bearing operational table administrator-only."""
+    if current_app.config.get("AUTHENTICATION_DISABLED", False):
+        return True
+    return bool(current_user.is_authenticated and current_user.is_admin)
+
+
+def registrations_access_required(view):
+    @wraps(view)
+    def protected(*args, **kwargs):
+        if not can_access_registrations():
+            abort(403)
+        return view(*args, **kwargs)
+
+    return protected
+
+
+def can_edit_attestation_verification():
+    """Verification changes require an attributable administrator account."""
+    return bool(current_user.is_authenticated and current_user.is_admin)
 
 
 def get_event_or_404(event_id):
@@ -414,6 +437,84 @@ def event_overview_registrants(event_id):
     if not batch:
         return jsonify({"registrants": []})
     return jsonify({"registrants": overview_registrants(db, batch["id"])})
+
+
+@bp.get("/events/<int:event_id>/registrations")
+@registrations_access_required
+def event_registrations(event_id):
+    db = get_db()
+    event = get_event_or_404(event_id)
+    batch = active_batch(db, event_id)
+    try:
+        selected_batch = resolve_batch_scope(
+            db, event_id, request.args.get("batch"), batch["id"] if batch else None
+        )
+    except AdminTableQueryError:
+        abort(404)
+    return render_template(
+        "registrations.html",
+        event=event,
+        active_batch=batch,
+        selected_batch=selected_batch,
+        batches=event_batches(db, event_id),
+        attestation_edit_allowed=can_edit_attestation_verification(),
+    )
+
+
+@bp.get("/events/<int:event_id>/registrations/data")
+@registrations_access_required
+def event_registrations_data(event_id):
+    db = get_db()
+    get_event_or_404(event_id)
+    batch = active_batch(db, event_id)
+    try:
+        result = registrations_data(
+            db, event_id, batch["id"] if batch else None, request.args
+        )
+    except AdminTableQueryError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(result)
+
+
+@bp.patch(
+    "/events/<int:event_id>/registrations/<int:registrant_id>/attestation"
+)
+@registrations_access_required
+def update_registration_attestation(event_id, registrant_id):
+    if not can_edit_attestation_verification():
+        abort(403)
+    db = get_db()
+    get_event_or_404(event_id)
+    batch = active_batch(db, event_id)
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "A JSON request body is required."}), 400
+    try:
+        result = update_attestation_verification(
+            db,
+            event_id,
+            batch["id"] if batch else None,
+            registrant_id,
+            request.args.get("batch"),
+            payload.get("status"),
+            current_user.id,
+        )
+    except AdminTableQueryError as exc:
+        return jsonify({"error": str(exc)}), 400
+    if result is None:
+        abort(404)
+    current_app.logger.info(
+        "attestation_verification_updated",
+        extra={
+            "event": "attestation_verification_updated",
+            "event_id": event_id,
+            "batch_id": result["batch_id"],
+            "registrant_id": registrant_id,
+            "user_id": current_user.id,
+            "status": result["status"],
+        },
+    )
+    return jsonify(result)
 
 
 @bp.get("/events/<int:event_id>/admin-tables/<dataset>")

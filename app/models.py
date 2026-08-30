@@ -350,6 +350,58 @@ class Registrant(Base):
     checked_in: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))
     source_data_json: Mapped[Optional[str]] = mapped_column(LONG_TEXT)
 
+    attestation_verification: Mapped[Optional["AttestationVerification"]] = relationship(
+        back_populates="registrant",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        uselist=False,
+    )
+
+
+class AttestationVerification(Base):
+    """Application-owned current review state for one imported registration."""
+
+    __tablename__ = "attestation_verifications"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending','verified','invalid')",
+            name="ck_attestation_verifications_status",
+        ),
+        UniqueConstraint(
+            "registrant_id", name="uq_attestation_verifications_registrant"
+        ),
+        Index("idx_attestation_verifications_status", "status"),
+        Index("idx_attestation_verifications_reviewer", "updated_by_user_id"),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    registrant_id: Mapped[int] = mapped_column(
+        ID_TYPE,
+        ForeignKey("registrants.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'pending'")
+    )
+    updated_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ID_TYPE,
+        ForeignKey("users.id", ondelete="SET NULL"),
+    )
+    created_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+    updated_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+    registrant: Mapped[Registrant] = relationship(
+        back_populates="attestation_verification"
+    )
+    updated_by: Mapped[Optional[User]] = relationship(
+        foreign_keys=[updated_by_user_id]
+    )
+
 
 class CuratedRegistrant(Base):
     __tablename__ = "curated_registrants"

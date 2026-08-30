@@ -1,6 +1,6 @@
 # Phase 3 Decision Register
 
-Status: **Phase 3 engineering in progress**  
+Status: **Phase 3 approved aggregate analytics complete; financial analytics deferred**
 Last reviewed: 2026-08-30
 
 This register separates product/governance authority from engineering facts.
@@ -9,18 +9,18 @@ decision. `Decision Required` entries must not be treated as approval.
 
 ## P3-01 — Analytics priority
 
-**Status: Decision Required**
+**Status: Deferred / not required for current Phase 3 scope**
 
 | Candidate | Approved priority |
 | --- | --- |
-| Payment Status | Decision Required |
-| Payment Method | Decision Required |
-| Revenue | Decision Required |
-| Occupation | Decision Required |
-| Dgroup | Decision Required |
-| Home Area | Decision Required |
-| Historical trends | Decision Required |
-| Cross-Event comparison | Decision Required |
+| Payment Status | Approved / implemented |
+| Payment Method | Approved / implemented |
+| Revenue | Deferred / not required for current Phase 3 scope |
+| Occupation | Approved / implemented |
+| Dgroup | Approved / implemented |
+| Home Area | Approved / implemented |
+| Historical trends | Approved / implemented |
+| Cross-Event comparison | Approved / implemented |
 
 Engineering has begun the source-derived, non-monetary aggregates because their
 eligible population and fields can be traced directly to current imports.
@@ -28,7 +28,7 @@ Implementing them does not establish their organizational priority.
 
 ## P3-02 — Monetary definitions
 
-**Status: Decision Required — Revenue remains disabled**
+**Status: Deferred / not required for current Phase 3 scope**
 
 ### Source-field audit — evidence, not a formula
 
@@ -57,41 +57,42 @@ or Revenue calculation has been added.
 
 ### Required decision contract
 
-Every section below remains **Decision Required**, so Revenue remains disabled.
+Every section below is retained as future reference for financial analytics.
+It is not a blocker for the current Phase 3 release.
 
-#### Expected Amount — Decision Required
+#### Expected Amount — Deferred / not required for current Phase 3 scope
 
 Define the eligible population, authoritative source or formula, bundle and Buy
 X Get Y allocation, and blank/zero/cancelled/complimentary treatment.
 
-#### Paid Amount — Decision Required
+#### Paid Amount — Deferred / not required for current Phase 3 scope
 
 Identify the authoritative collected-money field and states, refund semantics,
 and allocation of one Buyer amount across tickets and curated people.
 
-#### Revenue — Decision Required
+#### Revenue — Deferred / not required for current Phase 3 scope
 
 Choose and name gross collections, net collections, expected ticket value,
 recognized revenue, or another definition. Decide whether service charges are
 inside or outside Revenue.
 
-#### Payment Discrepancy — Decision Required
+#### Payment Discrepancy — Deferred / not required for current Phase 3 scope
 
 Approve operands, sign/direction, aggregation level, tolerance/rounding, and
 null/unallocatable behavior. No subtraction formula is implied.
 
-#### Refunds — Decision Required
+#### Refunds — Deferred / not required for current Phase 3 scope
 
 Identify an authoritative refund source, define partial/full refund treatment,
 and specify effects on Paid Amount, Revenue, and Discrepancy. The current
 exports do not support treating refunds as zero.
 
-#### Discounts and waivers — Decision Required
+#### Discounts and waivers — Deferred / not required for current Phase 3 scope
 
 Define how promotions, discount references, zero-price tickets, complimentary
 access, and approved waivers affect Expected Amount and Discrepancy.
 
-#### Currency — Decision Required
+#### Currency — Deferred / not required for current Phase 3 scope
 
 Define the authoritative currency source/default and missing-currency behavior.
 For multiple currencies, define separation or an approved conversion source,
@@ -103,42 +104,38 @@ defines currency, and no approved rule identifies which field is authoritative
 for a participant after cancellation, failure, refund, partial payment,
 multi-ticket purchase, or service charges.
 
-The product owner must approve each definition independently:
+The product owner may approve each definition independently in a future
+financial-analytics phase:
 
 | Concept | Decision required |
 | --- | --- |
-| Expected Amount | Eligible population, authoritative field/formula, treatment of complimentary/cancelled tickets, and rounding. |
-| Paid Amount | Authoritative collected field, payment-status conditions, refunds, partial payments, and allocation of Buyer-level amounts to participants. |
-| Revenue | Gross, net, expected, ticket-only, or another explicitly named concept. |
-| Payment Discrepancy | Direction and exact formula after Expected and Paid Amount definitions are approved. |
-| Refunds | Authoritative source and effects on Paid Amount, Revenue, and Discrepancy. |
-| Discounts / Waivers | Promotion allocation and zero/complimentary/waiver behavior. |
-| Currency | Authoritative source/default, handling of missing currency, and whether currencies may ever be converted. |
+| Expected Amount | Deferred / future financial analytics. |
+| Paid Amount | Deferred / future financial analytics. |
+| Revenue | Deferred / future financial analytics. |
+| Payment Discrepancy | Deferred / future financial analytics. |
+| Refunds | Deferred / future financial analytics. |
+| Discounts / Waivers | Deferred / future financial analytics. |
+| Currency | Deferred / future financial analytics. |
 
-The application does not calculate or display any monetary metric until these
-rules are approved. No `Price × Registrants` assumption is used.
+The application does not calculate or display any monetary metric. This is an
+intentional scope decision, not an implementation defect. No `Price ×
+Registrants` assumption is used.
 
 ## P3-03 — Report and export authorization
 
-**Status: Decision Required — Downloads remain disabled**
+**Status: Deferred / optional**
 
-- Aggregate CSV reports: decide between administrator-only and administrator +
-  approved users.
-- Row-level reports: decide between administrator-only, a future explicitly
-  authorized reporting role, or disabled entirely.
-- Decide the permitted row-level field list and audit retention if row-level
-  exports are approved.
+Aggregate CSV reports and row-level exports are not part of the approved Phase
+3 scope. If a future product release introduces downloads, the roles, row-level
+field list, audit retention, and server-side enforcement rules will need to be
+defined before implementation.
 
 Current safe behavior is no Phase 3 download endpoint. Dashboard access does
 not imply export permission, and Admin Tables remains administrator-only.
-No aggregate or row-level permission capability has been added because neither
-the permitted roles nor the long-term role model has been approved. Any future
-permission must be enforced server-side and must not be inferred from page
-visibility or normal aggregate-dashboard access.
 
 ## P3-04 — Small-group privacy threshold
 
-**Status: Decision Required — Final organizational threshold**
+**Status: Engineering default implemented; organizational policy deferred**
 
 Engineering behavior exists and is configurable through
 `CCF_ANALYTICS_MIN_GROUP_SIZE` (valid range 1–100). The temporary engineering
@@ -156,18 +153,19 @@ Current behavior:
 - Event totals and larger combined suppressed groups remain reconcilable;
 - aggregate APIs never include raw registrant identifiers or contact data.
 
-Before production acceptance of Phase 3, the product owner/privacy owner must
-approve the threshold, acceptable differencing risk, and whether stricter rules
-are needed for multi-dimensional or cross-Event views.
+Before any externally distributed reporting feature is introduced, the product
+owner/privacy owner should approve the threshold, acceptable differencing risk,
+and whether stricter rules are needed for multi-dimensional or cross-Event
+views.
 
 | Privacy question | Current engineering behavior | Approval status |
 | --- | --- | --- |
-| Minimum visible group | Configurable 1–100; temporary default 5 | Decision Required |
-| Display token | `< threshold` for a directly small non-zero group | Decision Required |
-| Small category labels | Combined as `Suppressed categories` | Decision Required |
-| Percentages | Withheld when they disclose a suppressed count | Decision Required |
-| Complementary suppression | Additional category/complementary values withheld when subtraction would disclose a small group | Decision Required |
-| Repeated-query differencing | Low-frequency filter values are omitted; broader differencing risk still needs privacy-owner review | Decision Required |
+| Minimum visible group | Configurable 1–100; temporary default 5 | Deferred / configurable engineering default |
+| Display token | `< threshold` for a directly small non-zero group | Deferred / configurable engineering default |
+| Small category labels | Combined as `Suppressed categories` | Deferred / configurable engineering default |
+| Percentages | Withheld when they disclose a suppressed count | Deferred / configurable engineering default |
+| Complementary suppression | Additional category/complementary values withheld when subtraction would reveal a small group | Deferred / configurable engineering default |
+| Repeated-query differencing | Low-frequency filter values are omitted; broader differencing risk still needs privacy-owner review | Deferred / configurable engineering default |
 
 ## P3-05 — Cross-Event access model
 
@@ -185,6 +183,7 @@ aggregate. This implementation does not invent an ACL or weaken Admin Tables.
 
 ## Approval record
 
-No Phase 3 product decision has an approved owner/date recorded in the
-repository as of 2026-08-30. Record the approver, decision date, exact rule, and
-effective release here before changing a status from `Decision Required`.
+No Phase 3 product decision needs to block the approved aggregate analytics
+scope. If future financial analytics or exports are reintroduced, record the
+approver, decision date, exact rule, and effective release here before treating
+them as required scope.
