@@ -4,15 +4,15 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{% block title %}CCF Event Intelligence{% endblock %}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v='20260824-auth-1') }}">
+    <title>{% block title %}{{ app_name }}{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v='20260831-b1g-cream-2') }}">
 </head>
 <body class="auth-page">
     <main class="auth-shell">
-        <section class="auth-brand-panel" aria-label="CCF Event Intelligence">
+        <section class="auth-brand-panel" aria-label="{{ app_name }}">
             <div class="auth-brand-lockup">
-                <span class="auth-brand-mark"><img src="{{ url_for('static', filename='CCF-Logo-2017-01.png') }}" alt="CCF"></span>
-                <span><strong>CCF EVENT</strong><small>INTELLIGENCE</small></span>
+                <span class="auth-brand-mark"><img src="{{ url_for('static', filename='b1g-logo-circle.png') }}" alt="" aria-hidden="true"></span>
+                <span><strong>{{ app_name }}</strong></span>
             </div>
             <div class="auth-brand-copy">
                 <p class="hero-kicker">Secure event operations</p>

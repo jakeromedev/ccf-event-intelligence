@@ -1,7 +1,7 @@
-# CCF Systems Dashboard Documentation
+# B1G Admin Internal System Documentation
 
 This directory contains the active development, architecture, operations, and
-roadmap documentation for the CCF Systems Dashboard. Project setup and the
+roadmap documentation for B1G Admin Internal System. Project setup and the
 high-level feature summary remain in the repository-level [README](../README.md).
 
 ## Architecture and technical references

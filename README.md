@@ -1,4 +1,4 @@
-# CCF Systems Dashboard
+# B1G Admin Internal System
 
 A privacy-conscious, event-based dashboard whose Phase 1 MVP is complete and
 whose Phase 2 production-readiness foundations are implemented. Production

@@ -6,19 +6,29 @@
     const batchSelect = root.querySelector("[data-batch-select]");
     const pageSize = root.querySelector("[data-page-size]");
     const stateMessage = root.querySelector("[data-table-state]");
+    const stateSkeleton = root.querySelector("[data-table-skeleton]");
+    const stateTitle = root.querySelector("[data-table-state-title]");
+    const stateDetail = root.querySelector("[data-table-state-detail]");
+    const stateClear = root.querySelector("[data-table-clear]");
+    const stateRetry = root.querySelector("[data-table-retry]");
     const tableWrap = root.querySelector("[data-table-wrap]");
     const tableHead = root.querySelector("[data-table-head]");
     const tableBody = root.querySelector("[data-table-body]");
     const tableFooter = root.querySelector("[data-table-footer]");
     const summary = root.querySelector("[data-table-summary]");
     const pagination = root.querySelector("[data-pagination]");
-    const filterBuilder = root.querySelector("[data-filter-builder]");
     const filterField = root.querySelector("[data-filter-field]");
     const filterOperator = root.querySelector("[data-filter-operator]");
     const valueLabel = root.querySelector(".admin-filter-value");
     const activeFilters = root.querySelector("[data-active-filters]");
     const filterChips = root.querySelector("[data-filter-chips]");
     const filterCount = root.querySelector("[data-filter-count]");
+    const filterToggle = root.querySelector("[data-filter-toggle]");
+    const filterDrawer = root.querySelector("[data-filter-drawer]");
+    const filterDialog = filterDrawer.querySelector("[role='dialog']");
+    const filterDraftList = root.querySelector("[data-filter-draft-list]");
+    const filterDraftEmpty = root.querySelector("[data-filter-draft-empty]");
+    const filterDraftCount = root.querySelector("[data-filter-draft-count]");
     const updateFeedback = root.querySelector("[data-update-feedback]");
     const columnsMenu = root.querySelector("[data-columns-menu]");
     const columnsToggle = root.querySelector("[data-columns-toggle]");
@@ -58,6 +68,7 @@
     let columns = [];
     let columnValues = {};
     let filters = [];
+    let draftFilters = [];
     let page = 1;
     let sort = "";
     let direction = "asc";
@@ -74,6 +85,7 @@
     let fitScale = 1;
     let previewLoaded = false;
     let previewLoadTimer = null;
+    let filterReturnFocus = null;
 
     const operatorLabels = {
         equals: "Equals", in: "Is Any Of", is_empty: "Is Empty",
@@ -84,10 +96,24 @@
         ? "—"
         : String(value);
 
+    const showTableState = ({title, detail = "", clear = false, retry = false, loading = false}) => {
+        stateTitle.textContent = title;
+        stateDetail.textContent = detail;
+        stateDetail.hidden = !detail;
+        stateClear.hidden = !clear;
+        stateRetry.hidden = !retry;
+        stateSkeleton.hidden = !loading;
+        stateMessage.hidden = false;
+    };
+
     const normalizeStatus = (value) => allowedStatuses.includes(value) ? value : "pending";
 
     const readUrl = () => {
         const params = new URLSearchParams(window.location.search);
+        const requestedBatch = params.get("batch") || "active";
+        batchSelect.value = [...batchSelect.options].some((option) => option.value === requestedBatch)
+            ? requestedBatch
+            : "active";
         search.value = params.get("search") || params.get("q") || "";
         page = Math.max(Number.parseInt(params.get("page") || "1", 10) || 1, 1);
         pageSize.value = ["25", "50", "100"].includes(params.get("per_page")) ? params.get("per_page") : "50";
@@ -106,7 +132,7 @@
         }
     };
 
-    const updateUrl = () => {
+    const updateUrl = (mode = "replace") => {
         const params = new URLSearchParams(window.location.search);
         const values = {
             search: search.value.trim(),
@@ -120,7 +146,11 @@
         Object.entries(values).forEach(([key, value]) => {
             if (value) params.set(key, value); else params.delete(key);
         });
-        window.history.replaceState({}, "", `${window.location.pathname}${params.toString() ? `?${params}` : ""}`);
+        const nextUrl = `${window.location.pathname}${params.toString() ? `?${params}` : ""}`;
+        const currentUrl = `${window.location.pathname}${window.location.search}`;
+        if (nextUrl === currentUrl) return;
+        const method = mode === "push" ? "pushState" : "replaceState";
+        window.history[method]({}, "", nextUrl);
     };
 
     const loadGroupPreference = () => {
@@ -191,8 +221,8 @@
     const refreshFilterValue = () => {
         const noValue = ["is_empty", "is_not_empty"].includes(filterOperator.value);
         valueLabel.hidden = noValue;
+        valueLabel.querySelectorAll("[data-filter-value], [data-filter-option-search]").forEach((item) => item.remove());
         if (noValue) return;
-        const previous = valueLabel.querySelector("input, select");
         const control = document.createElement("select");
         const options = columnValues[filterField.value] || [];
         if (filterOperator.value === "in") {
@@ -206,7 +236,81 @@
             control.append(option);
         });
         control.dataset.filterValue = "";
-        if (previous) previous.replaceWith(control); else valueLabel.append(control);
+        if (filterField.value === "satellite" && options.length >= 8) {
+            const optionSearch = document.createElement("input");
+            optionSearch.type = "search";
+            optionSearch.placeholder = "Search Satellite options";
+            optionSearch.setAttribute("aria-label", "Search Satellite filter options");
+            optionSearch.dataset.filterOptionSearch = "";
+            optionSearch.addEventListener("input", () => {
+                const query = optionSearch.value.trim().toLocaleLowerCase();
+                [...control.options].forEach((option) => {
+                    option.hidden = Boolean(query && !option.textContent.toLocaleLowerCase().includes(query));
+                });
+            });
+            valueLabel.append(optionSearch);
+        }
+        valueLabel.append(control);
+    };
+
+    const cloneFilters = (items) => items.map((item) => ({
+        ...item,
+        value: Array.isArray(item.value) ? [...item.value] : item.value,
+    }));
+
+    const filterValueLabel = (filter) => {
+        const values = Array.isArray(filter.value) ? filter.value : [filter.value];
+        const options = columnValues[filter.field] || [];
+        return values.map((value) => {
+            const option = options.find((item) => String(item.value) === String(value));
+            return option ? option.label : value;
+        }).filter(Boolean).join(", ");
+    };
+
+    const filterDescription = (filter) => {
+        const column = columns.find((item) => item.key === filter.field);
+        const label = column ? column.label : filter.field;
+        if (filter.operator === "is_empty") return `${label}: Is Empty`;
+        if (filter.operator === "is_not_empty") return `${label}: Is Not Empty`;
+        const value = filterValueLabel(filter);
+        return `${label}: ${value}`;
+    };
+
+    const renderDraftFilters = () => {
+        filterDraftList.replaceChildren();
+        draftFilters.forEach((filter, index) => {
+            const row = document.createElement("div");
+            const description = document.createElement("span");
+            description.textContent = filterDescription(filter);
+            const remove = document.createElement("button");
+            remove.type = "button";
+            remove.setAttribute("aria-label", `Remove ${filterDescription(filter)} filter`);
+            remove.textContent = "×";
+            remove.addEventListener("click", () => {
+                draftFilters.splice(index, 1);
+                renderDraftFilters();
+            });
+            row.append(description, remove);
+            filterDraftList.append(row);
+        });
+        filterDraftCount.textContent = String(draftFilters.length);
+        filterDraftEmpty.hidden = draftFilters.length > 0;
+    };
+
+    const setFilterDrawerOpen = (open) => {
+        filterDrawer.hidden = !open;
+        filterToggle.setAttribute("aria-expanded", String(open));
+        document.body.classList.toggle("registrations-filter-open", open);
+        if (open) {
+            filterReturnFocus = document.activeElement;
+            draftFilters = cloneFilters(filters);
+            renderDraftFilters();
+            window.requestAnimationFrame(() => filterField.focus());
+        } else {
+            const focusTarget = filterReturnFocus;
+            filterReturnFocus = null;
+            if (focusTarget && typeof focusTarget.focus === "function") focusTarget.focus();
+        }
     };
 
     const renderFilterChips = () => {
@@ -214,10 +318,10 @@
         filters.forEach((filter, index) => {
             const column = columns.find((item) => item.key === filter.field);
             if (!column) return;
-            const value = Array.isArray(filter.value) ? filter.value.join(", ") : filter.value;
             const chip = document.createElement("button");
             chip.type = "button";
-            chip.textContent = `${column.label}: ${operatorLabels[filter.operator] || filter.operator}${value ? ` ${value}` : ""} ×`;
+            chip.textContent = `${filterDescription(filter)} ×`;
+            chip.setAttribute("aria-label", `Remove ${filterDescription(filter)} filter`);
             chip.addEventListener("click", () => {
                 filters.splice(index, 1);
                 page = 1;
@@ -575,15 +679,24 @@
         let previousGroup = null;
         visibleColumns.forEach((column, index) => {
             const th = document.createElement("th");
+            th.scope = "col";
             if (index === 0) th.classList.add("sticky-key");
             if (previousGroup !== null && previousGroup !== column.group) th.classList.add("registration-group-start");
-            const button = document.createElement("button");
-            button.type = "button";
-            button.disabled = !column.sortable;
-            button.textContent = column.label;
             if (column.sortable) {
+                const activeSort = sort === column.key;
+                th.setAttribute("aria-sort", activeSort ? (direction === "asc" ? "ascending" : "descending") : "none");
+                const button = document.createElement("button");
+                button.type = "button";
+                button.textContent = column.label;
+                button.setAttribute(
+                    "aria-label",
+                    activeSort
+                        ? `Sort by ${column.label}, currently ${direction === "asc" ? "ascending" : "descending"}`
+                        : `Sort by ${column.label}`,
+                );
                 const indicator = document.createElement("span");
                 indicator.textContent = sort === column.key ? (direction === "asc" ? " ↑" : " ↓") : " ↕";
+                indicator.setAttribute("aria-hidden", "true");
                 button.append(indicator);
                 button.addEventListener("click", () => {
                     if (sort === column.key) direction = direction === "asc" ? "desc" : "asc";
@@ -591,8 +704,13 @@
                     page = 1;
                     loadData();
                 });
+                th.append(button);
+            } else {
+                const label = document.createElement("span");
+                label.className = "registration-column-label";
+                label.textContent = column.label;
+                th.append(label);
             }
-            th.append(button);
             headerRow.append(th);
             previousGroup = column.group;
         });
@@ -626,12 +744,17 @@
             button.type = "button";
             button.textContent = label;
             button.disabled = disabled;
-            if (current) button.className = "current";
+            const pageLabel = /^\d+$/.test(label) ? `Page ${label}` : `${label} page`;
+            button.setAttribute("aria-label", current ? `${pageLabel}, current page` : pageLabel);
+            if (current) {
+                button.className = "current";
+                button.setAttribute("aria-current", "page");
+            }
             button.addEventListener("click", () => { page = target; loadData(); });
             return button;
         };
         pagination.append(makePageButton("Previous", info.page - 1, !info.has_previous));
-        const startPage = Math.max(1, info.page - 2);
+        const startPage = Math.max(1, Math.min(info.page - 2, info.pages - 4));
         const endPage = Math.min(info.pages, startPage + 4);
         for (let number = startPage; number <= endPage; number += 1) {
             pagination.append(makePageButton(String(number), number, number === info.page, number === info.page));
@@ -640,15 +763,36 @@
 
         const hasRows = payload.rows.length > 0;
         const hasVisibleColumns = visibleColumns.length > 0;
+        tableWrap.setAttribute("aria-busy", "false");
+        tableWrap.querySelector("table").setAttribute("aria-rowcount", String(info.total + 1));
         tableWrap.hidden = !hasRows || !hasVisibleColumns;
-        tableFooter.hidden = false;
+        tableFooter.hidden = !hasRows;
         stateMessage.hidden = hasRows && hasVisibleColumns;
         if (hasRows && !hasVisibleColumns) {
-            stateMessage.textContent = "All column groups are hidden. Use Columns to show a group.";
+            showTableState({
+                title: "All column groups are hidden.",
+                detail: "Use Columns to show at least one group.",
+            });
         } else if (!hasRows) {
-            stateMessage.textContent = (filters.length || search.value.trim())
-                ? "No registrations match the current search and filters."
-                : "No registrations are available for this Event and Batch.";
+            const hasQuery = Boolean(filters.length || search.value.trim());
+            const noActiveBatch = batchSelect.value === "active" && root.dataset.hasActiveBatch === "false";
+            if (hasQuery) {
+                showTableState({
+                    title: "No registrations match your current search and filters.",
+                    detail: "Clear the search and filters to return to all registrations in this Batch.",
+                    clear: true,
+                });
+            } else if (noActiveBatch) {
+                showTableState({
+                    title: "No active batch is available for this Event.",
+                    detail: "Select a specific batch or All Batches to review historical registrations.",
+                });
+            } else {
+                showTableState({
+                    title: "No registrations found for this batch.",
+                    detail: "Registration records will appear here after a batch is imported.",
+                });
+            }
         }
         renderFilterChips();
     };
@@ -665,10 +809,20 @@
     };
 
     const loadData = (syncUrl = true) => {
-        if (syncUrl) updateUrl();
+        if (syncUrl) updateUrl("push");
         if (requestController) requestController.abort();
-        requestController = new AbortController();
+        const controller = new AbortController();
+        requestController = controller;
         root.classList.add("loading");
+        root.setAttribute("aria-busy", "true");
+        tableWrap.setAttribute("aria-busy", "true");
+        if (!latestPayload || tableWrap.hidden) {
+            showTableState({
+                title: "Loading registrations…",
+                detail: "Preparing the selected Event and Batch.",
+                loading: true,
+            });
+        }
         const params = new URLSearchParams({
             batch: batchSelect.value,
             search: search.value.trim(),
@@ -679,7 +833,7 @@
         if (sort) params.set("sort", sort);
         if (filters.length) params.set("filters", JSON.stringify(filters));
         return fetch(`${root.dataset.dataUrl}?${params}`, {
-            headers: {Accept: "application/json"}, signal: requestController.signal,
+            headers: {Accept: "application/json"}, signal: controller.signal,
         })
             .then((response) => response.ok ? response.json() : response.json().then((payload) => Promise.reject(new Error(payload.error || "Registrations could not be loaded."))))
             .then((payload) => {
@@ -690,26 +844,32 @@
                 direction = payload.query.direction;
                 defaultSort = payload.query.default_sort;
                 page = payload.pagination.page;
-                root.querySelector("[data-reset-sort]").hidden = sort === defaultSort && direction === "asc";
                 if (changed) populateFilterFields(); else refreshFilterControls();
                 renderSummary(payload.summary, payload.quick_filter_counts);
                 renderTable(payload);
-                updateUrl();
+                updateUrl("replace");
             })
             .catch((error) => {
                 if (error.name === "AbortError") return;
-                stateMessage.hidden = false;
-                stateMessage.textContent = "Registrations could not be loaded. Please try again.";
+                showTableState({
+                    title: "Registrations could not be loaded.",
+                    detail: "Check your connection and try again.",
+                    retry: true,
+                });
                 tableWrap.hidden = true;
                 tableFooter.hidden = true;
             })
-            .finally(() => root.classList.remove("loading"));
+            .finally(() => {
+                if (requestController !== controller) return;
+                root.classList.remove("loading");
+                root.setAttribute("aria-busy", "false");
+                tableWrap.setAttribute("aria-busy", "false");
+            });
     };
 
     loadGroupPreference();
     renderColumnGroupControls();
     readUrl();
-    batchSelect.value = new URLSearchParams(window.location.search).get("batch") || "active";
     loadData(false);
 
     search.addEventListener("input", () => {
@@ -718,22 +878,56 @@
     });
     batchSelect.addEventListener("change", () => { page = 1; loadData(); });
     pageSize.addEventListener("change", () => { page = 1; loadData(); });
+    stateRetry.addEventListener("click", () => loadData(false));
+    stateClear.addEventListener("click", () => {
+        window.clearTimeout(searchTimer);
+        search.value = "";
+        filters = [];
+        draftFilters = [];
+        page = 1;
+        loadData();
+        search.focus();
+    });
     filterField.addEventListener("change", refreshFilterControls);
     filterOperator.addEventListener("change", refreshFilterValue);
-    root.querySelector("[data-filter-toggle]").addEventListener("click", () => { filterBuilder.hidden = !filterBuilder.hidden; });
+    filterToggle.addEventListener("click", () => setFilterDrawerOpen(true));
+    filterDrawer.querySelectorAll("[data-filter-close]").forEach((control) => {
+        control.addEventListener("click", () => setFilterDrawerOpen(false));
+    });
     root.querySelector("[data-add-filter]").addEventListener("click", () => {
-        const valueControl = valueLabel.querySelector("select");
+        const valueControl = valueLabel.querySelector("[data-filter-value]");
         const operator = filterOperator.value;
         const value = ["is_empty", "is_not_empty"].includes(operator) ? "" : valueControl && valueControl.multiple
             ? [...valueControl.selectedOptions].map((option) => option.value)
             : (valueControl ? valueControl.value : "");
         if (!["is_empty", "is_not_empty"].includes(operator) && (!value || (Array.isArray(value) && !value.length))) return;
-        filters.push({field: filterField.value, operator, value});
-        page = 1;
-        loadData();
+        draftFilters.push({field: filterField.value, operator, value});
+        renderDraftFilters();
     });
     root.querySelector("[data-clear-filters]").addEventListener("click", () => { filters = []; page = 1; loadData(); });
-    root.querySelector("[data-reset-sort]").addEventListener("click", () => { sort = defaultSort; direction = "asc"; page = 1; loadData(); });
+    root.querySelector("[data-clear-filter-draft]").addEventListener("click", () => {
+        draftFilters = [];
+        renderDraftFilters();
+    });
+    root.querySelector("[data-apply-filters]").addEventListener("click", () => {
+        filters = cloneFilters(draftFilters);
+        page = 1;
+        setFilterDrawerOpen(false);
+        loadData();
+    });
+    root.querySelector("[data-reset-view]").addEventListener("click", () => {
+        window.clearTimeout(searchTimer);
+        search.value = "";
+        batchSelect.value = "active";
+        pageSize.value = "50";
+        filters = [];
+        draftFilters = [];
+        sort = defaultSort;
+        direction = "asc";
+        page = 1;
+        if (!filterDrawer.hidden) setFilterDrawerOpen(false);
+        loadData();
+    });
     root.querySelectorAll("[data-attestation-quick]").forEach((button) => {
         button.addEventListener("click", () => {
             filters = filters.filter((item) => item.field !== "attestation_status");
@@ -800,6 +994,28 @@
             if (event.key !== "Tab") return;
             const focusable = [...modalDialog.querySelectorAll(
                 "a[href], button:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex='-1'])",
+            )].filter((element) => !element.hidden);
+            if (!focusable.length) return;
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+            return;
+        }
+        if (!filterDrawer.hidden) {
+            if (event.key === "Escape") {
+                event.preventDefault();
+                setFilterDrawerOpen(false);
+                return;
+            }
+            if (event.key !== "Tab") return;
+            const focusable = [...filterDialog.querySelectorAll(
+                "button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex='-1'])",
             )].filter((element) => !element.hidden);
             if (!focusable.length) return;
             const first = focusable[0];

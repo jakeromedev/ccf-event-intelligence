@@ -232,7 +232,7 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         page = client.get("/events/{}/registrations".format(self.event_a))
         self.assertEqual(200, page.status_code)
         self.assertIn(b">Registrations</span>", page.data)
-        self.assertIn(b"Registration Records", page.data)
+        self.assertIn(b"Event-scoped operational view of imported registration submissions.", page.data)
         self.assertIn(b'class="application-header-page"', page.data)
         self.assertNotIn(b"overview-header admin-tables-header", page.data)
         self.assertIn(b"registrations.js", page.data)
@@ -249,6 +249,17 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         self.assertIn(b'data-attestation-canvas', page.data)
         self.assertIn(b'Loading form', page.data)
         self.assertIn(b'data-columns-toggle', page.data)
+        self.assertIn(b'class="admin-table-toolbar registrations-control-bar"', page.data)
+        self.assertIn(b'aria-label="Selected Event"', page.data)
+        self.assertIn(
+            b'placeholder="Search registration code, ticket code, name, email, or mobile"',
+            page.data,
+        )
+        self.assertIn(b'data-reset-view', page.data)
+        self.assertIn(b'data-filter-drawer', page.data)
+        self.assertIn(b"Advanced Filters", page.data)
+        self.assertIn(b'data-clear-filter-draft', page.data)
+        self.assertIn(b'data-apply-filters', page.data)
         self.assertIn(b'Attestation &amp; Payment', page.data)
         self.assertIn(b'Reset to Default', page.data)
         self.assertNotIn(b'data-attestation-save', page.data)
@@ -438,6 +449,98 @@ class RegistrationsIntegrationTests(unittest.TestCase):
                 self.assertEqual(1, payload["pagination"]["total"])
                 self.assertEqual(expected, payload["rows"][0]["registration_code"])
 
+    def test_phase2_filter_drawer_and_reset_interaction_contract(self):
+        self._process(self.event_a)
+        page = self.app.test_client().get(
+            "/events/{}/registrations".format(self.event_a)
+        ).get_data(as_text=True)
+        root = Path(__file__).parents[1]
+        script = (root / "app/static/registrations.js").read_text()
+        styles = (root / "app/static/app.css").read_text()
+
+        self.assertIn('aria-haspopup="dialog"', page)
+        self.assertIn('role="dialog" aria-modal="true"', page)
+        self.assertIn("Selected filters", page)
+        self.assertIn("No filters selected yet.", page)
+        self.assertIn("Clear All", page)
+        self.assertIn("Apply Filters", page)
+
+        self.assertIn("let draftFilters = []", script)
+        self.assertIn("draftFilters = cloneFilters(filters)", script)
+        self.assertIn("filters = cloneFilters(draftFilters)", script)
+        self.assertIn("setFilterDrawerOpen(false)", script)
+        self.assertIn('optionSearch.placeholder = "Search Satellite options"', script)
+        self.assertIn('filterField.value === "satellite"', script)
+        self.assertIn('batchSelect.value = "active"', script)
+        self.assertIn('pageSize.value = "50"', script)
+        self.assertIn('search.value = ""', script)
+        self.assertIn('sort = defaultSort', script)
+        self.assertIn('event.key === "Escape"', script)
+
+        self.assertIn(".registrations-filter-drawer { position: fixed", styles)
+        self.assertIn("grid-template-columns: 1fr minmax(390px, 32vw)", styles)
+        self.assertIn("body.registrations-filter-open { overflow: hidden; }", styles)
+        self.assertIn(".registrations-control-bar", styles)
+
+    def test_phase3_table_ux_accessibility_and_state_contract(self):
+        self._process(self.event_a)
+        page = self.app.test_client().get(
+            "/events/{}/registrations".format(self.event_a)
+        ).get_data(as_text=True)
+        root = Path(__file__).parents[1]
+        script = (root / "app/static/registrations.js").read_text()
+        styles = (root / "app/static/app.css").read_text()
+
+        self.assertIn('data-has-active-batch="true"', page)
+        self.assertIn('data-table-state role="status" aria-live="polite"', page)
+        self.assertIn("registrations-table-skeleton", page)
+        self.assertIn("Loading registrations", page)
+        self.assertIn("data-table-clear", page)
+        self.assertIn("data-table-retry", page)
+        self.assertIn('aria-label="Scrollable registration table"', page)
+        self.assertIn('aria-busy="true" tabindex="0"', page)
+        self.assertIn("<caption class=\"sr-only\">", page)
+        self.assertIn('aria-live="polite"', page)
+
+        self.assertIn('th.scope = "col"', script)
+        self.assertIn('th.setAttribute("aria-sort"', script)
+        self.assertIn('button.setAttribute("aria-current", "page")', script)
+        self.assertIn("No registrations match your current search and filters.", script)
+        self.assertIn("No active batch is available for this Event.", script)
+        self.assertIn("No registrations found for this batch.", script)
+        self.assertIn("Registrations could not be loaded.", script)
+        self.assertIn('stateRetry.addEventListener("click"', script)
+        self.assertIn("if (requestController !== controller) return", script)
+        self.assertIn('updateUrl("push")', script)
+        self.assertIn('mode === "push" ? "pushState" : "replaceState"', script)
+        self.assertIn('window.addEventListener("popstate"', script)
+
+        self.assertIn(".admin-data-table th { position: sticky", styles)
+        self.assertIn(".admin-table-scroll { position: relative; max-width: 100%;", styles)
+        self.assertIn("overflow: auto", styles)
+        self.assertIn(".registrations-table-skeleton", styles)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", styles)
+        self.assertIn('.registrations-data-table th[aria-sort="ascending"]', styles)
+
+        payload = self._data(per_page=25)
+        sortable = [column["key"] for column in payload["columns"] if column["sortable"]]
+        self.assertEqual(
+            ["attestation_status", "payment_status", "first_name", "last_name", "shirt_size"],
+            sortable,
+        )
+
+    def test_phase3_no_active_batch_contract(self):
+        page = self.app.test_client().get(
+            "/events/{}/registrations".format(self.event_a)
+        )
+        self.assertEqual(200, page.status_code)
+        self.assertIn(b'data-has-active-batch="false"', page.data)
+
+        payload = self._data()
+        self.assertIsNone(payload["batch"])
+        self.assertEqual(0, payload["pagination"]["total"])
+        self.assertEqual([], payload["rows"])
+
     def test_filters_are_allow_listed_and_composable(self):
         self._process(self.event_a)
         cases = (
@@ -485,6 +588,113 @@ class RegistrationsIntegrationTests(unittest.TestCase):
             },
         )
         self.assertEqual(400, rejected.status_code)
+
+    def test_phase4_filter_operators_and_filter_limit(self):
+        batch_id = self._process(self.event_a)
+        any_gender = self._data(
+            filters=json.dumps(
+                [{"field": "gender", "operator": "in", "value": ["Female", "Male"]}]
+            ),
+            per_page=50,
+        )
+        self.assertEqual(30, any_gender["pagination"]["total"])
+
+        with self.app.app_context():
+            get_db().execute(
+                "DELETE FROM tickets WHERE batch_id = ? AND ticket_code = 'T-001'",
+                (batch_id,),
+            )
+            get_db().commit()
+        empty_payment = self._data(
+            filters=json.dumps(
+                [{"field": "payment_status", "operator": "is_empty", "value": ""}]
+            )
+        )
+        populated_payment = self._data(
+            filters=json.dumps(
+                [{"field": "payment_status", "operator": "is_not_empty", "value": ""}]
+            )
+        )
+        self.assertEqual(1, empty_payment["pagination"]["total"])
+        self.assertEqual(29, populated_payment["pagination"]["total"])
+
+        too_many = self.app.test_client().get(
+            "/events/{}/registrations/data".format(self.event_a),
+            query_string={
+                "filters": json.dumps(
+                    [
+                        {"field": "gender", "operator": "equals", "value": "Female"}
+                        for _ in range(21)
+                    ]
+                )
+            },
+        )
+        self.assertEqual(400, too_many.status_code)
+        self.assertIn("at most 20 filters", too_many.get_json()["error"])
+
+    def test_phase4_rows_per_page_and_sensitive_field_exclusion(self):
+        self._process(self.event_a)
+        for size, expected_rows in ((25, 25), (50, 30), (100, 30)):
+            with self.subTest(size=size):
+                payload = self._data(per_page=size)
+                self.assertEqual(size, payload["pagination"]["per_page"])
+                self.assertEqual(expected_rows, len(payload["rows"]))
+        fallback = self._data(per_page=75)
+        self.assertEqual(50, fallback["pagination"]["per_page"])
+
+        excluded = {
+            "source_data_json", "medical_details", "allergies", "emergency_contact",
+            "complete_address", "dgroup_leader_contact", "gross_amount", "amount_paid",
+        }
+        payload = self._data(per_page=25)
+        self.assertTrue(excluded.isdisjoint(payload["rows"][0]))
+        self.assertTrue(excluded.isdisjoint({column["key"] for column in payload["columns"]}))
+        for rule in self.app.url_map.iter_rules():
+            if "/registrations" not in rule.rule:
+                continue
+            mutations = rule.methods - {"GET", "HEAD", "OPTIONS"}
+            if mutations:
+                self.assertEqual({"PATCH"}, mutations)
+                self.assertTrue(rule.rule.endswith("/<int:registrant_id>/attestation"))
+
+    def test_phase4_grouped_columns_performance_and_b1g_polish_contract(self):
+        self._process(self.event_a)
+        root = Path(__file__).parents[1]
+        page = self.app.test_client().get(
+            "/events/{}/registrations".format(self.event_a)
+        ).get_data(as_text=True)
+        script = (root / "app/static/registrations.js").read_text()
+        styles = (root / "app/static/app.css").read_text()
+        phase4_styles = styles.split(
+            "/* Registrations Phase 4 module-only B1G polish */", 1
+        )[1]
+
+        for group in ("Attestation &amp; Payment", "Registrant Details", "Logistics"):
+            self.assertIn(group, page)
+        self.assertIn('const columnGroupOrder = ["Attestation & Payment", "Registrant Details", "Logistics"]', script)
+        self.assertIn("loadGroupPreference()", script)
+        self.assertIn("saveGroupPreference()", script)
+        self.assertIn("visibleTableColumns()", script)
+        self.assertIn("groupVisibility[control.value] = control.checked", script)
+        self.assertIn("columnGroupOrder.forEach((group) => { groupVisibility[group] = true; })", script)
+        self.assertIn("if (latestPayload) renderTable(latestPayload)", script)
+
+        self.assertIn("searchTimer = window.setTimeout", script)
+        self.assertIn("}, 300);", script)
+        self.assertIn("requestController.abort()", script)
+        self.assertIn("window.requestAnimationFrame(() => loadPreview", script)
+        self.assertNotIn("innerHTML", script)
+
+        self.assertIn("--registrations-control-height", phase4_styles)
+        self.assertIn("var(--b1g-red)", phase4_styles)
+        self.assertIn("var(--b1g-off-white)", phase4_styles)
+        self.assertIn("var(--b1g-border)", phase4_styles)
+        self.assertIn(".registrations-panel", phase4_styles)
+        self.assertIn(".registrations-filter-drawer", phase4_styles)
+        self.assertIn(".attestation-review-modal", phase4_styles)
+        self.assertNotIn("--teal", phase4_styles)
+        self.assertNotIn("blue", phase4_styles.casefold())
+        self.assertNotIn("indigo", phase4_styles.casefold())
 
     def test_sorting_pagination_and_invalid_sort_fallback(self):
         self._process(self.event_a)

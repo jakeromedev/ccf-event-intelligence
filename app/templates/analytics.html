@@ -5,7 +5,7 @@
 {{ value.display }}
 {%- endmacro %}
 
-{% block title %}Analytics · CCF Event Dashboard{% endblock %}
+{% block title %}Analytics · {{ app_name }}{% endblock %}
 
 {% block page_header %}
 {{ render_page_header('Advanced Analytics', event, active_batch, 'Composable, privacy-aware analytics over the active Event snapshot.', variant='workspace', header_class='analytics-header') }}

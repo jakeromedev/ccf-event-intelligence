@@ -5,14 +5,14 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{% block title %}CCF Event Dashboard{% endblock %}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v='20260831-admin-table-header-2') }}">
+    <title>{% block title %}{{ app_name }}{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v='20260831-b1g-cream-2') }}">
 </head>
 <body>
     <aside class="sidebar" id="application-sidebar">
-        <a class="brand" href="{{ url_for('dashboard.events') }}" aria-label="CCF Event Dashboard events">
-            <span class="brand-mark"><img src="{{ url_for('static', filename='CCF-Logo-2017-01.png') }}" alt="" aria-hidden="true"></span>
-            <span class="brand-copy"><strong>CCF EVENT</strong><small>INTELLIGENCE</small></span>
+        <a class="brand" href="{{ url_for('dashboard.events') }}" aria-label="{{ app_name }} events">
+            <span class="brand-mark"><img src="{{ url_for('static', filename='b1g-logo-circle.png') }}" alt="" aria-hidden="true"></span>
+            <span class="brand-copy"><strong>{{ app_name }}</strong></span>
         </a>
 
         {% if event %}

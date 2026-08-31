@@ -1,4 +1,4 @@
-# CCF Systems Dashboard — Technical Reference
+# B1G Admin Internal System — Technical Reference
 
 ## Application profile
 

@@ -15,7 +15,7 @@
 {{ url_for('dashboard.event_imports', event_id=event['id'], batch=selected['id'] if selected else none, q=history.filters.query, status=history.filters.status, page=page_number, per_page=history.pagination.per_page, sort=history.filters.sort, direction=history.filters.direction) }}#import-history
 {%- endmacro %}
 
-{% block title %}Imports · CCF Event Dashboard{% endblock %}
+{% block title %}Imports · {{ app_name }}{% endblock %}
 
 {% block page_header %}
 {{ render_page_header('Event Imports', event, active_batch, 'Upload the required CSV exports, validate the files, and activate the dataset for this event.', variant='workspace', header_class='imports-header') }}

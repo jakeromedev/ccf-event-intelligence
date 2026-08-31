@@ -1,7 +1,7 @@
 # Data Quality Module
 
 This document describes the currently implemented Data Quality module in the
-CCF Event Dashboard. It covers Event scoping, validation sources, issue
+B1G Admin Internal System. It covers Event scoping, validation sources, issue
 categories, counting behavior, user interface, privacy safeguards, and current
 Phase 1 limitations.
 

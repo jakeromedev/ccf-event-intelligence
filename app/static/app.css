@@ -1,14 +1,34 @@
 :root {
-    --teal: #00a6b2;
-    --teal-dark: #007d8a;
-    --teal-deep: #006b77;
-    --teal-soft: #eaf8f9;
-    --teal-pale: #f4fbfc;
-    --ink: #203447;
-    --muted: #687985;
-    --line: #dcebed;
-    --background: #f6fafb;
-    --panel: #ffffff;
+    --b1g-red: #7a0b0b;
+    --b1g-red-light: #851415;
+    --b1g-red-dark: #5e0808;
+    --b1g-burgundy: #4a0909;
+    --b1g-muted-red: #8f4847;
+    --b1g-rose: #be8280;
+    --b1g-cream: #faead2;
+    --b1g-soft-rose: #e5b6b2;
+    --b1g-page-background: #faead2;
+    --b1g-page-background-soft: #f7e9d4;
+    --b1g-surface: #ffffff;
+    --b1g-surface-muted: #fff8ee;
+    --b1g-off-white: var(--b1g-surface-muted);
+    --b1g-white: #ffffff;
+    --b1g-text: #2b1a1a;
+    --b1g-text-muted: #755d5d;
+    --b1g-border: #e6d2b9;
+    --b1g-focus-ring: rgba(122, 11, 11, .2);
+
+    /* Compatibility aliases for existing components during the theme transition. */
+    --teal: var(--b1g-red);
+    --teal-dark: var(--b1g-red-light);
+    --teal-deep: var(--b1g-red-dark);
+    --teal-soft: #f7e9e8;
+    --teal-pale: #fcf6f5;
+    --ink: var(--b1g-text);
+    --muted: var(--b1g-text-muted);
+    --line: var(--b1g-border);
+    --background: var(--b1g-page-background);
+    --panel: var(--b1g-surface);
     --main: #008d99;
     --local: #37b4bd;
     --international: #78cbd1;
@@ -25,8 +45,8 @@
     --warning-soft: #fff4dd;
     --danger: #b84c46;
     --danger-soft: #fcecea;
-    --shadow: 0 10px 28px rgba(16, 80, 91, .07);
-    --shadow-soft: 0 5px 18px rgba(16, 80, 91, .055);
+    --shadow: 0 10px 28px rgba(74, 9, 9, .08);
+    --shadow-soft: 0 5px 18px rgba(74, 9, 9, .06);
 }
 
 * { box-sizing: border-box; }
@@ -1731,7 +1751,7 @@ body.sidebar-collapsed .sidebar-account form { display: none; }
 }
 
 /* Administrative source tables */
-.sidebar { overflow-x: hidden; overflow-y: auto; }
+.sidebar { overflow: hidden; }
 .nav-module { display: grid; gap: 2px; }
 .nav-module-link {
     width: 100%;
@@ -2209,4 +2229,705 @@ body.satellite-dataset-modal-open { overflow: hidden; }
     .satellite-dataset-form-actions { grid-template-columns: 1fr 1fr; }
     .satellite-dataset-form-actions > span { display: none; }
     .satellite-dataset-form-actions .button { width: 100%; }
+}
+
+/* B1G application theme --------------------------------------------------- */
+html,
+body { color: var(--b1g-text); background: var(--b1g-page-background); }
+
+.app-main { background: var(--b1g-page-background); }
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+    outline: 3px solid var(--b1g-focus-ring);
+    outline-offset: 2px;
+}
+
+input:not([type="hidden"]):not([type="file"]),
+select,
+textarea { border-color: var(--b1g-border); }
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="file"]):not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="image"]),
+select,
+textarea { background: var(--b1g-surface); }
+
+input[type="checkbox"],
+input[type="radio"] { accent-color: var(--b1g-red); }
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):focus,
+select:focus,
+textarea:focus,
+.auth-form input:focus,
+.admin-batch-selector select:focus,
+.admin-table-toolbar input:focus,
+.admin-filter-builder input:focus,
+.admin-filter-builder select:focus,
+.admin-columns-menu input:focus,
+.satellite-dataset-fields input:focus,
+.satellite-dataset-choice-heading input:focus,
+.attestation-status-control select:focus {
+    border-color: var(--b1g-red);
+    outline: 0;
+    box-shadow: 0 0 0 3px var(--b1g-focus-ring);
+}
+
+.sidebar {
+    color: var(--b1g-off-white);
+    background:
+        radial-gradient(circle at -20% 92%, rgba(229, 182, 178, .12) 0 120px, transparent 122px),
+        linear-gradient(160deg, var(--b1g-burgundy) 0%, var(--b1g-red-dark) 58%, #3d0606 100%);
+    box-shadow: 8px 0 28px rgba(74, 9, 9, .2);
+}
+.sidebar::after { border-color: rgba(229, 182, 178, .08); }
+.brand { border-bottom-color: rgba(247, 241, 240, .2); }
+.brand-mark {
+    padding: 3px;
+    border-color: rgba(255, 255, 255, .3);
+    border-radius: 10px;
+    background: var(--b1g-white);
+    box-shadow: 0 8px 22px rgba(40, 3, 3, .28), 0 0 0 4px rgba(229, 182, 178, .08);
+}
+.brand-mark img,
+.auth-brand-mark img { width: 100%; height: 100%; object-fit: contain; }
+.brand-copy strong {
+    color: var(--b1g-white);
+    line-height: 1.25;
+    letter-spacing: .025em;
+}
+.nav-link,
+.back-link,
+.sidebar-note { color: var(--b1g-cream); }
+.nav-link .icon { color: var(--b1g-soft-rose); }
+.nav-link:hover {
+    color: var(--b1g-white);
+    border-color: rgba(229, 182, 178, .22);
+    background: rgba(229, 182, 178, .12);
+}
+.nav-link:hover .icon { color: var(--b1g-white); }
+.nav-link.active {
+    color: var(--b1g-burgundy);
+    border-color: var(--b1g-cream);
+    background: linear-gradient(135deg, var(--b1g-off-white), var(--b1g-cream));
+    box-shadow: 0 8px 20px rgba(40, 3, 3, .25), inset 0 1px rgba(255, 255, 255, .65);
+}
+.nav-link.active .icon { color: var(--b1g-red); }
+.back-link,
+.sidebar-note,
+.sidebar-account { border-color: rgba(247, 241, 240, .2); }
+.back-icon { border-color: rgba(247, 241, 240, .35); }
+.sidebar-note small,
+.sidebar-account small { color: var(--b1g-rose); }
+.sidebar-account { color: var(--b1g-off-white); }
+.sidebar-account-icon { color: var(--b1g-cream); background: rgba(255, 255, 255, .1); }
+.sidebar-account button { color: var(--b1g-soft-rose); }
+
+.nav-submenu-inner { border-left-color: rgba(229, 182, 178, .25); }
+.nav-submenu a { color: var(--b1g-cream); }
+.nav-submenu a > span { background: var(--b1g-rose); }
+.nav-submenu a:hover { color: var(--b1g-white); background: rgba(229, 182, 178, .1); }
+.nav-submenu a:hover > span { background: var(--b1g-cream); }
+.nav-submenu a.active { color: var(--b1g-white); background: linear-gradient(90deg, rgba(229, 182, 178, .18), rgba(229, 182, 178, .04)); }
+.nav-submenu a.active::before { background: var(--b1g-soft-rose); box-shadow: 0 0 8px rgba(229, 182, 178, .45); }
+.nav-submenu a.active > span { background: var(--b1g-cream); box-shadow: 0 0 0 4px rgba(229, 182, 178, .12); }
+
+.application-header {
+    border-bottom-color: var(--b1g-border);
+    background: rgba(255, 255, 255, .96);
+    box-shadow: 0 3px 14px rgba(74, 9, 9, .05);
+}
+.application-header-page { border-left-color: var(--b1g-border); }
+.application-header-page h1,
+.event-selector { color: var(--b1g-text); }
+.application-header-module,
+.event-selector:not(.static):hover,
+.eyebrow,
+.hero-kicker,
+.topbar-context { color: var(--b1g-red); }
+.application-header-page p,
+.application-header-meta,
+.header-help { color: var(--b1g-text-muted); }
+.application-header-meta > * + * { border-left-color: var(--b1g-border); }
+.shell-menu-toggle {
+    color: var(--b1g-red);
+    border-color: var(--b1g-border);
+    background: var(--b1g-white);
+}
+.shell-menu-toggle:hover { color: var(--b1g-white); border-color: var(--b1g-red); background: var(--b1g-red); }
+
+.overview-header,
+.satellite-header,
+.quality-header,
+.imports-header {
+    border-bottom-color: var(--b1g-border);
+    background: linear-gradient(112deg, var(--b1g-white) 0%, #fcf8f7 62%, var(--b1g-off-white) 100%);
+}
+.overview-header::before { border-color: rgba(122, 11, 11, .06); }
+.overview-header::after { border-color: rgba(122, 11, 11, .16); }
+.overview-header h1,
+.satellite-header h1,
+.quality-header h1,
+.imports-header h1 { color: var(--b1g-text); }
+.overview-header h2 { color: var(--b1g-red); }
+.overview-description { color: var(--b1g-text-muted); }
+
+.events-hero,
+.auth-brand-panel {
+    background:
+        radial-gradient(circle at 92% -15%, rgba(255, 255, 255, .1) 0 145px, transparent 146px),
+        linear-gradient(135deg, var(--b1g-red-light), var(--b1g-red-dark) 68%, var(--b1g-burgundy));
+}
+.events-hero { box-shadow: 0 18px 40px rgba(74, 9, 9, .2); }
+.hero-button { color: var(--b1g-red-dark); background: var(--b1g-white); box-shadow: 0 9px 24px rgba(74, 9, 9, .22); }
+.hero-button:hover { color: var(--b1g-red); }
+
+.auth-page,
+.auth-form-panel { background: var(--b1g-page-background); }
+.auth-brand-mark {
+    padding: 4px;
+    border-radius: 12px;
+    background: var(--b1g-white);
+    box-shadow: 0 12px 28px rgba(74, 9, 9, .28);
+}
+.auth-card { border-color: var(--b1g-border); box-shadow: 0 22px 55px rgba(74, 9, 9, .12); }
+.auth-card h2 { color: var(--b1g-text); }
+.auth-switch a { color: var(--b1g-red); }
+
+.button.primary,
+.page-header-action {
+    color: var(--b1g-white);
+    border-color: var(--b1g-red);
+    background: var(--b1g-red);
+    box-shadow: 0 6px 16px rgba(122, 11, 11, .2);
+}
+.button.primary:hover:not(:disabled),
+.page-header-action:hover {
+    color: var(--b1g-white);
+    border-color: var(--b1g-red-light);
+    background: var(--b1g-red-light);
+    box-shadow: 0 8px 20px rgba(122, 11, 11, .25);
+}
+.button.primary:active:not(:disabled),
+.page-header-action:active { border-color: var(--b1g-red-dark); background: var(--b1g-red-dark); }
+.button.secondary {
+    color: var(--b1g-red);
+    border-color: var(--b1g-rose);
+    background: var(--b1g-white);
+}
+.button.secondary:hover:not(:disabled) { color: var(--b1g-white); border-color: var(--b1g-red); background: var(--b1g-red); }
+.button:disabled { opacity: .5; }
+
+.panel,
+.event-card,
+.auth-card,
+.admin-table-panel,
+.registrant-modal-dialog,
+.satellite-dataset-dialog { border-color: var(--b1g-border); background-color: var(--b1g-white); }
+.event-card:hover { border-color: var(--b1g-soft-rose); box-shadow: 0 16px 34px rgba(74, 9, 9, .11); }
+.event-icon,
+.form-icon,
+.empty-icon,
+.metric-icon { color: var(--b1g-red); background: #f7e9e8; }
+.phase1-settings .button.primary { border-color: var(--b1g-red); background: var(--b1g-red); box-shadow: 0 5px 13px rgba(122, 11, 11, .2); }
+.phase1-section-heading .eyebrow,
+.phase1-card-heading h2,
+.phase1-card-heading h3,
+.phase1-progress-body dt,
+.phase1-scope-note .icon,
+.satellite-target-total strong { color: var(--b1g-red); }
+.phase1-section-icon,
+.phase1-target-icon { color: var(--b1g-red); background: #f7e9e8; }
+.phase1-input-wrap:focus-within { border-color: var(--b1g-red); box-shadow: 0 0 0 3px var(--b1g-focus-ring); }
+.phase1-target-note,
+.phase1-scope-note { border-color: var(--b1g-cream); background: #fcf7f6; }
+.phase1-progress-ring { background: conic-gradient(var(--b1g-red) calc(var(--phase1-progress) * 1%), var(--b1g-cream) 0); }
+.phase1-age-row i,
+.satellite-target-progress i { background: linear-gradient(90deg, var(--b1g-muted-red), var(--b1g-red)); }
+.satellite-dataset-list-heading button { color: var(--b1g-red); }
+
+.analytics-table th,
+.curation-table th,
+.users-table th,
+.admin-data-table th,
+.admin-data-table th.sticky-key,
+.admin-data-table th.admin-actions-column {
+    color: var(--b1g-text-muted) !important;
+    border-color: var(--b1g-border) !important;
+    background: #f8eeee !important;
+}
+.admin-data-table tbody tr:hover td,
+.users-table tbody tr:hover td,
+.analytics-table tbody tr:hover td { background: #fdf7f6; }
+.admin-table-heading,
+.admin-table-toolbar,
+.admin-active-filters,
+.admin-table-footer { border-color: var(--b1g-border); }
+.admin-filter-builder,
+.admin-active-filters,
+.registrations-quick-filters { border-color: var(--b1g-border); background: #fcf7f6; }
+.admin-view-tabs { border-color: var(--b1g-border); }
+.admin-view-tabs a:hover,
+.admin-view-tabs a.active { color: var(--b1g-red); }
+.admin-view-tabs a.active { border-bottom-color: var(--b1g-red); }
+.admin-search { color: var(--b1g-text-muted); border-color: var(--b1g-border); }
+.admin-search:focus-within { border-color: var(--b1g-red); box-shadow: 0 0 0 3px var(--b1g-focus-ring); }
+.toolbar-count { background: var(--b1g-red); }
+.admin-column-actions button,
+.registrations-column-actions button { color: var(--b1g-red); }
+.admin-active-filters > div button,
+.analytics-active-filters a {
+    color: var(--b1g-red-dark);
+    border-color: var(--b1g-soft-rose);
+    background: #f8eeee;
+}
+.admin-active-filters > button { color: var(--b1g-red); }
+.admin-column-options input,
+.registrations-column-groups input,
+.satellite-dataset-checklist input { accent-color: var(--b1g-red); }
+
+.registrations-quick-filters button:hover { color: var(--b1g-red); border-color: var(--b1g-rose); }
+.registration-form-button {
+    color: var(--b1g-red-dark);
+    border-color: var(--b1g-soft-rose);
+    background: #fcf4f3;
+}
+.registration-form-button:hover { color: var(--b1g-white); border-color: var(--b1g-red); background: var(--b1g-red); }
+.registration-form-button:focus-visible { outline-color: var(--b1g-focus-ring); }
+.registrations-quick-filters button.active,
+.admin-pagination-controls nav button.current {
+    color: var(--b1g-white);
+    border-color: var(--b1g-red);
+    background: var(--b1g-red);
+}
+.registrations-quick-filters button:focus-visible { outline-color: var(--b1g-focus-ring); }
+.admin-pagination-controls nav button,
+.registrant-pagination button,
+.registrant-pagination span,
+.satellite-pagination nav a,
+.satellite-pagination nav span,
+.import-history-pagination nav a,
+.import-history-pagination nav span { color: var(--b1g-red-dark); border-color: var(--b1g-border); }
+.registrant-pagination button:hover:not(:disabled),
+.registrant-pagination .current-page,
+.satellite-pagination nav a:hover,
+.satellite-pagination nav a.selected,
+.import-history-pagination nav a:hover,
+.import-history-pagination nav a.selected {
+    color: var(--b1g-white);
+    border-color: var(--b1g-red);
+    background: var(--b1g-red);
+}
+
+.registrant-modal-backdrop,
+.satellite-dataset-backdrop { background: rgba(43, 26, 26, .58); }
+.admin-drawer-backdrop { background: rgba(43, 26, 26, .5); }
+.admin-source-drawer > aside { box-shadow: -18px 0 50px rgba(74, 9, 9, .24); }
+.admin-source-drawer > aside > header { color: var(--b1g-text); border-color: var(--b1g-border); background: linear-gradient(120deg, var(--b1g-white), var(--b1g-off-white)); }
+.admin-source-drawer header p,
+.admin-source-record h3,
+.admin-cell-link { color: var(--b1g-red); }
+.source-link { color: var(--b1g-red); border-color: var(--b1g-soft-rose); background: #fcf4f3; }
+.source-link:hover { color: var(--b1g-white); border-color: var(--b1g-red); background: var(--b1g-red); }
+.registrant-modal-header,
+.satellite-dataset-modal-header,
+.attestation-review-context,
+.attestation-preview-panel,
+.attestation-review-footer { border-color: var(--b1g-border); }
+.satellite-dataset-modal-header { background: linear-gradient(120deg, var(--b1g-white), var(--b1g-off-white)); }
+.registrant-modal-header h2,
+.satellite-dataset-modal-header h2,
+.attestation-section-heading h3,
+.attestation-status-panel h3 { color: var(--b1g-text); }
+.registrant-modal-close:hover,
+.satellite-dataset-modal-close:hover { color: var(--b1g-white); border-color: var(--b1g-red); background: var(--b1g-red); }
+.attestation-review-context { background: var(--b1g-border); }
+.attestation-review-context > div { background: #fcf8f7; }
+.attestation-preview-panel { background: var(--b1g-off-white); }
+.attestation-preview { border-color: var(--b1g-border); background-color: #eee9e8; }
+.attestation-preview:focus-visible { border-color: var(--b1g-red); box-shadow: inset 0 0 0 2px var(--b1g-focus-ring); }
+.attestation-document-toolbar button:hover:not(:disabled) { color: var(--b1g-red); border-color: var(--b1g-rose); background: var(--b1g-off-white); }
+.attestation-document-toolbar button:focus-visible,
+.attestation-open-original:focus-visible { outline-color: var(--b1g-focus-ring); }
+.attestation-document-toolbar button[aria-pressed="true"],
+.attestation-open-original:hover {
+    color: var(--b1g-white);
+    border-color: var(--b1g-red);
+    background: var(--b1g-red);
+}
+.attestation-open-original { color: var(--b1g-red); border-color: var(--b1g-soft-rose); }
+.attestation-preview-spinner { border-color: var(--b1g-cream); border-top-color: var(--b1g-red); }
+
+@media (max-width: 780px) {
+    .sidebar { box-shadow: 14px 0 38px rgba(74, 9, 9, .32); }
+}
+
+/* Registrations Phase 2 controls and advanced-filter drawer */
+.admin-table-panel.loading::after { background: linear-gradient(90deg, transparent, var(--b1g-red), transparent); }
+.registrations-control-bar {
+    min-height: 74px;
+    display: grid;
+    grid-template-columns: minmax(150px, .8fr) minmax(205px, .9fr) minmax(280px, 1.5fr) auto;
+    align-items: end;
+    gap: 12px;
+}
+.registrations-control-context {
+    min-width: 0;
+    min-height: 36px;
+    padding: 7px 10px;
+    display: grid;
+    align-content: center;
+    gap: 1px;
+    color: var(--b1g-text-muted);
+    border: 1px solid var(--b1g-border);
+    border-radius: 8px;
+    background: #fcf8f7;
+}
+.registrations-control-context span { font-size: 7px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.registrations-control-context strong { overflow: hidden; color: var(--b1g-text); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.registrations-control-bar .admin-batch-selector { min-width: 0; }
+.registrations-control-bar .admin-search { width: 100%; }
+.registrations-control-bar .admin-toolbar-actions { justify-content: flex-end; }
+.registrations-summary-grid > div:nth-child(2) strong { color: var(--warning); }
+.registrations-summary-grid > div:nth-child(3) strong,
+.registrations-summary-grid > div:nth-child(5) strong { color: var(--success); }
+.registrations-summary-grid > div:nth-child(4) strong { color: var(--danger); }
+
+body.registrations-filter-open { overflow: hidden; }
+.registrations-filter-drawer[hidden] { display: none; }
+.registrations-filter-drawer { position: fixed; z-index: 95; inset: 0; display: grid; grid-template-columns: 1fr minmax(390px, 32vw); }
+.registrations-filter-backdrop { padding: 0; border: 0; background: rgba(43, 26, 26, .46); backdrop-filter: blur(2px); cursor: pointer; }
+.registrations-filter-drawer > aside {
+    min-width: 0;
+    height: 100vh;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    color: var(--b1g-text);
+    background: var(--b1g-white);
+    box-shadow: -18px 0 52px rgba(74, 9, 9, .24);
+}
+.registrations-filter-drawer > aside > header {
+    min-height: 110px;
+    padding: 22px 24px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    border-bottom: 1px solid var(--b1g-border);
+    background: linear-gradient(120deg, var(--b1g-white), var(--b1g-off-white));
+}
+.registrations-filter-drawer header h2 { margin: 3px 0 0; font-size: 22px; letter-spacing: -.03em; }
+.registrations-filter-drawer header p:last-child { margin: 5px 0 0; color: var(--b1g-text-muted); font-size: 10px; line-height: 1.45; }
+.registrations-filter-close {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    flex: 0 0 auto;
+    color: var(--b1g-text-muted);
+    border: 1px solid var(--b1g-border);
+    border-radius: 50%;
+    background: var(--b1g-white);
+    cursor: pointer;
+    font-size: 23px;
+    line-height: 1;
+}
+.registrations-filter-close:hover { color: var(--b1g-white); border-color: var(--b1g-red); background: var(--b1g-red); }
+.registrations-filter-body { min-height: 0; padding: 20px 22px; overflow-y: auto; }
+.registrations-filter-drawer .admin-filter-builder { padding: 0 0 20px; border: 0; background: transparent; }
+.registrations-filter-drawer .admin-filter-fields { grid-template-columns: 1fr; align-items: stretch; }
+.registrations-filter-drawer .admin-filter-value { display: grid; gap: 6px; }
+.registrations-filter-drawer .admin-filter-value[hidden] { display: none; }
+.registrations-filter-drawer [data-filter-option-search] { min-height: 34px; }
+.registrations-filter-drawer [data-filter-value][multiple] { min-height: 112px; }
+.registrations-filter-drawer [data-add-filter] { width: 100%; margin-top: 3px; }
+.registrations-filter-selection { padding-top: 18px; border-top: 1px solid var(--b1g-border); }
+.registrations-filter-selection > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.registrations-filter-selection h3 { margin: 0; font-size: 12px; }
+.registrations-filter-selection > div:first-child span { min-width: 22px; padding: 3px 7px; color: var(--b1g-white); border-radius: 12px; background: var(--b1g-red); font-size: 8px; font-weight: 800; text-align: center; }
+.registrations-filter-draft-list { margin-top: 11px; display: grid; gap: 7px; }
+.registrations-filter-draft-list > div {
+    min-height: 39px;
+    padding: 8px 8px 8px 11px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    color: var(--b1g-red-dark);
+    border: 1px solid var(--b1g-cream);
+    border-radius: 8px;
+    background: #fcf4f3;
+    font-size: 9px;
+    font-weight: 700;
+}
+.registrations-filter-draft-list button { width: 26px; height: 26px; padding: 0; color: var(--b1g-red); border: 0; border-radius: 50%; background: transparent; cursor: pointer; font-size: 18px; }
+.registrations-filter-draft-list button:hover { color: var(--b1g-white); background: var(--b1g-red); }
+.registrations-filter-selection > p { margin: 12px 0 0; color: var(--b1g-text-muted); font-size: 9px; }
+.registrations-filter-selection > p[hidden] { display: none; }
+.registrations-filter-drawer > aside > footer { min-height: 68px; padding: 13px 22px; display: flex; justify-content: space-between; gap: 9px; border-top: 1px solid var(--b1g-border); background: var(--b1g-white); }
+.registrations-filter-drawer > aside > footer .button { flex: 1; }
+
+@media (max-width: 1180px) {
+    .registrations-control-bar { grid-template-columns: minmax(150px, 1fr) minmax(205px, 1fr); }
+    .registrations-control-bar .admin-search { grid-column: 1 / 2; }
+    .registrations-control-bar .admin-toolbar-actions { grid-column: 2 / 3; }
+}
+
+@media (max-width: 780px) {
+    .registrations-control-bar { grid-template-columns: 1fr; align-items: stretch; }
+    .registrations-control-bar .admin-search,
+    .registrations-control-bar .admin-toolbar-actions { grid-column: auto; }
+    .registrations-control-bar .admin-toolbar-actions { justify-content: stretch; }
+    .registrations-control-bar .admin-toolbar-actions > button,
+    .registrations-control-bar .admin-column-control { flex: 1; }
+    .registrations-filter-drawer { grid-template-columns: minmax(0, 1fr); }
+    .registrations-filter-backdrop { display: none; }
+}
+
+@media (max-width: 520px) {
+    .registrations-control-bar .admin-toolbar-actions { flex-wrap: wrap; }
+    .registrations-control-bar .admin-toolbar-actions > button,
+    .registrations-control-bar .admin-column-control { flex: 1 1 calc(50% - 4px); }
+    .registrations-filter-drawer > aside > header,
+    .registrations-filter-body,
+    .registrations-filter-drawer > aside > footer { padding-inline: 16px; }
+}
+
+/* Registrations Phase 3 table states, sorting, and pagination */
+.registrations-table-state {
+    min-height: 270px;
+    padding: 28px 24px;
+    align-content: center;
+    gap: 22px;
+}
+.registrations-table-skeleton {
+    width: min(100%, 980px);
+    margin-inline: auto;
+    display: grid;
+    gap: 8px;
+}
+.registrations-table-skeleton[hidden] { display: none; }
+.registrations-table-skeleton span {
+    height: 30px;
+    border-radius: 6px;
+    background: linear-gradient(90deg, #f3e7e6 20%, #fcf8f7 38%, #f3e7e6 56%);
+    background-size: 220% 100%;
+    animation: registrations-skeleton 1.2s ease-in-out infinite;
+}
+.registrations-table-skeleton span:first-child { height: 38px; background-color: #eedcda; }
+.registrations-table-state-content { display: grid; justify-items: center; gap: 6px; text-align: center; }
+.registrations-table-state-content strong { color: var(--b1g-text); font-size: 13px; }
+.registrations-table-state-content p { max-width: 520px; margin: 0; color: var(--b1g-text-muted); font-size: 10px; line-height: 1.5; }
+.registrations-table-state-content p[hidden] { display: none; }
+.registrations-table-state-actions { margin-top: 9px; display: flex; justify-content: center; gap: 8px; }
+.registrations-table-state-actions .button { min-height: 34px; }
+@keyframes registrations-skeleton {
+    from { background-position: 100% 0; }
+    to { background-position: -100% 0; }
+}
+
+.registrations-panel.loading .admin-table-scroll:not([hidden]) {
+    opacity: .72;
+    pointer-events: none;
+    transition: opacity .16s ease;
+}
+.registrations-data-table th > .registration-column-label,
+.registrations-data-table th > button {
+    min-height: 24px;
+    align-items: center;
+}
+.registrations-data-table th > .registration-column-label {
+    display: flex;
+    font-size: 8px;
+    font-weight: 800;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+.registrations-data-table th[aria-sort="ascending"],
+.registrations-data-table th[aria-sort="descending"] { color: var(--b1g-red-dark) !important; }
+.registrations-data-table th button:focus-visible,
+.admin-pagination-controls nav button:focus-visible {
+    border-radius: 4px;
+    outline: 3px solid var(--b1g-focus-ring);
+    outline-offset: 2px;
+}
+.admin-pagination-controls nav button[aria-current="page"] { cursor: default; }
+
+@media (max-width: 780px) {
+    .registrations-table-state { min-height: 235px; padding-inline: 16px; }
+    .registrations-table-state-actions { width: 100%; flex-wrap: wrap; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .registrations-table-skeleton span { animation: none; }
+}
+
+/* Registrations Phase 4 module-only B1G polish */
+.registrations-panel,
+.registrations-filter-drawer,
+.attestation-review-modal {
+    --registrations-control-height: 38px;
+    --registrations-radius: 8px;
+    --registrations-radius-large: 12px;
+    --registrations-focus: 0 0 0 3px var(--b1g-focus-ring);
+}
+
+.registrations-panel {
+    border-color: var(--b1g-border);
+    border-radius: var(--registrations-radius-large);
+    box-shadow: 0 10px 30px rgba(74, 9, 9, .075);
+}
+.registrations-panel .admin-table-heading { padding: 19px 20px 16px; }
+.registrations-panel .admin-table-heading h1 { font-size: 21px; letter-spacing: -.02em; }
+.registrations-panel .admin-table-heading > div > p:last-child { line-height: 1.5; }
+
+.registrations-summary-grid > div {
+    min-height: 74px;
+    padding: 16px 18px;
+    transition: background-color .16s ease;
+}
+.registrations-summary-grid > div:hover { background: var(--b1g-off-white); }
+.registrations-summary-grid span { margin-bottom: 7px; line-height: 1.35; }
+.registrations-summary-grid strong { font-size: 19px; font-variant-numeric: tabular-nums; }
+
+.registrations-quick-filters { min-height: 44px; gap: 8px; }
+.registrations-quick-filters button {
+    min-height: 28px;
+    padding-inline: 11px;
+    border-radius: 999px;
+    line-height: 1;
+}
+.registrations-quick-filters button:focus-visible,
+.registrations-panel button:focus-visible,
+.registrations-panel input:focus-visible,
+.registrations-panel select:focus-visible,
+.registrations-filter-drawer button:focus-visible,
+.registrations-filter-drawer input:focus-visible,
+.registrations-filter-drawer select:focus-visible,
+.attestation-review-modal button:focus-visible,
+.attestation-review-modal a:focus-visible,
+.attestation-review-modal select:focus-visible {
+    outline: 0;
+    box-shadow: var(--registrations-focus);
+}
+
+.registrations-control-bar { padding-block: 13px; }
+.registrations-control-context,
+.registrations-control-bar .admin-search,
+.registrations-control-bar .admin-batch-selector select,
+.registrations-control-bar .admin-toolbar-actions .button {
+    min-height: var(--registrations-control-height);
+    border-radius: var(--registrations-radius);
+}
+.registrations-control-context { padding-inline: 11px; }
+.registrations-control-context strong { font-size: 10.5px; }
+.registrations-control-bar .admin-toolbar-actions .button { padding-inline: 13px; }
+.registrations-control-bar .admin-toolbar-actions svg { width: 16px; height: 16px; }
+
+.registrations-panel .admin-active-filters { min-height: 46px; }
+.registrations-panel .admin-active-filters > div button {
+    min-height: 28px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    line-height: 1.2;
+}
+.registrations-scope-note { min-height: 38px; line-height: 1.45; }
+
+.registrations-panel .admin-table-scroll {
+    scrollbar-gutter: stable;
+    overscroll-behavior: contain;
+    border-bottom: 1px solid var(--b1g-border);
+}
+.registrations-data-table th { height: 44px; padding: 10px 12px; }
+.registrations-data-table td {
+    height: 44px;
+    padding: 10px 12px;
+    color: var(--b1g-text);
+    font-size: 9.5px;
+}
+.registrations-data-table tbody tr:hover td { background: var(--b1g-off-white); }
+.registrations-data-table .registration-group-start { border-left-color: var(--b1g-cream); }
+.registration-form-button {
+    min-height: 30px;
+    border-radius: 7px;
+    font-size: 8.5px;
+}
+.registration-attestation-badge,
+.registration-payment-badge {
+    min-height: 25px;
+    padding: 5px 9px;
+    border-radius: 999px;
+    font-size: 8.5px;
+    line-height: 1.2;
+}
+
+.registrations-panel .admin-table-footer { min-height: 62px; padding-block: 11px; }
+.registrations-panel .admin-table-footer > p { font-size: 9.5px; font-variant-numeric: tabular-nums; }
+.registrations-panel .admin-pagination-controls > label { font-size: 8.5px; }
+.registrations-panel .admin-pagination-controls select,
+.registrations-panel .admin-pagination-controls nav button {
+    min-height: 34px;
+    border-radius: 7px;
+}
+.registrations-panel .admin-pagination-controls nav button { min-width: 34px; font-size: 8.5px; }
+.registrations-table-state-actions .button { border-radius: var(--registrations-radius); }
+
+.registrations-columns-menu { border-color: var(--b1g-border); border-radius: 10px; }
+.registrations-column-groups label { min-height: 54px; }
+.registrations-column-groups label:focus-within { background: var(--b1g-off-white); box-shadow: inset 3px 0 var(--b1g-red); }
+
+.registrations-filter-drawer > aside > header { padding: 22px 24px 20px; }
+.registrations-filter-body { padding: 22px 24px; }
+.registrations-filter-drawer .admin-filter-fields { gap: 11px; }
+.registrations-filter-drawer .admin-filter-fields input,
+.registrations-filter-drawer .admin-filter-fields select,
+.registrations-filter-drawer .admin-filter-fields .button {
+    min-height: var(--registrations-control-height);
+    border-radius: var(--registrations-radius);
+}
+.registrations-filter-draft-list > div { min-height: 42px; border-radius: var(--registrations-radius); }
+.registrations-filter-drawer > aside > footer { min-height: 70px; padding-block: 14px; }
+.registrations-filter-drawer > aside > footer .button {
+    min-height: var(--registrations-control-height);
+    border-radius: var(--registrations-radius);
+}
+
+.attestation-review-dialog {
+    border-color: var(--b1g-border);
+    border-radius: 13px;
+    box-shadow: 0 24px 70px rgba(74, 9, 9, .24);
+}
+.attestation-review-context > div { padding: 12px 16px; }
+.attestation-preview-panel { padding: 19px 20px 20px; }
+.attestation-document-toolbar button,
+.attestation-open-original { min-height: 32px; border-radius: 7px; }
+.attestation-status-panel { padding: 23px; }
+.attestation-status-control select { min-height: var(--registrations-control-height); border-radius: var(--registrations-radius); }
+.attestation-review-footer { min-height: 66px; padding-block: 12px; }
+.attestation-review-footer .button {
+    min-height: var(--registrations-control-height);
+    border-radius: var(--registrations-radius);
+}
+
+@media (max-width: 1180px) and (min-width: 781px) {
+    .registrations-summary-grid { grid-template-columns: repeat(3, minmax(120px, 1fr)); }
+    .registrations-summary-grid > div:nth-child(3) { border-right: 0; }
+    .registrations-summary-grid > div:nth-child(n+4) { border-top: 1px solid var(--b1g-border); }
+}
+
+@media (max-width: 780px) {
+    .registrations-summary-grid > div:nth-child(2n) { border-right: 0; }
+    .registrations-summary-grid > div:nth-child(n+3) { border-top: 1px solid var(--b1g-border); }
+    .registrations-control-bar { padding-block: 14px; }
+    .registrations-panel .admin-table-footer { gap: 12px; }
+    .attestation-status-panel { padding: 20px; }
+}
+
+@media (max-width: 520px) {
+    .registrations-panel .admin-table-heading { padding-inline: 14px; }
+    .registrations-quick-filters { padding-inline: 14px; overflow-x: auto; }
+    .registrations-quick-filters > span,
+    .registrations-quick-filters button { flex: 0 0 auto; }
+    .registrations-table-state-actions .button { flex: 1 1 150px; }
+    .attestation-preview-panel { padding-inline: 13px; }
 }

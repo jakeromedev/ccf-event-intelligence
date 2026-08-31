@@ -1,4 +1,4 @@
-"""Canonical SQLAlchemy schema for CCF Events Intelligence.
+"""Canonical SQLAlchemy schema for B1G Admin Internal System.
 
 MySQL is the production database.  The small SQLite type variants exist only so
 unit tests and the one-time migration test fixtures can use an ephemeral local

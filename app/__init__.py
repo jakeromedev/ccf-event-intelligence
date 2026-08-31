@@ -58,6 +58,7 @@ def create_app(test_config=None):
         from .routes import can_access_admin_tables, can_access_registrations
 
         return {
+            "app_name": app.config["APP_NAME"],
             "admin_tables_allowed": can_access_admin_tables(),
             "registrations_allowed": can_access_registrations(),
             "max_upload_mb": app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024),

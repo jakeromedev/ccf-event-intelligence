@@ -122,6 +122,44 @@ class AuthenticationTests(unittest.TestCase):
         self.assertIsNotNone(match, result.output)
         return result, match.group(1)
 
+    def test_application_name_brands_authentication_and_application_shell(self):
+        login_page = self.client.get("/login")
+        self.assertEqual(200, login_page.status_code)
+        self.assertIn(b"<title>Login \xc2\xb7 B1G Admin Internal System</title>", login_page.data)
+        self.assertIn(b'aria-label="B1G Admin Internal System"', login_page.data)
+        self.assertIn(b"/static/b1g-logo-circle.png", login_page.data)
+        self.assertNotIn(b"CCF-Logo-2017-01.png", login_page.data)
+        self.assertNotIn(b"CCF Event Intelligence", login_page.data)
+
+        self.create_user("brand-check")
+        events_page = self.login("brand-check", "StrongPassword12!")
+        self.assertEqual(200, events_page.status_code)
+        self.assertIn(b"<title>Events \xc2\xb7 B1G Admin Internal System</title>", events_page.data)
+        self.assertIn(b"B1G Admin Internal System", events_page.data)
+        self.assertIn(b"/static/b1g-logo-circle.png", events_page.data)
+        self.assertNotIn(b"CCF-Logo-2017-01.png", events_page.data)
+        self.assertNotIn(b"CCF Event Dashboard", events_page.data)
+
+        styles = (Path(__file__).parents[1] / "app/static/app.css").read_text()
+        for token in (
+            "--b1g-red: #7a0b0b",
+            "--b1g-burgundy: #4a0909",
+            "--b1g-cream: #faead2",
+            "--b1g-page-background: #faead2",
+            "--b1g-page-background-soft: #f7e9d4",
+            "--b1g-surface: #ffffff",
+            "--b1g-surface-muted: #fff8ee",
+            "--b1g-border: #e6d2b9",
+            "--b1g-focus-ring: rgba(122, 11, 11, .2)",
+        ):
+            self.assertIn(token, styles)
+        self.assertIn(".nav-link.active", styles)
+        self.assertIn("object-fit: contain", styles)
+        self.assertIn(".app-main { background: var(--b1g-page-background); }", styles)
+        self.assertIn(".auth-form-panel { background: var(--b1g-page-background); }", styles)
+        self.assertIn(".sidebar { overflow: hidden; }", styles)
+        self.assertIn(':not([type="submit"])', styles)
+
     def test_admin_init_creates_then_resets_one_admin_and_invalidates_session(self):
         first, old_password = self.initialize_admin()
         self.assertIn("Admin account initialized successfully", first.output)

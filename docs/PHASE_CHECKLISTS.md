@@ -1,4 +1,4 @@
-# CCF Systems Dashboard — Phase Checklists
+# B1G Admin Internal System — Phase Checklists
 
 This document is the project-level checklist for completed and proposed phases.
 It summarizes implementation status without replacing the detailed contracts in
@@ -31,7 +31,7 @@ separately and do not block the current phase.
 
 ---
 
-## Phase 1 — Core Event Intelligence MVP
+## Phase 1 — B1G Admin Internal System MVP
 
 ### Event and import foundation
 

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "_icons.html" import icon %}
 
-{% block title %}Registrations · CCF Event Intelligence{% endblock %}
+{% block title %}Registrations · {{ app_name }}{% endblock %}
 
 {% block application_header_page %}
 <div class="application-header-page">
@@ -13,28 +13,20 @@
 
 {% block content %}
 <section class="admin-table-panel registrations-panel" data-registrations-table
+    aria-busy="true"
     data-event-id="{{ event['id'] }}"
     data-data-url="{{ url_for('dashboard.event_registrations_data', event_id=event['id']) }}"
     data-update-url="{{ url_for('dashboard.update_registration_attestation', event_id=event['id'], registrant_id=0) }}"
     data-csrf-token="{{ csrf_token() }}"
     data-column-preference-key="ccf-registrations-column-groups"
+    data-has-active-batch="{{ 'true' if active_batch else 'false' }}"
     data-can-edit-attestation="{{ 'true' if attestation_edit_allowed else 'false' }}">
     <header class="admin-table-heading">
         <div>
             <p class="admin-breadcrumb">Event Operations <span>/</span> Registrations</p>
-            <h1>Registration Records</h1>
-            <p>One row per imported registration. Records are not deduplicated.</p>
+            <h1>Registrations</h1>
+            <p>Event-scoped operational view of imported registration submissions.</p>
         </div>
-        <label class="admin-batch-selector">
-            <span>Batch</span>
-            <select data-batch-select>
-                <option value="active" {{ 'selected' if selected_batch == (active_batch['id'] if active_batch else none) else '' }}>Active Batch{% if active_batch %} (#{{ active_batch['id'] }}){% endif %}</option>
-                <option value="all" {{ 'selected' if selected_batch == 'all' else '' }}>All Batches</option>
-                {% for batch in batches %}
-                    <option value="{{ batch.id }}" {{ 'selected' if selected_batch == batch.id and (not active_batch or batch.id != active_batch['id']) else '' }}>Batch #{{ batch.id }} · {{ batch.status|capitalize }}</option>
-                {% endfor %}
-            </select>
-        </label>
     </header>
 
     <div class="registrations-summary-grid" aria-label="Registration requirement summary">
@@ -55,15 +47,28 @@
 
     <p class="registrations-update-feedback" data-update-feedback role="status" aria-live="polite" hidden></p>
 
-    <div class="admin-table-toolbar">
+    <div class="admin-table-toolbar registrations-control-bar" aria-label="Registration table controls">
+        <div class="registrations-control-context" aria-label="Selected Event">
+            <span>Event</span>
+            <strong title="{{ event['name'] }}">{{ event['name'] }}</strong>
+        </div>
+        <label class="admin-batch-selector">
+            <span>Batch</span>
+            <select data-batch-select>
+                <option value="active" {{ 'selected' if selected_batch == (active_batch['id'] if active_batch else none) else '' }}>Active Batch{% if active_batch %} (#{{ active_batch['id'] }}){% endif %}</option>
+                <option value="all" {{ 'selected' if selected_batch == 'all' else '' }}>All Batches</option>
+                {% for batch in batches %}
+                    <option value="{{ batch.id }}" {{ 'selected' if selected_batch == batch.id and (not active_batch or batch.id != active_batch['id']) else '' }}>Batch #{{ batch.id }} · {{ batch.status|capitalize }}</option>
+                {% endfor %}
+            </select>
+        </label>
         <label class="admin-search">
             {{ icon('search', 18) }}
             <span class="sr-only">Search registrations</span>
-            <input type="search" placeholder="Search code, name, email, or mobile…" autocomplete="off" data-global-search>
+            <input type="search" placeholder="Search registration code, ticket code, name, email, or mobile" autocomplete="off" data-global-search>
         </label>
         <div class="admin-toolbar-actions">
-            <button type="button" class="button secondary admin-reset-sort" data-reset-sort hidden>Reset Sort</button>
-            <button type="button" class="button secondary" data-filter-toggle>{{ icon('filter', 17) }} Filters <span class="toolbar-count" data-filter-count hidden>0</span></button>
+            <button type="button" class="button secondary" data-filter-toggle aria-haspopup="dialog" aria-controls="registration-filter-drawer" aria-expanded="false">{{ icon('filter', 17) }} Filters <span class="toolbar-count" data-filter-count hidden>0</span></button>
             <div class="admin-column-control">
                 <button type="button" class="button secondary" data-columns-toggle aria-expanded="false" aria-controls="registration-columns-menu">{{ icon('columns', 17) }} Columns</button>
                 <div class="admin-columns-menu registrations-columns-menu" id="registration-columns-menu" data-columns-menu hidden>
@@ -77,22 +82,49 @@
                     </fieldset>
                 </div>
             </div>
+            <button type="button" class="button secondary" data-reset-view>Reset</button>
         </div>
-    </div>
-
-    <div class="admin-filter-builder" data-filter-builder hidden>
-        <div class="admin-filter-fields">
-            <label><span>Column</span><select data-filter-field></select></label>
-            <label><span>Condition</span><select data-filter-operator></select></label>
-            <label class="admin-filter-value"><span>Value</span><select data-filter-value></select></label>
-            <button type="button" class="button primary" data-add-filter>Add Filter</button>
-        </div>
-        <p>Combine filters within the selected Event and Batch.</p>
     </div>
 
     <div class="admin-active-filters" data-active-filters hidden>
         <span>Filters:</span><div data-filter-chips></div>
-        <button type="button" data-clear-filters>Clear All Filters</button>
+        <button type="button" data-clear-filters>Clear All</button>
+    </div>
+
+    <div class="registrations-filter-drawer" id="registration-filter-drawer" data-filter-drawer hidden>
+        <button type="button" class="registrations-filter-backdrop" data-filter-close aria-label="Close filters"></button>
+        <aside role="dialog" aria-modal="true" aria-labelledby="registration-filter-title" aria-describedby="registration-filter-description">
+            <header>
+                <div>
+                    <p class="eyebrow">REGISTRATION FILTERS</p>
+                    <h2 id="registration-filter-title">Advanced Filters</h2>
+                    <p id="registration-filter-description">Narrow records within the selected Event and Batch.</p>
+                </div>
+                <button type="button" class="registrations-filter-close" data-filter-close aria-label="Close filters">&times;</button>
+            </header>
+            <div class="registrations-filter-body">
+                <div class="admin-filter-builder" data-filter-builder>
+                    <div class="admin-filter-fields">
+                        <label><span>Column</span><select data-filter-field></select></label>
+                        <label><span>Condition</span><select data-filter-operator></select></label>
+                        <label class="admin-filter-value"><span>Value</span><select data-filter-value></select></label>
+                        <button type="button" class="button secondary" data-add-filter>Add Filter</button>
+                    </div>
+                </div>
+                <section class="registrations-filter-selection" aria-labelledby="registration-selected-filters">
+                    <div>
+                        <h3 id="registration-selected-filters">Selected filters</h3>
+                        <span data-filter-draft-count>0</span>
+                    </div>
+                    <div class="registrations-filter-draft-list" data-filter-draft-list></div>
+                    <p data-filter-draft-empty>No filters selected yet.</p>
+                </section>
+            </div>
+            <footer>
+                <button type="button" class="button secondary" data-clear-filter-draft>Clear All</button>
+                <button type="button" class="button primary" data-apply-filters>Apply Filters</button>
+            </footer>
+        </aside>
     </div>
 
     <div class="registrations-scope-note">
@@ -100,16 +132,29 @@
         Personal information is restricted to authorized registration operators and is never exported from this page.
     </div>
 
-    <div class="admin-table-state" data-table-state>Loading registrations…</div>
-    <div class="admin-table-scroll" data-table-wrap hidden>
-        <table class="admin-data-table registrations-data-table">
+    <div class="admin-table-state registrations-table-state" data-table-state role="status" aria-live="polite">
+        <div class="registrations-table-skeleton" data-table-skeleton aria-hidden="true">
+            {% for _ in range(7) %}<span></span>{% endfor %}
+        </div>
+        <div class="registrations-table-state-content" data-table-state-content>
+            <strong data-table-state-title>Loading registrations…</strong>
+            <p data-table-state-detail>Preparing the selected Event and Batch.</p>
+            <div class="registrations-table-state-actions">
+                <button type="button" class="button secondary" data-table-clear hidden>Clear search and filters</button>
+                <button type="button" class="button primary" data-table-retry hidden>Retry</button>
+            </div>
+        </div>
+    </div>
+    <div class="admin-table-scroll" data-table-wrap aria-label="Scrollable registration table" aria-busy="true" tabindex="0" hidden>
+        <table class="admin-data-table registrations-data-table" aria-describedby="registration-table-summary">
+            <caption class="sr-only">Registrations for the selected Event and Batch</caption>
             <thead data-table-head></thead>
             <tbody data-table-body></tbody>
         </table>
     </div>
 
     <footer class="admin-table-footer" data-table-footer hidden>
-        <p data-table-summary></p>
+        <p id="registration-table-summary" data-table-summary aria-live="polite"></p>
         <div class="admin-pagination-controls">
             <label>Rows per page
                 <select data-page-size>{% for size in (25, 50, 100) %}<option value="{{ size }}" {{ 'selected' if size == 50 else '' }}>{{ size }}</option>{% endfor %}</select>
@@ -198,5 +243,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='registrations.js', v='20260831-document-viewer') }}" defer></script>
+<script src="{{ url_for('static', filename='registrations.js', v='20260831-phase4-final') }}" defer></script>
 {% endblock %}

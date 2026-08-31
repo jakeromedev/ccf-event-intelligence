@@ -90,6 +90,8 @@ Do not expose excluded sensitive fields such as:
 
 # Phase 1 — PRIORITY: Core Table and Attestation Workflow
 
+> **Status:** Complete — implemented and locally verified on August 31, 2026.
+
 ## Objective
 
 Implement the highest-priority operational changes first.
@@ -371,6 +373,8 @@ Phase 1 is complete only when:
 
 # Phase 2 — Page Controls, Summary Cards, Search, and Filters
 
+> **Status:** Complete — implemented and locally verified on August 31, 2026.
+
 ## Objective
 
 Improve the page-level operational controls and make the current registration state easy to understand.
@@ -578,6 +582,8 @@ Batch should return to active-batch behavior unless existing UX explicitly requi
 ---
 
 # Phase 3 — Table UX, Sorting, Pagination, Responsive Behavior, and Accessibility
+
+> **Status:** Complete — implemented and locally verified on August 31, 2026.
 
 ## Objective
 
@@ -817,6 +823,8 @@ Debounce search requests and prevent duplicate submissions/API requests.
 
 # Phase 4 — Visual Polish, Testing, and Regression Validation
 
+> **Status:** Complete — implemented and locally verified on August 31, 2026.
+
 ## Objective
 
 Finish the module visually and validate that the redesign did not break existing behavior, authorization, or performance.
@@ -842,10 +850,11 @@ Standardize:
 
 Use a polished SaaS-style visual direction:
 
-- clean light background
+- clean warm-cream/off-white background
 - restrained cards
 - subtle borders/shadows
-- blue/indigo primary accent
+- deep B1G red and burgundy primary accents
+- muted rose supporting accents
 - green success
 - amber pending
 - red invalid/error
@@ -860,6 +869,10 @@ Prefer Registrations-specific styling.
 Example:
 
 `app/static/registrations.css`
+
+When retaining the existing application stylesheet, all new polish rules must
+remain scoped to Registrations, its filter drawer, or its Attestation Review
+modal. Do not require a global template change solely to load module polish.
 
 Do not introduce broad global CSS changes that alter unrelated pages.
 

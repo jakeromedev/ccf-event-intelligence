@@ -43,7 +43,7 @@
 </footer>
 {%- endmacro %}
 
-{% block title %}Data Quality · CCF Event Dashboard{% endblock %}
+{% block title %}Data Quality · {{ app_name }}{% endblock %}
 
 {% block page_header %}
 {{ render_page_header('Data Quality', event, active_batch, 'Review data issues and validation results from the active dataset.', variant='workspace', header_class='quality-header') }}

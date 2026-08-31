@@ -15,7 +15,7 @@
 <span class="sort-indicator" aria-hidden="true">{% if sort == field %}{{ '↑' if direction == 'asc' else '↓' }}{% else %}↕{% endif %}</span>
 {%- endmacro %}
 
-{% block title %}Satellites · CCF Event Dashboard{% endblock %}
+{% block title %}Satellites · {{ app_name }}{% endblock %}
 
 {% block page_header %}
 {{ render_page_header('Satellite Analytics', event, active_batch, 'Unique-person satellite insights with traceable registration sources.', variant='workspace', header_class='satellite-header') }}

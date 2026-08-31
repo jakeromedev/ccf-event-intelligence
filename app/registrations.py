@@ -1,5 +1,6 @@
 """Focused registration records and attestation verification operations."""
 
+import json
 from datetime import datetime
 
 from .admin_tables import (
@@ -18,6 +19,7 @@ from .url_safety import safe_external_url
 
 
 ATTESTATION_STATUSES = ("pending", "verified", "invalid")
+MAX_REGISTRATION_FILTERS = 20
 ATTESTATION_STATUS_LABELS = {
     "pending": "Pending",
     "verified": "Verified",
@@ -256,6 +258,24 @@ def registrations_data(db, event_id, active_batch_id, args):
     batch_scope = resolve_batch_scope(db, event_id, args.get("batch"), active_batch_id)
     columns = registration_columns(db)
     column_map = {column["key"]: column for column in columns}
+    raw_filters = args.get("filters")
+    json_filter_count = 0
+    if raw_filters:
+        try:
+            parsed_filters = json.loads(raw_filters)
+        except (TypeError, ValueError):
+            parsed_filters = None
+        if isinstance(parsed_filters, list):
+            json_filter_count = len(parsed_filters)
+    indexed_filter_count = sum(
+        1 for key in args if key.startswith("filters[") and key.endswith("]")
+    )
+    if json_filter_count + indexed_filter_count > MAX_REGISTRATION_FILTERS:
+        raise AdminTableQueryError(
+            "Registrations supports at most {} filters.".format(
+                MAX_REGISTRATION_FILTERS
+            )
+        )
     filters = _parse_filters(args, column_map)
     for item in filters:
         if not column_map[item["field"]]["filterable"]:

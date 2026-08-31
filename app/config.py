@@ -8,6 +8,7 @@ from pathlib import Path
 
 
 ENVIRONMENTS = {"development", "testing", "staging", "production"}
+APPLICATION_NAME = "B1G Admin Internal System"
 PLACEHOLDER_SECRETS = {
     "dev-only-change-me",
     "replace-with-a-long-random-value",
@@ -80,6 +81,7 @@ def configure_app(app, test_config=None):
     ]
 
     app.config.from_mapping(
+        APP_NAME=APPLICATION_NAME,
         APP_ENV=environment,
         SECRET_KEY=os.environ.get("CCF_DASHBOARD_SECRET", "dev-only-change-me"),
         DATABASE_URL=os.environ.get("DATABASE_URL"),

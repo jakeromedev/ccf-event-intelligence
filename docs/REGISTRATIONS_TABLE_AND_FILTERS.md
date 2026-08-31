@@ -295,6 +295,28 @@ Summary cards use the same scoped and filtered query conditions as the rows:
 
 ## Display behavior
 
+- The unified control bar keeps the selected Event, batch scope, server-side
+  search, Filters, Columns, and top-level Reset actions together. Reset returns
+  search, filters, quick filters, sorting, pagination, and batch scope to their
+  defaults while preserving the selected Event.
+- Advanced filters are staged in a right-side drawer. **Apply Filters** commits
+  the staged selection; closing the drawer leaves the current query unchanged.
+  Applied filters remain visible as individually removable chips outside the
+  drawer, and large Satellite option lists provide an in-drawer search field.
+- The table uses a sticky header inside its own vertically and horizontally
+  scrollable region. Only supported visible fields expose sort buttons, with
+  `aria-sort` reflecting the current direction. Pagination remains server-side
+  and identifies the current page accessibly.
+- Initial loading uses a stable table skeleton. Subsequent refreshes retain the
+  table with a busy treatment, while empty, no-active-batch, and request-error
+  states provide distinct operator guidance. Filtered empty results can clear
+  search and filters directly, and request failures provide a Retry action.
+- Table interactions add browser history entries; Back and Forward restore the
+  batch, search, filter, sort, page, and rows-per-page state from the URL.
+- Final component polish is scoped to the Registrations panel, advanced-filter
+  drawer, and Attestation Review modal. It uses the approved B1G red, burgundy,
+  warm-cream, and rose tokens while retaining green, amber, and red semantic
+  status meanings.
 - The **Attestation Form** button opens the in-page Attestation Review modal
   before the external document request begins, so registrant and verification
   context remain immediately available during loading.
