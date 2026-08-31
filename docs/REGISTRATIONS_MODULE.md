@@ -12,9 +12,12 @@ submissions. It is separate from aggregate dashboards and from Admin Tables:
 - Admin Tables remains the administrator-only complete-source inspection tool
   for Registrants, Generated Tickets, Buyers, and curated lineage.
 
-Imported registration data remains read-only. Phase 2 adds a separate,
-application-owned current attestation decision; it does not modify source JSON,
-source CSV values, or the uploaded-form URL. The module provides no downloads.
+Imported registration data remains read-only. A separate, application-owned
+current attestation decision is stored once per durable participant inside the
+Event registration lifecycle; imports do not modify or reset it. Source JSON,
+source CSV values, and the uploaded-form URL remain source-owned. The module
+also has a persistent one-to-many Remarks backend owned by the same durable
+participant identity. The module provides no downloads.
 
 ## Navigation and routes
 
@@ -26,6 +29,9 @@ state.
 | Registrations page | `/events/<event_id>/registrations` | GET |
 | Paginated registration data | `/events/<event_id>/registrations/data` | GET |
 | Update current attestation state | `/events/<event_id>/registrations/<registrant_id>/attestation` | PATCH |
+| List participant remarks | `/events/<event_id>/registrations/<registrant_id>/remarks` | GET |
+| Create participant remark | `/events/<event_id>/registrations/<registrant_id>/remarks` | POST |
+| Resolve participant remark | `/events/<event_id>/registrations/<registrant_id>/remarks/<remark_id>` | PATCH |
 
 All routes independently apply `registrations_access_required`; sidebar
 visibility is not an authorization control.
@@ -45,8 +51,8 @@ detailed registration inspection:
   an authenticated reviewer is required.
 
 The Registration role is deny-by-default at the global endpoint guard. It may
-view the Dashboard and Registrations and may edit only the application-owned
-attestation state. It cannot access Analytics, Data Quality, Admin Tables,
+view the Dashboard and Registrations and may edit the independently authorized
+application-owned attestation and remark states. It cannot access Analytics, Data Quality, Admin Tables,
 imports/batches, Event or Satellite Dataset settings, or user administration.
 Standard users can do neither Registrations action. The PATCH endpoint requires
 an attributable administrator or Registration operator even when read-only
@@ -83,11 +89,13 @@ registrants record
   `-- (batch_id, ticket_code)
           LEFT JOIN tickets (batch_id, ticket_code)
               `-- payment_status
-  `-- id
-          LEFT JOIN attestation_verifications.registrant_id
-              |-- current verification status
-              |-- reviewed timestamp
-              `-- users.id reviewer username
+  `-- (batch_id, id)
+          LEFT JOIN attestation_participant_registrants
+              `-- attestation_participant_id
+                  LEFT JOIN attestation_verifications
+                      |-- current verification status
+                      |-- reviewed timestamp
+                      `-- users.id reviewer username
 ```
 
 `buyers` is not needed for Phase 1. Payment Status comes directly from the
@@ -95,7 +103,11 @@ Generated Ticket row whose `batch_id` and `ticket_code` match the registration.
 The left join deliberately retains a registration whose ticket is missing;
 that row receives no Payment Status and displays `—`.
 
-Names and email addresses are never used as relationship keys.
+Names and email addresses are never used as relationship keys. Exact normalized
+source ID, registration code, and ticket code aliases resolve a durable
+Event-scoped attestation participant. Curated demographic grouping is used only
+to associate duplicate rows inside one import run; it is not the durable
+foreign key.
 
 ## Displayed columns
 
@@ -103,6 +115,7 @@ Names and email addresses are never used as relationship keys.
 |---|---|---|
 | Attestation & Payment | Attestation Form | `source_data_json["Upload Your Accomplished Attestation Form Here"]` |
 | Attestation & Payment | Attestation Status | `COALESCE(attestation_verifications.status, 'pending')` |
+| Attestation & Payment | Remarks | Pre-aggregated Pending and Resolved counts for the durable participant |
 | Attestation & Payment | Payment Status | `tickets.payment_status` through the batch/ticket-code relationship |
 | Registrant Details | First Name | `registrants.first_name` |
 | Registrant Details | Last Name | `registrants.last_name` |
@@ -160,14 +173,17 @@ The application owns exactly three verification states:
 
 No `attestation_verifications` row means **Pending** with reviewer and reviewed
 time displayed as `—`. This derived default avoids materializing a row for
-every imported registration. The Attestation Review modal shows the registrant,
+every participant. Multiple displayed source rows mapped to one participant
+show the same status and reviewer metadata, while summary cards continue to
+count displayed imported rows. The Attestation Review modal shows the registrant,
 Satellite, Payment Status, submitted form, and current state. An administrator
 or Registration operator can change the state in that modal; read-only viewers
 receive the same preview without editing controls. The server, never the
 browser, supplies `current_user.id` and the review timestamp.
 
-Updates validate the Event, selected active/historical batch, registration
-ownership, and exact status allow-list before writing. The JSON response is
+Updates validate the Event, selected active/historical batch, registration and
+participant ownership, and exact status allow-list before writing the one
+participant-scoped record. The JSON response is
 limited to status, label, reviewer, timestamp, and batch ID. Operational logs
 contain safe IDs and status only—not names, contact fields, form URLs, or source
 rows.
@@ -175,6 +191,56 @@ rows.
 The table records current last-editor attribution and time. It is not a
 complete historical audit ledger: later updates replace the prior current
 state, reviewer, and timestamp.
+
+## Registrant Remarks backend
+
+Remarks are stored independently of imported rows in `registrant_remarks`,
+owned by `(event_id, attestation_participant_id)`. The registrant ID in each
+route is only a row locator: the server validates its Event and selected batch,
+then resolves it through `attestation_participant_registrants`. Participant,
+author, and resolver IDs are never accepted from JSON.
+
+GET orders Pending remarks first and newest first within each status. POST
+accepts only `remark`, trims it, rejects blank or more than 4,000 characters,
+and creates an attributed Pending record. PATCH accepts only the one-way
+`pending` to `resolved` transition; reopening and editing remark text are not
+part of Phase 2. Flask-WTF CSRF protection applies to both mutations. Structured
+logs contain IDs only and exclude remark text and registrant PII.
+
+The table shows `No Remarks`, Pending counts, Resolved counts, or both. Pending
+counts receive the stronger visual treatment, and the server-side Remarks
+filter exposes `Has Pending Remarks`. Counts come from a grouped participant
+subquery, so the one-to-many relation cannot multiply source rows or pagination.
+
+The Remarks action opens an accessible modal with loading, empty, validation,
+save, and resolution states. Pending notes appear first and newest first;
+Resolved notes remain visible with resolver and resolution time. Authorized
+operators can create and resolve notes without leaving the Registrations table.
+
+The importer does not read or write `registrant_remarks`. Replacement imports
+reuse durable participant ownership, so all remark content, per-remark status,
+created/resolved attribution, and timestamps remain unchanged.
+
+### Registrant Remarks acceptance validation
+
+The final regression suite exercises four consecutive imports for one Event
+with two Pending remarks, one Resolved remark, and a Verified Attestation. After
+each replacement it compares the complete remark IDs, text, statuses, author and
+resolver IDs, and all timestamps to the original snapshot. It also confirms new
+source-row IDs, unchanged Payment Status, failed-import preservation, inactive
+batch deletion, duplicate source rows, and active/historical/all-batch views.
+
+Security coverage includes CSRF, unauthorized create/resolve, strict JSON field
+allow-lists, foreign remark IDs, manipulated ownership/attribution fields, and
+cross-Event/cross-batch requests. Database tests cover composite ownership,
+status/timestamp checks, operator `SET NULL`, participant/Event cascade, and
+downgrade/re-upgrade behavior. An execution-level assertion verifies that the
+Registrations SELECT count is identical with zero or many remarks, preventing
+an N+1 count query regression.
+
+Final local validation on 2026-09-01 passed 126 tests on SQLite and the same 126
+tests on MySQL. A clean MySQL Alembic upgrade, downgrade to `f3a8c2d9e401`,
+re-upgrade to `a4c9e2f7b610`, and `alembic check` also passed.
 
 ## Query contract
 
@@ -264,11 +330,13 @@ shared public cache.
 
 ## Retention and audit governance
 
-Verification metadata is retained for the life of its imported registration.
-Deleting an eligible batch cascades the associated current-state rows. Deleting
-the reviewer retains status and timestamp while clearing reviewer ID. There is
-no separate automatic cleanup schedule and no copy of the attachment contents
-or URL in the verification table.
+Verification metadata is retained for the life of the durable Event-scoped
+participant. Deleting an eligible technical import batch removes its source
+mapping and clears matching raw-row provenance, but preserves current state.
+Deleting the Event cascades the participant lifecycle. Deleting the reviewer
+retains status and timestamp while clearing reviewer ID. There is no separate
+automatic cleanup schedule and no copy of attachment contents or URL in the
+verification table.
 
 Organization-specific owner and retention duration remain governance decisions
 in `OPERATIONS_AND_INCIDENT_RESPONSE.md`. Phase 3 does not invent a duration or
@@ -285,9 +353,9 @@ updates against disposable MySQL had a 0.86 ms median, 1.34 ms p95, and 2.77 ms
 maximum in that local environment.
 
 These are development-host observations, not an approved production SLA. The
-existing unique registrant key and status/reviewer indexes support the measured
-workflow; no additional index, per-row query, cache, worker, or background job
-was justified.
+durable participant uniqueness and mapping indexes plus status/reviewer indexes
+support the current workflow. No per-row query, cache, worker, or background
+job is used.
 
 ## Phase 1 verification history
 
@@ -319,11 +387,11 @@ Hosted CI was not executed from the local implementation environment.
 | Registration-role restricted-module denial | Pass | Direct page/API/mutation requests return 403 |
 | Default Pending presentation | Pass | Missing-row query and UI contract tests |
 | Pending/Verified/Invalid transitions | Pass | CSRF-protected endpoint tests |
-| Active and historical batch isolation | Pass | Independent-state and ownership tests |
+| Active/historical participant reconciliation | Pass | Updated imports resolve the same participant state |
 | Quick filters and combined filters | Pass | Server reconciliation and UI contract tests |
 | Summary reconciliation | Pass | Mixed-state 30-registration fixture |
 | Reviewer attribution and timestamps | Pass | Database and response tests |
-| Batch cleanup and reviewer deletion | Pass | Cascade and `SET NULL` tests |
+| Batch cleanup and reviewer deletion | Pass | State preservation and `SET NULL` tests |
 | PII-safe operational logging | Pass | JSON-log capture and exclusion assertions |
 | Export/cache absence | Pass | Route-map and implementation review |
 | Manual target-browser UAT | Not executed | External acceptance required |
@@ -367,7 +435,13 @@ Implementation verified: **2026-08-31**
 ## Current limitations
 
 The module has no export surface and does not provide complete verification
-history. Organization-specific retention ownership/duration and any future
-split reviewer permission remain explicit decisions. Local engineering is
-ready for acceptance, but hosted CI and manual target-browser UAT must be
-recorded before the three-phase plan can truthfully be marked Complete.
+history. Cross-import identity requires at least one stable exact source ID,
+registration code, or ticket code; if all three change, the source row is
+conservatively treated as a new participant. Ambiguous identifier merges fail
+the candidate import rather than inheriting another participant's review.
+
+Organization-specific retention ownership/duration and any future split
+reviewer permission remain explicit decisions. The attestation-preservation
+change passed complete SQLite and dedicated local MySQL suites, live MySQL
+migration and schema checks, lint, compilation, and frontend syntax checks.
+Hosted CI and manual target-browser UAT remain external acceptance steps.

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from werkzeug.utils import secure_filename
 
+from .attestation_identity import reconcile_attestation_participants
 from .classifier import classify_affiliation, clean
 from .curation import rebuild_batch_curation
 from .satellite_datasets import remap_satellite_dataset_links
@@ -700,6 +701,10 @@ def process_batch(db, batch_id):
 
         _insert_issues(db, batch_id, quality_issues)
         rebuild_batch_curation(db, batch_id)
+        reconcile_attestation_participants(db, batch["event_id"], batch_id)
+        # Application-owned attestation verification and registrant remark rows
+        # are intentionally outside the import mutation boundary. Reconciliation
+        # only attaches this batch's replaceable source rows to durable owners.
         _set_active_batch(db, batch["event_id"], batch_id)
         db.commit()
     except Exception as exc:

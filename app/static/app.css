@@ -2765,7 +2765,8 @@ body.registrations-filter-open { overflow: hidden; }
 /* Registrations Phase 4 module-only B1G polish */
 .registrations-panel,
 .registrations-filter-drawer,
-.attestation-review-modal {
+.attestation-review-modal,
+.remarks-modal {
     --registrations-control-height: 38px;
     --registrations-radius: 8px;
     --registrations-radius-large: 12px;
@@ -2852,6 +2853,20 @@ body.registrations-filter-open { overflow: hidden; }
     border-radius: 7px;
     font-size: 8.5px;
 }
+.registration-remarks-button {
+    min-height: 30px;
+    padding: 6px 10px;
+    color: var(--b1g-text-muted);
+    border: 1px solid var(--b1g-border);
+    border-radius: 999px;
+    background: var(--b1g-white);
+    font-size: 8.5px;
+    font-weight: 750;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.registration-remarks-button:hover { color: var(--b1g-red); border-color: var(--b1g-rose); background: var(--b1g-off-white); }
+.registration-remarks-button.has-pending { color: #7a4d00; border-color: #e5ca82; background: #fff8df; }
 .registration-attestation-badge,
 .registration-payment-badge {
     min-height: 25px;
@@ -2909,6 +2924,46 @@ body.registrations-filter-open { overflow: hidden; }
     border-radius: var(--registrations-radius);
 }
 
+.remarks-dialog {
+    width: min(760px, 100%);
+    height: min(820px, 92vh);
+    max-height: 92vh;
+    display: flex;
+    flex-direction: column;
+    border-color: var(--b1g-border);
+    border-radius: 13px;
+    box-shadow: 0 24px 70px rgba(74, 9, 9, .24);
+}
+.remarks-participant-context { padding: 13px 22px; border-bottom: 1px solid var(--b1g-border); background: var(--b1g-off-white); }
+.remarks-participant-context span,
+.remarks-participant-context strong { display: block; }
+.remarks-participant-context span { color: var(--b1g-text-muted); font-size: 8px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.remarks-participant-context strong { margin-top: 3px; color: var(--b1g-text); font-size: 13px; }
+.remarks-compose { padding: 17px 22px; border-bottom: 1px solid var(--b1g-border); }
+.remarks-compose label > span { display: block; margin-bottom: 6px; color: var(--b1g-text); font-size: 10px; font-weight: 800; }
+.remarks-compose textarea { width: 100%; min-height: 88px; padding: 10px 12px; resize: vertical; color: var(--b1g-text); border: 1px solid var(--b1g-border); border-radius: var(--registrations-radius); font: inherit; line-height: 1.5; }
+.remarks-compose > div { margin-top: 8px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.remarks-compose small { color: var(--b1g-text-muted); font-size: 8px; font-variant-numeric: tabular-nums; }
+.remarks-feedback { margin: 0; padding: 9px 22px; color: #176b5c; border-bottom: 1px solid #cce4dc; background: #f1faf7; font-size: 9px; font-weight: 700; }
+.remarks-feedback.is-error { color: #914a43; border-color: #edcfcb; background: #fff5f4; }
+.remarks-loading { min-height: 150px; padding: 44px 22px; color: var(--b1g-text-muted); text-align: center; font-size: 10px; }
+.remarks-content { min-height: 0; padding: 19px 22px 24px; display: grid; gap: 22px; overflow-y: auto; }
+.remarks-content[hidden] { display: none; }
+.remarks-section-heading { margin-bottom: 9px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.remarks-section-heading h3 { margin: 0; color: var(--b1g-text); font-size: 13px; }
+.remarks-section-heading span { min-width: 25px; padding: 4px 7px; color: var(--b1g-red-dark); border-radius: 999px; background: #f8eeee; text-align: center; font-size: 8px; font-weight: 800; }
+.remarks-list { display: grid; gap: 8px; }
+.remark-card { padding: 13px 14px; border: 1px solid var(--b1g-border); border-radius: 9px; background: var(--b1g-white); }
+.remark-card.is-pending { border-left: 3px solid #d69a24; background: #fffdf7; }
+.remark-card.is-resolved { border-left: 3px solid #4d947f; background: #f8fcfa; }
+.remark-text { margin: 0; color: var(--b1g-text); font-size: 10px; line-height: 1.55; overflow-wrap: anywhere; white-space: pre-wrap; }
+.remark-metadata { margin: 7px 0 0; color: var(--b1g-text-muted); font-size: 8px; }
+.remark-resolve-button { margin-top: 10px; min-height: 31px; }
+.remarks-empty { margin: 0; padding: 17px; color: var(--b1g-text-muted); border: 1px dashed var(--b1g-border); border-radius: 8px; background: var(--b1g-off-white); text-align: center; font-size: 9px; }
+.remarks-footer { min-height: 62px; margin-top: auto; padding: 11px 22px; display: flex; justify-content: flex-end; border-top: 1px solid var(--b1g-border); background: var(--b1g-white); }
+.remarks-footer .button,
+.remarks-compose .button { min-height: var(--registrations-control-height); border-radius: var(--registrations-radius); }
+
 @media (max-width: 1180px) and (min-width: 781px) {
     .registrations-summary-grid { grid-template-columns: repeat(3, minmax(120px, 1fr)); }
     .registrations-summary-grid > div:nth-child(3) { border-right: 0; }
@@ -2921,6 +2976,7 @@ body.registrations-filter-open { overflow: hidden; }
     .registrations-control-bar { padding-block: 14px; }
     .registrations-panel .admin-table-footer { gap: 12px; }
     .attestation-status-panel { padding: 20px; }
+    .remarks-dialog { width: 100%; height: 100%; max-height: none; border: 0; border-radius: 0; }
 }
 
 @media (max-width: 520px) {
@@ -2930,4 +2986,8 @@ body.registrations-filter-open { overflow: hidden; }
     .registrations-quick-filters button { flex: 0 0 auto; }
     .registrations-table-state-actions .button { flex: 1 1 150px; }
     .attestation-preview-panel { padding-inline: 13px; }
+    .remarks-compose,
+    .remarks-content,
+    .remarks-participant-context,
+    .remarks-footer { padding-inline: 14px; }
 }

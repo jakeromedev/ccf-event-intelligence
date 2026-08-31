@@ -14,10 +14,15 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 
 from app import create_app
+from app.attestation_identity import (
+    AttestationIdentityConflict,
+    resolve_attestation_participant,
+)
 from app.db import get_db, get_engine
 from app.importer import process_batch, store_validation, validate_batch
 from app.models import Base, User
 from app.observability import JsonLogFormatter
+from app.registrations import update_attestation_verification
 from app.url_safety import safe_external_url
 
 
@@ -127,7 +132,14 @@ class RegistrationsIntegrationTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def _write_fixture(self, count, prefix=""):
+    def _write_fixture(
+        self,
+        count,
+        prefix="",
+        first_satellite="Eastwood",
+        first_attestation="https://files.example.com/form-1.pdf",
+        duplicate_first_identity=False,
+    ):
         write_csv(
             self.paths["buyers"],
             BUYER_FIELDS,
@@ -147,7 +159,7 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         tickets = []
         registrants = []
         attestation_values = {
-            1: "https://files.example.com/form-1.pdf",
+            1: first_attestation,
             2: "http://files.example.com/form-2.pdf",
             3: "javascript:alert(1)",
             4: "data:text/html,unsafe",
@@ -161,7 +173,16 @@ class RegistrationsIntegrationTests(unittest.TestCase):
             first_name = "Jane" if number == 1 else "John" if number == 2 else "Name{:03d}".format(number)
             last_name = "Alpha" if number == 1 else "Beta" if number == 2 else "Person{:03d}".format(number)
             gender = "Female" if number % 2 else "Male"
-            satellite = "Eastwood" if number % 2 else "CCF Main"
+            birth_year = str(1980 + number)
+            if duplicate_first_identity and number == 2:
+                last_name = "Alpha"
+                gender = "Female"
+                birth_year = "1981"
+            satellite = (
+                first_satellite
+                if number == 1
+                else "Eastwood" if number % 2 else "CCF Main"
+            )
             shirt_size = "S" if number % 3 == 1 else "M" if number % 3 == 2 else "L"
             transportation_to = "Bus" if number % 2 else "Private Vehicle"
             transportation_from = "Van" if number % 2 else "Private Vehicle"
@@ -193,7 +214,7 @@ class RegistrationsIntegrationTests(unittest.TestCase):
                     "Mobile Number": "0917{}".format(identifier),
                     "Gender": gender,
                     "Birth Month": "January",
-                    "Birth Year": str(1980 + number),
+                    "Birth Year": birth_year,
                     "Life Stage": "Single",
                     "Are You Attending Ccf": "Yes",
                     "Are You From A Local Or International Satellite": "Local Satellite",
@@ -247,6 +268,10 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         self.assertIn(b'data-attestation-fit', page.data)
         self.assertIn(b'data-attestation-actual-size', page.data)
         self.assertIn(b'data-attestation-canvas', page.data)
+        self.assertIn(b'data-remarks-modal', page.data)
+        self.assertIn(b'aria-labelledby="remarks-title"', page.data)
+        self.assertIn(b'data-pending-remarks-list', page.data)
+        self.assertIn(b'data-resolved-remarks-list', page.data)
         self.assertIn(b'Loading form', page.data)
         self.assertIn(b'data-columns-toggle', page.data)
         self.assertIn(b'class="admin-table-toolbar registrations-control-bar"', page.data)
@@ -270,7 +295,7 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         labels = [column["label"] for column in payload["columns"]]
         self.assertEqual(
             [
-                "Attestation Form", "Attestation Status", "Payment Status",
+                "Attestation Form", "Attestation Status", "Remarks", "Payment Status",
                 "First Name", "Last Name", "Email Address", "Mobile Number",
                 "Gender", "Birth Month", "Birth Year", "Life Stage", "Satellite", "Shirt Size",
                 "Transportation To MMRC", "Transportation From MMRC",
@@ -281,8 +306,8 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         self.assertNotIn("Registration Code", labels)
         self.assertNotIn("Ticket Code", labels)
         self.assertEqual(
-            ["Attestation & Payment", "Attestation & Payment", "Attestation & Payment"],
-            [column["group"] for column in payload["columns"][:3]],
+            ["Attestation & Payment"] * 4,
+            [column["group"] for column in payload["columns"][:4]],
         )
         row = next(item for item in payload["rows"] if item["registration_code"] == "R-001")
         self.assertEqual("T-001", row["ticket_code"])
@@ -301,12 +326,19 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         self.assertEqual("PLATE-001", row["plate_number"])
         self.assertEqual("https://files.example.com/form-1.pdf", row["attestation_form"])
         self.assertEqual("pending", row["attestation_status"])
+        self.assertEqual(0, row["pending_remark_count"])
+        self.assertEqual(0, row["resolved_remark_count"])
+        self.assertEqual(0, row["total_remark_count"])
         self.assertIsNone(row["last_reviewed_by"])
         self.assertIsNone(row["last_reviewed_at"])
         self.assertEqual("Payment Validated", row["payment_status"])
         self.assertEqual(
             ["pending", "verified", "invalid"],
             [item["value"] for item in payload["column_options"]["attestation_status"]],
+        )
+        self.assertEqual(
+            [{"value": "has_pending", "label": "Has Pending Remarks"}],
+            payload["column_options"]["remarks"],
         )
         self.assertEqual(
             {
@@ -327,6 +359,686 @@ class RegistrationsIntegrationTests(unittest.TestCase):
             },
             payload["quick_filter_counts"],
         )
+
+    def test_reimport_preserves_reviewed_attestation_for_same_participant(self):
+        initial_batch_id = self._process(self.event_a)
+        initial = self._data(per_page=50)
+        initial_row = next(
+            row for row in initial["rows"] if row["registration_code"] == "R-001"
+        )
+        with self.app.app_context():
+            db = get_db()
+            participant_id = resolve_attestation_participant(
+                db, self.event_a, initial_batch_id, initial_row["id"]
+            )
+            reviewer_id = db.execute(
+                """
+                INSERT INTO users (
+                    username, password_hash, role, status, approved_at
+                ) VALUES (
+                    'phase3-reviewer', 'unused-test-hash', 'registration',
+                    'approved', CURRENT_TIMESTAMP
+                )
+                """
+            ).lastrowid
+            db.execute(
+                """
+                INSERT INTO attestation_verifications (
+                    event_id, attestation_participant_id, registrant_id, status,
+                    updated_by_user_id, created_at, updated_at
+                ) VALUES (?, ?, ?, 'verified', ?, ?, ?)
+                """,
+                (
+                    self.event_a,
+                    participant_id,
+                    initial_row["id"],
+                    reviewer_id,
+                    datetime(2026, 8, 30, 9, 0, 0),
+                    datetime(2026, 8, 30, 10, 0, 0),
+                ),
+            )
+            db.commit()
+
+        reviewed = self._data(per_page=50)
+        reviewed_row = next(
+            row for row in reviewed["rows"] if row["registration_code"] == "R-001"
+        )
+        self.assertEqual("verified", reviewed_row["attestation_status"])
+        self.assertEqual("phase3-reviewer", reviewed_row["last_reviewed_by"])
+        reviewed_at = reviewed_row["last_reviewed_at"]
+
+        # A second complete upload for the same Event is a new technical batch.
+        # It recreates the participant while changing an imported source field.
+        self._write_fixture(
+            31,
+            first_satellite="B1G Gen. Trias",
+            first_attestation="https://files.example.com/form-1-updated.pdf",
+        )
+        replacement_batch_id = self._process(self.event_a)
+        replacement = self._data(per_page=50)
+        replacement_row = next(
+            row
+            for row in replacement["rows"]
+            if row["registration_code"] == "R-001"
+        )
+        self.assertNotEqual(initial_batch_id, replacement_batch_id)
+        self.assertNotEqual(initial_row["id"], replacement_row["id"])
+        self.assertEqual("B1G Gen. Trias", replacement_row["satellite"])
+        self.assertEqual(
+            "https://files.example.com/form-1-updated.pdf",
+            replacement_row["attestation_form"],
+        )
+        self.assertEqual("verified", replacement_row["attestation_status"])
+        self.assertEqual("phase3-reviewer", replacement_row["last_reviewed_by"])
+        self.assertEqual(reviewed_at, replacement_row["last_reviewed_at"])
+        new_row = next(
+            row
+            for row in replacement["rows"]
+            if row["registration_code"] == "R-031"
+        )
+        self.assertEqual("pending", new_row["attestation_status"])
+        self.assertIsNone(new_row["last_reviewed_by"])
+        self.assertIsNone(new_row["last_reviewed_at"])
+
+    def test_reimport_reuses_stable_attestation_participant_ownership(self):
+        initial_batch_id = self._process(self.event_a)
+        with self.app.app_context():
+            db = get_db()
+            initial = db.execute(
+                """
+                SELECT mapping.attestation_participant_id, mapping.registrant_id
+                FROM attestation_participant_registrants mapping
+                JOIN registrants record ON record.id = mapping.registrant_id
+                WHERE mapping.batch_id = ? AND record.registration_code = 'R-001'
+                """,
+                (initial_batch_id,),
+            ).fetchone()
+            db.execute(
+                """
+                INSERT INTO attestation_verifications (
+                    event_id, attestation_participant_id, registrant_id, status,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, 'invalid', ?, ?)
+                """,
+                (
+                    self.event_a,
+                    initial["attestation_participant_id"],
+                    initial["registrant_id"],
+                    datetime(2026, 8, 30, 9, 0, 0),
+                    datetime(2026, 8, 30, 10, 0, 0),
+                ),
+            )
+            db.commit()
+
+        self._write_fixture(30, first_satellite="B1G Gen. Trias")
+        replacement_batch_id = self._process(self.event_a)
+        with self.app.app_context():
+            db = get_db()
+            replacement = db.execute(
+                """
+                SELECT mapping.attestation_participant_id, mapping.registrant_id
+                FROM attestation_participant_registrants mapping
+                JOIN registrants record ON record.id = mapping.registrant_id
+                WHERE mapping.batch_id = ? AND record.registration_code = 'R-001'
+                """,
+                (replacement_batch_id,),
+            ).fetchone()
+            verification = db.execute(
+                "SELECT * FROM attestation_verifications"
+            ).fetchone()
+            self.assertEqual(
+                initial["attestation_participant_id"],
+                replacement["attestation_participant_id"],
+            )
+            self.assertNotEqual(initial["registrant_id"], replacement["registrant_id"])
+            self.assertEqual("invalid", verification["status"])
+            self.assertEqual(initial["registrant_id"], verification["registrant_id"])
+            self.assertEqual("2026-08-30 09:00:00", verification["created_at"])
+            self.assertEqual("2026-08-30 10:00:00", verification["updated_at"])
+
+            active = self._data(per_page=50)
+            active_row = next(
+                row
+                for row in active["rows"]
+                if row["registration_code"] == "R-001"
+            )
+            self.assertEqual("invalid", active_row["attestation_status"])
+            self.assertEqual("2026-08-30 10:00:00", active_row["last_reviewed_at"])
+
+            with self.assertRaises(IntegrityError):
+                db.execute(
+                    """
+                    INSERT INTO attestation_verifications (
+                        event_id, attestation_participant_id, registrant_id, status
+                    ) VALUES (?, ?, ?, 'verified')
+                    """,
+                    (
+                        self.event_a,
+                        replacement["attestation_participant_id"],
+                        replacement["registrant_id"],
+                    ),
+                )
+                db.commit()
+            db.rollback()
+
+    def test_remarks_survive_replacement_import_with_status_and_attribution(self):
+        initial_batch_id = self._process(self.event_a)
+        initial = self._data(per_page=50)
+        initial_row = next(
+            row for row in initial["rows"] if row["registration_code"] == "R-001"
+        )
+        with self.app.app_context():
+            db = get_db()
+            participant_id = resolve_attestation_participant(
+                db, self.event_a, initial_batch_id, initial_row["id"]
+            )
+            operator_id = db.execute(
+                """
+                INSERT INTO users (
+                    username, password_hash, role, status, approved_at
+                ) VALUES (
+                    'remarks-import-operator', 'unused-test-hash', 'registration',
+                    'approved', CURRENT_TIMESTAMP
+                )
+                """
+            ).lastrowid
+            pending_id = db.execute(
+                """
+                INSERT INTO registrant_remarks (
+                    event_id, attestation_participant_id, remark,
+                    created_by_user_id, created_at, updated_at
+                ) VALUES (?, ?, 'Confirm satellite assignment.', ?, ?, ?)
+                """,
+                (
+                    self.event_a,
+                    participant_id,
+                    operator_id,
+                    datetime(2026, 8, 30, 9, 0, 0),
+                    datetime(2026, 8, 30, 9, 0, 0),
+                ),
+            ).lastrowid
+            resolved_id = db.execute(
+                """
+                INSERT INTO registrant_remarks (
+                    event_id, attestation_participant_id, remark, status,
+                    created_by_user_id, resolved_by_user_id,
+                    created_at, updated_at, resolved_at
+                ) VALUES (?, ?, 'Identity checked.', 'resolved', ?, ?, ?, ?, ?)
+                """,
+                (
+                    self.event_a,
+                    participant_id,
+                    operator_id,
+                    operator_id,
+                    datetime(2026, 8, 29, 9, 0, 0),
+                    datetime(2026, 8, 29, 10, 0, 0),
+                    datetime(2026, 8, 29, 10, 0, 0),
+                ),
+            ).lastrowid
+            db.commit()
+
+        self._write_fixture(31, first_satellite="B1G Gen. Trias")
+        replacement_batch_id = self._process(self.event_a)
+        replacement = self._data(per_page=50)
+        replacement_row = next(
+            row
+            for row in replacement["rows"]
+            if row["registration_code"] == "R-001"
+        )
+        self.assertEqual(1, replacement_row["pending_remark_count"])
+        self.assertEqual(1, replacement_row["resolved_remark_count"])
+        self.assertEqual(2, replacement_row["total_remark_count"])
+        new_row = next(
+            row
+            for row in replacement["rows"]
+            if row["registration_code"] == "R-031"
+        )
+        self.assertEqual(0, new_row["total_remark_count"])
+        pending_filter = self._data(
+            filters=json.dumps(
+                [{"field": "remarks", "operator": "equals", "value": "has_pending"}]
+            ),
+            per_page=25,
+        )
+        self.assertEqual(1, pending_filter["pagination"]["total"])
+        self.assertEqual("R-001", pending_filter["rows"][0]["registration_code"])
+        historical = self._data(batch=initial_batch_id, per_page=50)
+        historical_row = next(
+            row
+            for row in historical["rows"]
+            if row["registration_code"] == "R-001"
+        )
+        self.assertEqual(2, historical_row["total_remark_count"])
+        all_batches = self._data(batch="all", search="R-001", per_page=50)
+        self.assertEqual(2, all_batches["pagination"]["total"])
+        self.assertTrue(
+            all(row["total_remark_count"] == 2 for row in all_batches["rows"])
+        )
+        response = self.app.test_client().get(
+            "/events/{}/registrations/{}/remarks".format(
+                self.event_a, replacement_row["id"]
+            )
+        )
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json()
+        self.assertEqual(replacement_batch_id, payload["batch_id"])
+        self.assertEqual([pending_id, resolved_id], [item["id"] for item in payload["remarks"]])
+        self.assertEqual(
+            ["pending", "resolved"],
+            [item["status"] for item in payload["remarks"]],
+        )
+        self.assertEqual(
+            ["remarks-import-operator", "remarks-import-operator"],
+            [item["created_by"] for item in payload["remarks"]],
+        )
+        self.assertEqual(
+            "remarks-import-operator", payload["remarks"][1]["resolved_by"]
+        )
+        with self.app.app_context():
+            self.assertEqual(
+                2,
+                get_db().execute(
+                    "SELECT COUNT(*) FROM registrant_remarks WHERE event_id = ?",
+                    (self.event_a,),
+                ).fetchone()[0],
+            )
+
+    def test_three_replacement_imports_preserve_multiple_remarks_and_attestation(self):
+        initial_batch_id = self._process(self.event_a)
+        initial = self._data(per_page=50)
+        initial_row = next(
+            row for row in initial["rows"] if row["registration_code"] == "R-001"
+        )
+        with self.app.app_context():
+            db = get_db()
+            participant_id = resolve_attestation_participant(
+                db, self.event_a, initial_batch_id, initial_row["id"]
+            )
+            operator_id = db.execute(
+                """
+                INSERT INTO users (
+                    username, password_hash, role, status, approved_at
+                ) VALUES (
+                    'remarks-regression-operator', 'unused-test-hash',
+                    'registration', 'approved', CURRENT_TIMESTAMP
+                )
+                """
+            ).lastrowid
+            db.executemany(
+                """
+                INSERT INTO registrant_remarks (
+                    event_id, attestation_participant_id, remark, status,
+                    created_by_user_id, resolved_by_user_id,
+                    created_at, updated_at, resolved_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        self.event_a, participant_id, "Pending one", "pending",
+                        operator_id, None, datetime(2026, 8, 28, 8, 0),
+                        datetime(2026, 8, 28, 8, 0), None,
+                    ),
+                    (
+                        self.event_a, participant_id, "Resolved one", "resolved",
+                        operator_id, operator_id, datetime(2026, 8, 28, 9, 0),
+                        datetime(2026, 8, 28, 10, 0), datetime(2026, 8, 28, 10, 0),
+                    ),
+                    (
+                        self.event_a, participant_id, "Pending two", "pending",
+                        operator_id, None, datetime(2026, 8, 28, 11, 0),
+                        datetime(2026, 8, 28, 11, 0), None,
+                    ),
+                ],
+            )
+            db.execute(
+                """
+                INSERT INTO attestation_verifications (
+                    event_id, attestation_participant_id, registrant_id, status,
+                    updated_by_user_id, created_at, updated_at
+                ) VALUES (?, ?, ?, 'verified', ?, ?, ?)
+                """,
+                (
+                    self.event_a, participant_id, initial_row["id"], operator_id,
+                    datetime(2026, 8, 28, 7, 0), datetime(2026, 8, 28, 7, 30),
+                ),
+            )
+            db.commit()
+            expected = [
+                dict(row)
+                for row in db.execute(
+                    """
+                    SELECT id, event_id, attestation_participant_id, remark, status,
+                           created_by_user_id, resolved_by_user_id,
+                           created_at, updated_at, resolved_at
+                    FROM registrant_remarks ORDER BY id
+                    """
+                ).fetchall()
+            ]
+
+        source_ids = [initial_row["id"]]
+        for import_number in range(2, 5):
+            self._write_fixture(
+                30,
+                first_satellite="Remark replacement {}".format(import_number),
+                first_attestation="https://files.example.com/remark-{}.pdf".format(
+                    import_number
+                ),
+            )
+            self._process(self.event_a)
+            active = self._data(per_page=50)
+            row = next(
+                item for item in active["rows"] if item["registration_code"] == "R-001"
+            )
+            source_ids.append(row["id"])
+            self.assertEqual(2, row["pending_remark_count"])
+            self.assertEqual(1, row["resolved_remark_count"])
+            self.assertEqual(3, row["total_remark_count"])
+            self.assertEqual("verified", row["attestation_status"])
+            self.assertEqual("Payment Validated", row["payment_status"])
+            with self.app.app_context():
+                actual = [
+                    dict(item)
+                    for item in get_db().execute(
+                        """
+                        SELECT id, event_id, attestation_participant_id, remark,
+                               status, created_by_user_id, resolved_by_user_id,
+                               created_at, updated_at, resolved_at
+                        FROM registrant_remarks ORDER BY id
+                        """
+                    ).fetchall()
+                ]
+                self.assertEqual(expected, actual)
+
+        self.assertEqual(4, len(set(source_ids)))
+        with self.app.app_context():
+            db = get_db()
+            db.execute("DELETE FROM import_batches WHERE id = ?", (initial_batch_id,))
+            db.commit()
+            self.assertEqual(
+                3, db.execute("SELECT COUNT(*) FROM registrant_remarks").fetchone()[0]
+            )
+            self.assertEqual(
+                1,
+                db.execute("SELECT COUNT(*) FROM attestation_verifications").fetchone()[0],
+            )
+
+    def test_duplicate_source_rows_share_one_attestation_status(self):
+        self._write_fixture(2, duplicate_first_identity=True)
+        batch_id = self._process(self.event_a)
+        with self.app.app_context():
+            db = get_db()
+            rows = db.execute(
+                """
+                SELECT record.id, mapping.attestation_participant_id
+                FROM registrants record
+                JOIN attestation_participant_registrants mapping
+                  ON mapping.batch_id = record.batch_id
+                 AND mapping.registrant_id = record.id
+                WHERE record.batch_id = ?
+                ORDER BY record.registration_code
+                """,
+                (batch_id,),
+            ).fetchall()
+            self.assertEqual(2, len(rows))
+            self.assertEqual(
+                rows[0]["attestation_participant_id"],
+                rows[1]["attestation_participant_id"],
+            )
+            updated = update_attestation_verification(
+                db,
+                self.event_a,
+                batch_id,
+                rows[1]["id"],
+                "active",
+                "verified",
+                None,
+            )
+            self.assertEqual("verified", updated["status"])
+            db.execute(
+                """
+                INSERT INTO registrant_remarks (
+                    event_id, attestation_participant_id, remark
+                ) VALUES (?, ?, 'Shared duplicate-row remark')
+                """,
+                (self.event_a, rows[0]["attestation_participant_id"]),
+            )
+            db.commit()
+
+        payload = self._data(per_page=25)
+        self.assertEqual(
+            ["verified", "verified"],
+            [row["attestation_status"] for row in payload["rows"]],
+        )
+        self.assertEqual(2, payload["summary"]["attestation_verified"])
+        self.assertEqual(
+            [1, 1], [row["pending_remark_count"] for row in payload["rows"]]
+        )
+        with self.app.app_context():
+            self.assertEqual(
+                1,
+                get_db().execute(
+                    "SELECT COUNT(*) FROM attestation_verifications"
+                ).fetchone()[0],
+            )
+
+    def test_attestation_status_survives_three_replacement_imports(self):
+        initial_batch_id = self._process(self.event_a)
+        with self.app.app_context():
+            db = get_db()
+            source = db.execute(
+                """
+                SELECT record.id, mapping.attestation_participant_id
+                FROM registrants record
+                JOIN attestation_participant_registrants mapping
+                  ON mapping.batch_id = record.batch_id
+                 AND mapping.registrant_id = record.id
+                WHERE record.batch_id = ? AND record.registration_code = 'R-001'
+                """,
+                (initial_batch_id,),
+            ).fetchone()
+            db.execute(
+                """
+                INSERT INTO attestation_verifications (
+                    event_id, attestation_participant_id, registrant_id, status,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, 'verified', ?, ?)
+                """,
+                (
+                    self.event_a,
+                    source["attestation_participant_id"],
+                    source["id"],
+                    datetime(2026, 8, 30, 9, 0, 0),
+                    datetime(2026, 8, 30, 10, 0, 0),
+                ),
+            )
+            db.commit()
+
+        for import_number in range(1, 4):
+            self._write_fixture(
+                30,
+                first_satellite="Replacement {}".format(import_number),
+                first_attestation=(
+                    "https://files.example.com/form-1-update-{}.pdf".format(
+                        import_number
+                    )
+                ),
+            )
+            self._process(self.event_a)
+            active = self._data(per_page=50)
+            active_row = next(
+                row
+                for row in active["rows"]
+                if row["registration_code"] == "R-001"
+            )
+            self.assertEqual("verified", active_row["attestation_status"])
+            self.assertEqual("2026-08-30 10:00:00", active_row["last_reviewed_at"])
+
+        with self.app.app_context():
+            db = get_db()
+            self.assertEqual(
+                1,
+                db.execute(
+                    "SELECT COUNT(*) FROM attestation_verifications WHERE event_id = ?",
+                    (self.event_a,),
+                ).fetchone()[0],
+            )
+            self.assertEqual(
+                30,
+                db.execute(
+                    "SELECT COUNT(*) FROM attestation_participants WHERE event_id = ?",
+                    (self.event_a,),
+                ).fetchone()[0],
+            )
+
+    def test_same_source_identity_is_isolated_between_events(self):
+        batch_a = self._process(self.event_a)
+        batch_b = self._process(self.event_b)
+        with self.app.app_context():
+            db = get_db()
+            identities = db.execute(
+                """
+                SELECT mapping.event_id, mapping.attestation_participant_id,
+                       record.id AS registrant_id
+                FROM attestation_participant_registrants mapping
+                JOIN registrants record ON record.id = mapping.registrant_id
+                WHERE mapping.batch_id IN (?, ?)
+                  AND record.registration_code = 'R-001'
+                ORDER BY mapping.event_id
+                """,
+                (batch_a, batch_b),
+            ).fetchall()
+            self.assertEqual(2, len(identities))
+            self.assertNotEqual(
+                identities[0]["attestation_participant_id"],
+                identities[1]["attestation_participant_id"],
+            )
+            event_a_identity = next(
+                row for row in identities if row["event_id"] == self.event_a
+            )
+            db.execute(
+                """
+                INSERT INTO attestation_verifications (
+                    event_id, attestation_participant_id, registrant_id, status
+                ) VALUES (?, ?, ?, 'verified')
+                """,
+                (
+                    self.event_a,
+                    event_a_identity["attestation_participant_id"],
+                    event_a_identity["registrant_id"],
+                ),
+            )
+            db.commit()
+
+        event_a = self._data(self.event_a, search="R-001", per_page=25)
+        event_b = self._data(self.event_b, search="R-001", per_page=25)
+        self.assertEqual("verified", event_a["rows"][0]["attestation_status"])
+        self.assertEqual("pending", event_b["rows"][0]["attestation_status"])
+
+    def test_active_historical_and_all_batch_counts_use_shared_state_per_source_row(self):
+        self._write_fixture(2)
+        historical_batch_id = self._process(self.event_a)
+        with self.app.app_context():
+            db = get_db()
+            source = db.execute(
+                """
+                SELECT record.id, mapping.attestation_participant_id
+                FROM registrants record
+                JOIN attestation_participant_registrants mapping
+                  ON mapping.batch_id = record.batch_id
+                 AND mapping.registrant_id = record.id
+                WHERE record.batch_id = ? AND record.registration_code = 'R-001'
+                """,
+                (historical_batch_id,),
+            ).fetchone()
+            db.execute(
+                """
+                INSERT INTO attestation_verifications (
+                    event_id, attestation_participant_id, registrant_id, status
+                ) VALUES (?, ?, ?, 'verified')
+                """,
+                (
+                    self.event_a,
+                    source["attestation_participant_id"],
+                    source["id"],
+                ),
+            )
+            db.commit()
+        self._write_fixture(2, first_satellite="Updated Satellite")
+        self._process(self.event_a)
+
+        active = self._data(per_page=25)
+        historical = self._data(batch=historical_batch_id, per_page=25)
+        all_batches = self._data(batch="all", per_page=25)
+        for scoped in (active, historical):
+            self.assertEqual(2, scoped["summary"]["total_registrations"])
+            self.assertEqual(1, scoped["summary"]["attestation_verified"])
+            self.assertEqual(1, scoped["summary"]["attestation_pending"])
+        self.assertEqual(4, all_batches["summary"]["total_registrations"])
+        self.assertEqual(2, all_batches["summary"]["attestation_verified"])
+        self.assertEqual(2, all_batches["summary"]["attestation_pending"])
+
+        verified = self._data(
+            batch="all",
+            filters=json.dumps(
+                [
+                    {
+                        "field": "attestation_status",
+                        "operator": "equals",
+                        "value": "verified",
+                    }
+                ]
+            ),
+            sort="attestation_status",
+            direction="desc",
+            per_page=25,
+        )
+        self.assertEqual(2, verified["pagination"]["total"])
+        self.assertTrue(
+            all(row["attestation_status"] == "verified" for row in verified["rows"])
+        )
+
+    def test_ambiguous_identity_import_fails_without_replacing_active_batch(self):
+        active_batch_id = self._process(self.event_a)
+        active_row = self._data(per_page=50)["rows"][0]
+        with self.app.app_context():
+            db = get_db()
+            participant_id = resolve_attestation_participant(
+                db, self.event_a, active_batch_id, active_row["id"]
+            )
+            remark_id = db.execute(
+                """
+                INSERT INTO registrant_remarks (
+                    event_id, attestation_participant_id, remark
+                ) VALUES (?, ?, 'Preserve on failed import')
+                """,
+                (self.event_a, participant_id),
+            ).lastrowid
+            db.commit()
+        self._write_fixture(2, duplicate_first_identity=True)
+        staged = {key: (str(path), path.name) for key, path in self.paths.items()}
+        validation = validate_batch(staged)
+        self.assertTrue(validation.valid)
+        with self.app.app_context():
+            db = get_db()
+            conflicting_batch_id = store_validation(db, validation, self.event_a)
+            with self.assertRaises(AttestationIdentityConflict):
+                process_batch(db, conflicting_batch_id)
+            failed = db.execute(
+                "SELECT status FROM import_batches WHERE id = ?",
+                (conflicting_batch_id,),
+            ).fetchone()
+            active = db.execute(
+                "SELECT id FROM import_batches WHERE event_id = ? AND status = 'active'",
+                (self.event_a,),
+            ).fetchone()
+            self.assertEqual("failed", failed["status"])
+            self.assertEqual(active_batch_id, active["id"])
+            retained = db.execute(
+                "SELECT id, remark, status FROM registrant_remarks"
+            ).fetchone()
+            self.assertEqual(remark_id, retained["id"])
+            self.assertEqual("Preserve on failed import", retained["remark"])
+            self.assertEqual("pending", retained["status"])
 
     def test_attestation_values_are_sanitized_and_ui_contract_is_safe(self):
         self._process(self.event_a)
@@ -433,6 +1145,94 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         self.assertIn(".attestation-status-panel", styles)
         self.assertIn("grid-template-columns: minmax(0, 1fr) 285px", styles)
         self.assertIn("height: min(820px, 92vh)", styles)
+
+    def test_remarks_modal_interaction_and_accessibility_contract(self):
+        self._process(self.event_a)
+        root = Path(__file__).parents[1]
+        page = self.app.test_client().get(
+            "/events/{}/registrations".format(self.event_a)
+        ).get_data(as_text=True)
+        script = (root / "app/static/registrations.js").read_text()
+        styles = (root / "app/static/app.css").read_text()
+
+        for marker in (
+            'data-remarks-modal',
+            'aria-labelledby="remarks-title"',
+            'data-pending-remarks-list',
+            'data-resolved-remarks-list',
+            'data-remarks-loading',
+            'data-remarks-feedback',
+        ):
+            self.assertIn(marker, page)
+        self.assertIn('column.renderer === "remarks"', script)
+        self.assertIn('button.textContent = "No Remarks"', script)
+        self.assertIn('button.textContent = `${pending} Pending`', script)
+        self.assertIn('body: JSON.stringify({remark})', script)
+        self.assertIn('body: JSON.stringify({status: "resolved"})', script)
+        self.assertIn('"X-CSRFToken": root.dataset.csrfToken', script)
+        self.assertIn("text.textContent = remark.remark", script)
+        self.assertIn('if (!remarksModal.hidden)', script)
+        self.assertIn('closeRemarksModal();', script)
+        self.assertIn(".registration-remarks-button.has-pending", styles)
+        self.assertIn(".remark-card.is-pending", styles)
+        self.assertIn(".remark-card.is-resolved", styles)
+
+    def test_remark_aggregate_query_count_is_constant(self):
+        batch_id = self._process(self.event_a)
+        client = self.app.test_client()
+
+        def select_statements_for_request():
+            statements = []
+
+            def capture(_connection, _cursor, statement, _parameters, _context, _many):
+                if statement.lstrip().upper().startswith("SELECT"):
+                    statements.append(statement)
+
+            with self.app.app_context():
+                engine = get_engine()
+                sqlalchemy_event.listen(engine, "before_cursor_execute", capture)
+                try:
+                    response = client.get(
+                        "/events/{}/registrations/data".format(self.event_a),
+                        query_string={"per_page": 25},
+                    )
+                    self.assertEqual(200, response.status_code)
+                finally:
+                    sqlalchemy_event.remove(engine, "before_cursor_execute", capture)
+            return statements
+
+        without_remarks = select_statements_for_request()
+        with self.app.app_context():
+            db = get_db()
+            participants = db.execute(
+                """
+                SELECT attestation_participant_id
+                FROM attestation_participant_registrants
+                WHERE batch_id = ?
+                """,
+                (batch_id,),
+            ).fetchall()
+            db.executemany(
+                """
+                INSERT INTO registrant_remarks (
+                    event_id, attestation_participant_id, remark
+                ) VALUES (?, ?, ?)
+                """,
+                [
+                    (self.event_a, row["attestation_participant_id"], "Bulk remark")
+                    for row in participants
+                ],
+            )
+            db.commit()
+
+        with_remarks = select_statements_for_request()
+        self.assertEqual(len(without_remarks), len(with_remarks))
+        self.assertTrue(
+            any("GROUP BY event_id, attestation_participant_id" in statement for statement in with_remarks)
+        )
+        self.assertFalse(
+            any("FROM registrant_remarks remark" in statement for statement in with_remarks)
+        )
 
     def test_search_uses_codes_names_email_and_mobile(self):
         self._process(self.event_a)
@@ -654,8 +1454,13 @@ class RegistrationsIntegrationTests(unittest.TestCase):
                 continue
             mutations = rule.methods - {"GET", "HEAD", "OPTIONS"}
             if mutations:
-                self.assertEqual({"PATCH"}, mutations)
-                self.assertTrue(rule.rule.endswith("/<int:registrant_id>/attestation"))
+                if rule.rule.endswith("/<int:registrant_id>/attestation"):
+                    self.assertEqual({"PATCH"}, mutations)
+                elif rule.rule.endswith("/<int:registrant_id>/remarks"):
+                    self.assertEqual({"POST"}, mutations)
+                else:
+                    self.assertTrue(rule.rule.endswith("/<int:remark_id>"))
+                    self.assertEqual({"PATCH"}, mutations)
 
     def test_phase4_grouped_columns_performance_and_b1g_polish_contract(self):
         self._process(self.event_a)
@@ -760,14 +1565,28 @@ class RegistrationsIntegrationTests(unittest.TestCase):
                 (batch_id,),
             ).fetchall()
             for row in rows[:2]:
+                participant_id = resolve_attestation_participant(
+                    db, self.event_a, batch_id, row["id"]
+                )
                 db.execute(
-                    "INSERT INTO attestation_verifications (registrant_id, status) VALUES (?, 'verified')",
-                    (row["id"],),
+                    """
+                    INSERT INTO attestation_verifications (
+                        event_id, attestation_participant_id, registrant_id, status
+                    ) VALUES (?, ?, ?, 'verified')
+                    """,
+                    (self.event_a, participant_id, row["id"]),
                 )
             for row in rows[2:5]:
+                participant_id = resolve_attestation_participant(
+                    db, self.event_a, batch_id, row["id"]
+                )
                 db.execute(
-                    "INSERT INTO attestation_verifications (registrant_id, status) VALUES (?, 'invalid')",
-                    (row["id"],),
+                    """
+                    INSERT INTO attestation_verifications (
+                        event_id, attestation_participant_id, registrant_id, status
+                    ) VALUES (?, ?, ?, 'invalid')
+                    """,
+                    (self.event_a, participant_id, row["id"]),
                 )
             db.commit()
 
@@ -1073,6 +1892,163 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
             ).fetchone()
             self.assertEqual("registration-operator", reviewer["username"])
 
+    def test_registrant_remarks_api_is_scoped_attributed_and_resolvable(self):
+        self._login(
+            "registration-operator", "Registration-Operator-Password-1!"
+        )
+        collection_url = "/events/{}/registrations/{}/remarks".format(
+            self.event_id, self.registrant_id
+        )
+        csrf_token = self._csrf_token()
+        missing_csrf = self.client.post(
+            collection_url, json={"remark": "Needs review."}
+        )
+        self.assertEqual(400, missing_csrf.status_code)
+        blank = self.client.post(
+            collection_url,
+            json={"remark": "   "},
+            headers={"X-CSRFToken": csrf_token},
+        )
+        self.assertEqual(400, blank.status_code)
+        too_long = self.client.post(
+            collection_url,
+            json={"remark": "x" * 4001},
+            headers={"X-CSRFToken": csrf_token},
+        )
+        self.assertEqual(400, too_long.status_code)
+
+        first = self.client.post(
+            collection_url,
+            json={"remark": "  Confirm satellite assignment.  "},
+            headers={"X-CSRFToken": csrf_token},
+        )
+        second = self.client.post(
+            collection_url,
+            json={"remark": "Confirm payment exception."},
+            headers={"X-CSRFToken": csrf_token},
+        )
+        self.assertEqual(201, first.status_code)
+        self.assertEqual(201, second.status_code)
+        first_remark = first.get_json()["remark"]
+        second_remark = second.get_json()["remark"]
+        self.assertEqual("Confirm satellite assignment.", first_remark["remark"])
+        self.assertEqual("pending", first_remark["status"])
+        self.assertEqual("registration-operator", first_remark["created_by"])
+        self.assertIsNone(first_remark["resolved_at"])
+
+        resolve_url = collection_url + "/{}".format(first_remark["id"])
+        invalid_transition = self.client.patch(
+            resolve_url,
+            json={"status": "pending"},
+            headers={"X-CSRFToken": csrf_token},
+        )
+        self.assertEqual(400, invalid_transition.status_code)
+        resolved = self.client.patch(
+            resolve_url,
+            json={"status": "resolved"},
+            headers={"X-CSRFToken": csrf_token},
+        )
+        self.assertEqual(200, resolved.status_code)
+        resolved_remark = resolved.get_json()["remark"]
+        self.assertEqual("resolved", resolved_remark["status"])
+        self.assertEqual("registration-operator", resolved_remark["resolved_by"])
+        self.assertTrue(resolved_remark["resolved_at"])
+        self.assertEqual(
+            400,
+            self.client.patch(
+                resolve_url,
+                json={"status": "resolved"},
+                headers={"X-CSRFToken": csrf_token},
+            ).status_code,
+        )
+
+        listed = self.client.get(collection_url)
+        self.assertEqual(200, listed.status_code)
+        self.assertEqual(
+            ["pending", "resolved"],
+            [item["status"] for item in listed.get_json()["remarks"]],
+        )
+        self.assertEqual(
+            [second_remark["id"], first_remark["id"]],
+            [item["id"] for item in listed.get_json()["remarks"]],
+        )
+        table_payload = self.client.get(
+            "/events/{}/registrations/data".format(self.event_id)
+        ).get_json()
+        row = table_payload["rows"][0]
+        self.assertEqual(1, row["pending_remark_count"])
+        self.assertEqual(1, row["resolved_remark_count"])
+        self.assertEqual("pending", row["attestation_status"])
+        self.assertIsNone(row["last_reviewed_by"])
+        cross_event = "/events/{}/registrations/{}/remarks".format(
+            self.event_id, self.other_registrant_id
+        )
+        self.assertEqual(404, self.client.get(cross_event).status_code)
+        self.assertEqual(
+            400,
+            self.client.get(
+                collection_url, query_string={"batch": self.other_batch_id}
+            ).status_code,
+        )
+        manipulated_owner = self.client.post(
+            collection_url,
+            json={"remark": "Wrong owner", "participant_id": 999999},
+            headers={"X-CSRFToken": csrf_token},
+        )
+        self.assertEqual(400, manipulated_owner.status_code)
+        manipulated_resolver = self.client.patch(
+            collection_url + "/{}".format(second_remark["id"]),
+            json={"status": "resolved", "resolved_by_user_id": 999999},
+            headers={"X-CSRFToken": csrf_token},
+        )
+        self.assertEqual(400, manipulated_resolver.status_code)
+        with self.app.app_context():
+            db = get_db()
+            other_participant_id = resolve_attestation_participant(
+                db,
+                self.other_event_id,
+                self.other_batch_id,
+                self.other_registrant_id,
+            )
+            foreign_remark_id = db.execute(
+                """
+                INSERT INTO registrant_remarks (
+                    event_id, attestation_participant_id, remark
+                ) VALUES (?, ?, 'Other participant remark')
+                """,
+                (self.other_event_id, other_participant_id),
+            ).lastrowid
+            db.commit()
+        self.assertEqual(
+            404,
+            self.client.patch(
+                collection_url + "/{}".format(foreign_remark_id),
+                json={"status": "resolved"},
+                headers={"X-CSRFToken": csrf_token},
+            ).status_code,
+        )
+
+        self.client.post("/logout", data={"csrf_token": self._csrf_token()})
+        self._login("operator", "User-Registrations-Password-1!")
+        self.assertEqual(403, self.client.get(collection_url).status_code)
+        unauthorized_csrf = self._csrf_token()
+        self.assertEqual(
+            403,
+            self.client.post(
+                collection_url,
+                json={"remark": "Denied"},
+                headers={"X-CSRFToken": unauthorized_csrf},
+            ).status_code,
+        )
+        self.assertEqual(
+            403,
+            self.client.patch(
+                resolve_url,
+                json={"status": "resolved"},
+                headers={"X-CSRFToken": unauthorized_csrf},
+            ).status_code,
+        )
+
     def test_registration_role_cannot_cross_event_batch_boundaries(self):
         self._login(
             "registration-operator", "Registration-Operator-Password-1!"
@@ -1196,7 +2172,7 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
             ).status_code,
         )
 
-    def test_attestation_verification_cascades_with_registration_batch(self):
+    def test_attestation_verification_survives_registration_batch_deletion(self):
         self._login("admin", "Admin-Registrations-Password-1!")
         response = self.client.patch(
             "/events/{}/registrations/{}/attestation".format(
@@ -1217,13 +2193,11 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
             )
             db.execute("DELETE FROM import_batches WHERE id = ?", (self.batch_id,))
             db.commit()
-            self.assertEqual(
-                0,
-                db.execute(
-                    "SELECT COUNT(*) FROM attestation_verifications WHERE registrant_id = ?",
-                    (self.registrant_id,),
-                ).fetchone()[0],
-            )
+            verification = db.execute(
+                "SELECT status, registrant_id FROM attestation_verifications"
+            ).fetchone()
+            self.assertEqual("verified", verification["status"])
+            self.assertIsNone(verification["registrant_id"])
 
     def test_historical_and_active_registrations_have_independent_state(self):
         self._login("admin", "Admin-Registrations-Password-1!")
@@ -1278,13 +2252,22 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
             operator = db.execute(
                 "SELECT id FROM users WHERE username = 'operator'"
             ).fetchone()
+            participant_id = resolve_attestation_participant(
+                db, self.event_id, self.batch_id, self.registrant_id
+            )
             db.execute(
                 """
                 INSERT INTO attestation_verifications (
-                    registrant_id, status, updated_by_user_id
-                ) VALUES (?, 'verified', ?)
+                    event_id, attestation_participant_id, registrant_id,
+                    status, updated_by_user_id
+                ) VALUES (?, ?, ?, 'verified', ?)
                 """,
-                (self.registrant_id, operator["id"]),
+                (
+                    self.event_id,
+                    participant_id,
+                    self.registrant_id,
+                    operator["id"],
+                ),
             )
             db.commit()
             db.execute("DELETE FROM users WHERE id = ?", (operator["id"],))

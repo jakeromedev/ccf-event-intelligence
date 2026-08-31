@@ -17,10 +17,12 @@
     data-event-id="{{ event['id'] }}"
     data-data-url="{{ url_for('dashboard.event_registrations_data', event_id=event['id']) }}"
     data-update-url="{{ url_for('dashboard.update_registration_attestation', event_id=event['id'], registrant_id=0) }}"
+    data-remarks-url="{{ url_for('dashboard.registration_remarks', event_id=event['id'], registrant_id=0) }}"
     data-csrf-token="{{ csrf_token() }}"
     data-column-preference-key="ccf-registrations-column-groups"
     data-has-active-batch="{{ 'true' if active_batch else 'false' }}"
-    data-can-edit-attestation="{{ 'true' if attestation_edit_allowed else 'false' }}">
+    data-can-edit-attestation="{{ 'true' if attestation_edit_allowed else 'false' }}"
+    data-can-edit-remarks="{{ 'true' if remarks_edit_allowed else 'false' }}">
     <header class="admin-table-heading">
         <div>
             <p class="admin-breadcrumb">Event Operations <span>/</span> Registrations</p>
@@ -76,7 +78,7 @@
                     <div class="registrations-column-actions"><button type="button" data-reset-column-groups>Reset to Default</button></div>
                     <fieldset class="registrations-column-groups" data-column-groups>
                         <legend class="sr-only">Visible registration column groups</legend>
-                        <label><input type="checkbox" value="Attestation &amp; Payment" data-column-group checked><span><strong>Attestation &amp; Payment</strong><small>Form, statuses, and review history</small></span></label>
+                        <label><input type="checkbox" value="Attestation &amp; Payment" data-column-group checked><span><strong>Attestation &amp; Payment</strong><small>Forms, statuses, remarks, and review history</small></span></label>
                         <label><input type="checkbox" value="Registrant Details" data-column-group checked><span><strong>Registrant Details</strong><small>Name, contact, and profile details</small></span></label>
                         <label><input type="checkbox" value="Logistics" data-column-group checked><span><strong>Logistics</strong><small>Shirt, transportation, and plate details</small></span></label>
                     </fieldset>
@@ -240,8 +242,65 @@
         </footer>
     </section>
 </div>
+
+<div class="registrant-modal remarks-modal" data-remarks-modal hidden>
+    <button class="registrant-modal-backdrop" type="button" data-remarks-close aria-label="Close Remarks"></button>
+    <section class="registrant-dialog remarks-dialog" role="dialog" aria-modal="true" aria-labelledby="remarks-title" aria-describedby="remarks-description">
+        <header class="registrant-modal-header">
+            <div>
+                <p class="eyebrow">PARTICIPANT OPERATIONS</p>
+                <h2 id="remarks-title">Registrant Remarks</h2>
+                <p id="remarks-description">Add operational notes and resolve completed follow-ups.</p>
+            </div>
+            <button class="registrant-modal-close" type="button" data-remarks-close aria-label="Close Remarks">&times;</button>
+        </header>
+
+        <div class="remarks-participant-context">
+            <span>Registrant</span>
+            <strong data-remarks-name>—</strong>
+        </div>
+
+        {% if remarks_edit_allowed %}
+        <form class="remarks-compose" data-remarks-form>
+            <label for="registrant-remark-text">
+                <span>Add Remark</span>
+                <textarea id="registrant-remark-text" data-remarks-text maxlength="4000" rows="3" placeholder="Add an operational follow-up…" required></textarea>
+            </label>
+            <div>
+                <small><span data-remarks-character-count>0</span>/4000</small>
+                <button type="submit" class="button primary" data-remarks-save>Save Remark</button>
+            </div>
+        </form>
+        {% endif %}
+
+        <p class="remarks-feedback" data-remarks-feedback role="status" aria-live="polite" hidden></p>
+        <div class="remarks-loading" data-remarks-loading role="status">Loading remarks…</div>
+        <div class="remarks-content" data-remarks-content hidden>
+            <section aria-labelledby="pending-remarks-heading">
+                <div class="remarks-section-heading">
+                    <h3 id="pending-remarks-heading">Pending Remarks</h3>
+                    <span data-pending-remarks-count>0</span>
+                </div>
+                <div class="remarks-list" data-pending-remarks-list></div>
+                <p class="remarks-empty" data-pending-remarks-empty>No pending remarks.</p>
+            </section>
+            <section aria-labelledby="resolved-remarks-heading">
+                <div class="remarks-section-heading">
+                    <h3 id="resolved-remarks-heading">Resolved Remarks</h3>
+                    <span data-resolved-remarks-count>0</span>
+                </div>
+                <div class="remarks-list" data-resolved-remarks-list></div>
+                <p class="remarks-empty" data-resolved-remarks-empty>No resolved remarks.</p>
+            </section>
+        </div>
+
+        <footer class="remarks-footer">
+            <button type="button" class="button secondary" data-remarks-close>Close</button>
+        </footer>
+    </section>
+</div>
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='registrations.js', v='20260831-phase4-final') }}" defer></script>
+<script src="{{ url_for('static', filename='registrations.js', v='20260901-remarks-phase3') }}" defer></script>
 {% endblock %}

@@ -3,6 +3,8 @@
 import json
 from datetime import datetime
 
+from .attestation_identity import resolve_attestation_participant
+
 from .admin_tables import (
     AdminTableQueryError,
     PER_PAGE_OPTIONS,
@@ -19,6 +21,8 @@ from .url_safety import safe_external_url
 
 
 ATTESTATION_STATUSES = ("pending", "verified", "invalid")
+REMARK_STATUSES = ("pending", "resolved")
+MAX_REMARK_LENGTH = 4000
 MAX_REGISTRATION_FILTERS = 20
 ATTESTATION_STATUS_LABELS = {
     "pending": "Pending",
@@ -114,6 +118,16 @@ def registration_columns(db):
             filterable=True,
             sortable=True,
             renderer="attestation_status",
+        ),
+        _registration_column(
+            "remarks",
+            "Remarks",
+            "CASE WHEN COALESCE(remark_counts.pending_remark_count, 0) > 0 "
+            "THEN 'has_pending' ELSE 'no_pending' END",
+            data_type="select",
+            group="Attestation & Payment",
+            filterable=True,
+            renderer="remarks",
         ),
         _registration_column(
             "payment_status",
@@ -235,6 +249,30 @@ def registration_columns(db):
             group="Attestation & Payment",
             renderer="reviewed_at",
         ),
+        _registration_column(
+            "pending_remark_count",
+            "Pending Remark Count",
+            "COALESCE(remark_counts.pending_remark_count, 0)",
+            data_type="number",
+            group="Attestation & Payment",
+            hidden=True,
+        ),
+        _registration_column(
+            "resolved_remark_count",
+            "Resolved Remark Count",
+            "COALESCE(remark_counts.resolved_remark_count, 0)",
+            data_type="number",
+            group="Attestation & Payment",
+            hidden=True,
+        ),
+        _registration_column(
+            "total_remark_count",
+            "Total Remark Count",
+            "COALESCE(remark_counts.total_remark_count, 0)",
+            data_type="number",
+            group="Attestation & Payment",
+            hidden=True,
+        ),
     ]
 
 
@@ -246,8 +284,26 @@ def _base_sql():
         LEFT JOIN tickets ticket
           ON ticket.batch_id = record.batch_id
          AND ticket.ticket_code = record.ticket_code
+        LEFT JOIN attestation_participant_registrants participant_mapping
+          ON participant_mapping.batch_id = record.batch_id
+         AND participant_mapping.registrant_id = record.id
         LEFT JOIN attestation_verifications verification
-          ON verification.registrant_id = record.id
+          ON verification.event_id = batch.event_id
+         AND verification.attestation_participant_id =
+             participant_mapping.attestation_participant_id
+        LEFT JOIN (
+            SELECT event_id, attestation_participant_id,
+                   COUNT(*) AS total_remark_count,
+                   COUNT(CASE WHEN status = 'pending' THEN 1 END)
+                       AS pending_remark_count,
+                   COUNT(CASE WHEN status = 'resolved' THEN 1 END)
+                       AS resolved_remark_count
+            FROM registrant_remarks
+            GROUP BY event_id, attestation_participant_id
+        ) remark_counts
+          ON remark_counts.event_id = batch.event_id
+         AND remark_counts.attestation_participant_id =
+             participant_mapping.attestation_participant_id
         LEFT JOIN users reviewer
           ON reviewer.id = verification.updated_by_user_id
     """
@@ -411,6 +467,9 @@ def registrations_data(db, event_id, active_batch_id, args):
         {"value": value, "label": ATTESTATION_STATUS_LABELS[value]}
         for value in ATTESTATION_STATUSES
     ]
+    column_options["remarks"] = [
+        {"value": "has_pending", "label": "Has Pending Remarks"}
+    ]
     return {
         "batch": batch_scope,
         "columns": public_columns,
@@ -469,23 +528,39 @@ def update_attestation_verification(
     if status not in ATTESTATION_STATUSES:
         raise AdminTableQueryError("Attestation status is invalid.")
 
+    participant_id = resolve_attestation_participant(
+        db, event_id, registration["batch_id"], registrant_id
+    )
+    if participant_id is None:
+        return None
+
     reviewed_at = datetime.now()
     updated = db.execute(
         """
         UPDATE attestation_verifications
-        SET status = ?, updated_by_user_id = ?, updated_at = ?
-        WHERE registrant_id = ?
+        SET registrant_id = ?, status = ?, updated_by_user_id = ?, updated_at = ?
+        WHERE event_id = ? AND attestation_participant_id = ?
         """,
-        (status, reviewer_user_id, reviewed_at, registrant_id),
+        (
+            registrant_id,
+            status,
+            reviewer_user_id,
+            reviewed_at,
+            event_id,
+            participant_id,
+        ),
     )
     if updated.rowcount == 0:
         db.execute(
             """
             INSERT INTO attestation_verifications (
-                registrant_id, status, updated_by_user_id, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?)
+                event_id, attestation_participant_id, registrant_id, status,
+                updated_by_user_id, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                event_id,
+                participant_id,
                 registrant_id,
                 status,
                 reviewer_user_id,
@@ -506,14 +581,207 @@ def update_attestation_verification(
     }
 
 
+def _scoped_registration_participant(
+    db, event_id, active_batch_id, registrant_id, batch_argument
+):
+    """Resolve a row locator to durable ownership inside its requested scope."""
+    batch_scope = resolve_batch_scope(
+        db, event_id, batch_argument, active_batch_id
+    )
+    registration = db.execute(
+        """
+        SELECT record.id, record.batch_id
+        FROM registrants record
+        JOIN import_batches batch ON batch.id = record.batch_id
+        WHERE record.id = ? AND batch.event_id = ?
+        """,
+        (registrant_id, event_id),
+    ).fetchone()
+    if (
+        registration is None
+        or batch_scope is None
+        or (batch_scope != "all" and registration["batch_id"] != batch_scope)
+    ):
+        return None
+    participant_id = resolve_attestation_participant(
+        db, event_id, registration["batch_id"], registrant_id
+    )
+    if participant_id is None:
+        return None
+    return registration, participant_id
+
+
+def _remark_payload(row):
+    return {
+        "id": row["id"],
+        "remark": row["remark"],
+        "status": row["status"],
+        "created_by": row["created_by"],
+        "resolved_by": row["resolved_by"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+        "resolved_at": row["resolved_at"],
+    }
+
+
+def _select_remark(db, event_id, participant_id, remark_id):
+    return db.execute(
+        """
+        SELECT remark.id, remark.remark, remark.status,
+               creator.username AS created_by,
+               resolver.username AS resolved_by,
+               remark.created_at, remark.updated_at, remark.resolved_at
+        FROM registrant_remarks remark
+        LEFT JOIN users creator ON creator.id = remark.created_by_user_id
+        LEFT JOIN users resolver ON resolver.id = remark.resolved_by_user_id
+        WHERE remark.id = ? AND remark.event_id = ?
+          AND remark.attestation_participant_id = ?
+        """,
+        (remark_id, event_id, participant_id),
+    ).fetchone()
+
+
+def list_registrant_remarks(
+    db, event_id, active_batch_id, registrant_id, batch_argument
+):
+    ownership = _scoped_registration_participant(
+        db, event_id, active_batch_id, registrant_id, batch_argument
+    )
+    if ownership is None:
+        return None
+    registration, participant_id = ownership
+    rows = db.execute(
+        """
+        SELECT remark.id, remark.remark, remark.status,
+               creator.username AS created_by,
+               resolver.username AS resolved_by,
+               remark.created_at, remark.updated_at, remark.resolved_at
+        FROM registrant_remarks remark
+        LEFT JOIN users creator ON creator.id = remark.created_by_user_id
+        LEFT JOIN users resolver ON resolver.id = remark.resolved_by_user_id
+        WHERE remark.event_id = ?
+          AND remark.attestation_participant_id = ?
+        ORDER BY CASE remark.status WHEN 'pending' THEN 0 ELSE 1 END,
+                 remark.created_at DESC, remark.id DESC
+        """,
+        (event_id, participant_id),
+    ).fetchall()
+    return {
+        "batch_id": registration["batch_id"],
+        "remarks": [_remark_payload(row) for row in rows],
+    }
+
+
+def create_registrant_remark(
+    db,
+    event_id,
+    active_batch_id,
+    registrant_id,
+    batch_argument,
+    remark_text,
+    author_user_id,
+):
+    ownership = _scoped_registration_participant(
+        db, event_id, active_batch_id, registrant_id, batch_argument
+    )
+    if ownership is None:
+        return None
+    registration, participant_id = ownership
+    if not isinstance(remark_text, str):
+        raise AdminTableQueryError("Remark text is required.")
+    remark_text = remark_text.strip()
+    if not remark_text:
+        raise AdminTableQueryError("Remark text cannot be blank.")
+    if len(remark_text) > MAX_REMARK_LENGTH:
+        raise AdminTableQueryError(
+            "Remark text cannot exceed {} characters.".format(MAX_REMARK_LENGTH)
+        )
+    created_at = datetime.now()
+    remark_id = db.execute(
+        """
+        INSERT INTO registrant_remarks (
+            event_id, attestation_participant_id, remark, status,
+            created_by_user_id, created_at, updated_at
+        ) VALUES (?, ?, ?, 'pending', ?, ?, ?)
+        """,
+        (
+            event_id,
+            participant_id,
+            remark_text,
+            author_user_id,
+            created_at,
+            created_at,
+        ),
+    ).lastrowid
+    db.commit()
+    row = _select_remark(db, event_id, participant_id, remark_id)
+    return {
+        "batch_id": registration["batch_id"],
+        "remark": _remark_payload(row),
+    }
+
+
+def resolve_registrant_remark(
+    db,
+    event_id,
+    active_batch_id,
+    registrant_id,
+    batch_argument,
+    remark_id,
+    status,
+    resolver_user_id,
+):
+    ownership = _scoped_registration_participant(
+        db, event_id, active_batch_id, registrant_id, batch_argument
+    )
+    if ownership is None:
+        return None
+    registration, participant_id = ownership
+    if status != "resolved":
+        raise AdminTableQueryError("Remark status must transition to resolved.")
+    existing = _select_remark(db, event_id, participant_id, remark_id)
+    if existing is None:
+        return None
+    if existing["status"] != "pending":
+        raise AdminTableQueryError("Only Pending remarks can be resolved.")
+    resolved_at = datetime.now()
+    db.execute(
+        """
+        UPDATE registrant_remarks
+        SET status = 'resolved', resolved_by_user_id = ?, resolved_at = ?,
+            updated_at = ?
+        WHERE id = ? AND event_id = ? AND attestation_participant_id = ?
+          AND status = 'pending'
+        """,
+        (
+            resolver_user_id,
+            resolved_at,
+            resolved_at,
+            remark_id,
+            event_id,
+            participant_id,
+        ),
+    )
+    db.commit()
+    row = _select_remark(db, event_id, participant_id, remark_id)
+    return {
+        "batch_id": registration["batch_id"],
+        "remark": _remark_payload(row),
+    }
+
+
 __all__ = [
     "AdminTableQueryError",
     "ATTESTATION_STATUSES",
     "ATTESTATION_STATUS_LABELS",
+    "MAX_REMARK_LENGTH",
     "PER_PAGE_OPTIONS",
     "SELECT_OPERATORS",
     "TEXT_OPERATORS",
     "registration_columns",
+    "create_registrant_remark",
+    "list_registrant_remarks",
     "registrations_data",
+    "resolve_registrant_remark",
     "update_attestation_verification",
 ]

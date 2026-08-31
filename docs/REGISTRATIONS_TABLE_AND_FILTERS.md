@@ -30,6 +30,8 @@ server-side.
 | Registrations page | `GET` | `/events/<event_id>/registrations` |
 | Table data | `GET` | `/events/<event_id>/registrations/data` |
 | Attestation status update | `PATCH` | `/events/<event_id>/registrations/<registrant_id>/attestation` |
+| List/create remarks | `GET`, `POST` | `/events/<event_id>/registrations/<registrant_id>/remarks` |
+| Resolve remark | `PATCH` | `/events/<event_id>/registrations/<registrant_id>/remarks/<remark_id>` |
 
 The table data endpoint returns columns, categorical filter options, rows,
 summary counts, normalized query state, and pagination metadata as JSON.
@@ -42,13 +44,16 @@ summary counts, normalized query state, and pagination metadata as JSON.
 | `import_batches` | Supplies active or explicitly selected batch scope | `import_batches.id = registrants.batch_id` |
 | `registrants` | Base row source and imported registration fields | One output row per record |
 | `tickets` | Supplies Payment Status | Same `batch_id` and `ticket_code` as the registrant |
-| `attestation_verifications` | Supplies the application-owned current attestation status and review time | `registrant_id = registrants.id` |
+| `attestation_participant_registrants` | Resolves replaceable source rows to durable participants | Same `batch_id` and `registrant_id` as the registrant |
+| `attestation_verifications` | Supplies the application-owned current attestation status and review time | Same Event and durable `attestation_participant_id` |
+| `registrant_remarks` | Supplies pre-aggregated Pending, Resolved, and total counts | Grouped by Event and durable `attestation_participant_id` before joining |
 | `users` | Supplies the last reviewer's username | `users.id = attestation_verifications.updated_by_user_id` |
 
 The ticket, verification, and reviewer relationships are left joins. A
 registration therefore remains visible when any of those related records is
-missing. Names, email addresses, and mobile numbers are never used as join
-keys.
+missing. Missing verification means Pending. Multiple source rows mapped to one
+participant display the same state; counts remain source-row counts. Names,
+email addresses, and mobile numbers are never used as join keys.
 
 ## Batch scope
 
@@ -72,6 +77,7 @@ contract. `Search`, `Filter`, and `Sort` identify supported operations.
 |---|---|---|:---:|:---:|:---:|
 | Attestation & Payment | Attestation Form | `source_data_json["Upload Your Accomplished Attestation Form Here"]` | No | No | No |
 | Attestation & Payment | Attestation Status | Verification status, defaulting to `pending` when no verification row exists | No | Yes | Yes |
+| Attestation & Payment | Remarks | Durable-participant Pending and Resolved counts | No | Yes | No |
 | Attestation & Payment | Payment Status | Matched ticket's `payment_status` | No | Yes | Yes |
 | Registrant Details | First Name | `registrants.first_name` | Yes | No | Yes |
 | Registrant Details | Last Name | `registrants.last_name` | Yes | No | Yes |
@@ -106,6 +112,7 @@ The available values are queried from the selected Event and batch scope.
 | Transportation To MMRC | `transportation_to_mmrc` | Distinct supported transportation-to source values |
 | Transportation From MMRC | `transportation_from_mmrc` | Distinct supported transportation-from source values |
 | Attestation Status | `attestation_status` | Fixed `Pending`, `Verified`, and `Invalid` choices |
+| Remarks | `remarks` | Fixed `Has Pending Remarks` choice |
 | Payment Status | `payment_status` | Distinct matched-ticket payment statuses |
 
 ### Supported operators
@@ -205,6 +212,11 @@ The response includes total records, page count, displayed start/end positions,
 and previous/next availability. The browser never downloads the complete
 registration dataset merely to paginate it.
 
+Remark bodies are likewise excluded from this response and loaded only when an
+operator opens the scoped modal. Counts come from one grouped subquery, and the
+test suite verifies that adding remarks does not increase the number of SELECT
+statements used to load a Registrations page.
+
 ## Query parameters and URL state
 
 | Parameter | Purpose |
@@ -244,8 +256,19 @@ function get_registration_page(event_id, active_batch_id, request):
             tickets.batch_id = registrants.batch_id
             and tickets.ticket_code = registrants.ticket_code
         )
+        left_join attestation_participant_registrants as mapping on (
+            mapping.batch_id = registrants.batch_id
+            and mapping.registrant_id = registrants.id
+        )
         left_join attestation_verifications on (
-            attestation_verifications.registrant_id = registrants.id
+            attestation_verifications.event_id = events.id
+            and attestation_verifications.attestation_participant_id =
+                mapping.attestation_participant_id
+        )
+        left_join grouped_registrant_remark_counts on (
+            grouped_registrant_remark_counts.event_id = events.id
+            and grouped_registrant_remark_counts.attestation_participant_id =
+                mapping.attestation_participant_id
         )
         left_join users as reviewer on (
             reviewer.id = attestation_verifications.updated_by_user_id
@@ -320,6 +343,10 @@ Summary cards use the same scoped and filtered query conditions as the rows:
 - The **Attestation Form** button opens the in-page Attestation Review modal
   before the external document request begins, so registrant and verification
   context remain immediately available during loading.
+- The **Remarks** action shows `No Remarks`, Pending, and Resolved counts without
+  loading note bodies into the paginated table response. Its modal fetches the
+  scoped records on demand, renders Pending first, and lets authorized operators
+  create or resolve notes with immediate count refresh.
 - A safe `http://` or `https://` value is attempted as an image preview. When
   the browser cannot display it as an image, the modal shows a clear fallback
   and a safe **Open Original** action using `target="_blank"` and

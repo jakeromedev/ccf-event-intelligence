@@ -43,6 +43,7 @@ LOGIN_LOCK_MINUTES = 15
 CAPABILITY_VIEW_DASHBOARD = "dashboard.view"
 CAPABILITY_VIEW_REGISTRATIONS = "registrations.view"
 CAPABILITY_EDIT_ATTESTATION = "registrations.attestation.edit"
+CAPABILITY_EDIT_REMARKS = "registrations.remarks.edit"
 CAPABILITY_VIEW_ANALYTICS = "analytics.view"
 CAPABILITY_VIEW_SATELLITES = "satellites.view"
 CAPABILITY_VIEW_DATA_QUALITY = "data_quality.view"
@@ -57,6 +58,7 @@ REGISTRATION_CAPABILITIES = frozenset(
         CAPABILITY_VIEW_DASHBOARD,
         CAPABILITY_VIEW_REGISTRATIONS,
         CAPABILITY_EDIT_ATTESTATION,
+        CAPABILITY_EDIT_REMARKS,
     }
 )
 STANDARD_USER_CAPABILITIES = frozenset(
@@ -82,6 +84,8 @@ REGISTRATION_ENDPOINT_CAPABILITIES = {
     "dashboard.event_registrations": CAPABILITY_VIEW_REGISTRATIONS,
     "dashboard.event_registrations_data": CAPABILITY_VIEW_REGISTRATIONS,
     "dashboard.update_registration_attestation": CAPABILITY_EDIT_ATTESTATION,
+    "dashboard.registration_remarks": CAPABILITY_VIEW_REGISTRATIONS,
+    "dashboard.resolve_registration_remark": CAPABILITY_EDIT_REMARKS,
 }
 
 # Checking this when a username does not exist reduces timing differences
@@ -199,6 +203,21 @@ def can_edit_attestation_verification() -> bool:
             or (
                 current_user.role == "registration"
                 and CAPABILITY_EDIT_ATTESTATION in REGISTRATION_CAPABILITIES
+            )
+        )
+    )
+
+
+def can_edit_registrant_remarks() -> bool:
+    """Require an attributable administrator or Registration operator."""
+    return bool(
+        current_user.is_authenticated
+        and current_user.status == "approved"
+        and (
+            current_user.is_admin
+            or (
+                current_user.role == "registration"
+                and CAPABILITY_EDIT_REMARKS in REGISTRATION_CAPABILITIES
             )
         )
     )

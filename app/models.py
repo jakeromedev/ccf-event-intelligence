@@ -353,15 +353,109 @@ class Registrant(Base):
     source_data_json: Mapped[Optional[str]] = mapped_column(LONG_TEXT)
 
     attestation_verification: Mapped[Optional["AttestationVerification"]] = relationship(
-        back_populates="registrant",
-        cascade="all, delete-orphan",
-        passive_deletes=True,
-        uselist=False,
+        back_populates="registrant", uselist=False
+    )
+
+
+class AttestationParticipant(Base):
+    """Durable participant identity within one Event's registration lifecycle."""
+
+    __tablename__ = "attestation_participants"
+    __table_args__ = (
+        ForeignKeyConstraint(["event_id"], ["events.id"], ondelete="CASCADE"),
+        UniqueConstraint("event_id", "id", name="uq_attestation_participants_event_id"),
+        Index("idx_attestation_participants_event", "event_id"),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    created_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+    updated_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+
+class AttestationParticipantIdentifier(Base):
+    """Authoritative imported identifiers attached to a durable participant."""
+
+    __tablename__ = "attestation_participant_identifiers"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["event_id", "attestation_participant_id"],
+            ["attestation_participants.event_id", "attestation_participants.id"],
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "identifier_type IN ('source_id','registration_code','ticket_code')",
+            name="ck_attestation_participant_identifiers_type",
+        ),
+        UniqueConstraint(
+            "event_id",
+            "identifier_type",
+            "identifier_value",
+            name="uq_attestation_participant_identifiers_value",
+        ),
+        Index(
+            "idx_attestation_participant_identifiers_participant",
+            "event_id",
+            "attestation_participant_id",
+        ),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    attestation_participant_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    identifier_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    identifier_value: Mapped[str] = mapped_column(String(512), nullable=False)
+    created_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+
+class AttestationParticipantRegistrant(Base):
+    """Maps replaceable imported rows to durable attestation participants."""
+
+    __tablename__ = "attestation_participant_registrants"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["event_id", "attestation_participant_id"],
+            ["attestation_participants.event_id", "attestation_participants.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["batch_id", "registrant_id"],
+            ["registrants.batch_id", "registrants.id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "batch_id",
+            "registrant_id",
+            name="uq_attestation_participant_registrants_source",
+        ),
+        Index(
+            "idx_attestation_participant_registrants_participant",
+            "event_id",
+            "attestation_participant_id",
+        ),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    batch_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    registrant_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    attestation_participant_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    created_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
     )
 
 
 class AttestationVerification(Base):
-    """Application-owned current review state for one imported registration."""
+    """Application-owned current review state for one durable participant."""
 
     __tablename__ = "attestation_verifications"
     __table_args__ = (
@@ -369,8 +463,15 @@ class AttestationVerification(Base):
             "status IN ('pending','verified','invalid')",
             name="ck_attestation_verifications_status",
         ),
+        ForeignKeyConstraint(
+            ["event_id", "attestation_participant_id"],
+            ["attestation_participants.event_id", "attestation_participants.id"],
+            ondelete="CASCADE",
+        ),
         UniqueConstraint(
-            "registrant_id", name="uq_attestation_verifications_registrant"
+            "event_id",
+            "attestation_participant_id",
+            name="uq_attestation_verifications_participant",
         ),
         Index("idx_attestation_verifications_status", "status"),
         Index("idx_attestation_verifications_reviewer", "updated_by_user_id"),
@@ -378,10 +479,11 @@ class AttestationVerification(Base):
     )
 
     id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
-    registrant_id: Mapped[int] = mapped_column(
+    event_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    attestation_participant_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    registrant_id: Mapped[Optional[int]] = mapped_column(
         ID_TYPE,
-        ForeignKey("registrants.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("registrants.id", ondelete="SET NULL"),
     )
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, server_default=text("'pending'")
@@ -402,6 +504,66 @@ class AttestationVerification(Base):
     )
     updated_by: Mapped[Optional[User]] = relationship(
         foreign_keys=[updated_by_user_id]
+    )
+
+
+class RegistrantRemark(Base):
+    """Application-owned operational note for one durable participant."""
+
+    __tablename__ = "registrant_remarks"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending','resolved')",
+            name="ck_registrant_remarks_status",
+        ),
+        CheckConstraint(
+            "(status = 'pending' AND resolved_at IS NULL) OR "
+            "(status = 'resolved' AND resolved_at IS NOT NULL)",
+            name="ck_registrant_remarks_resolution",
+        ),
+        ForeignKeyConstraint(
+            ["event_id", "attestation_participant_id"],
+            ["attestation_participants.event_id", "attestation_participants.id"],
+            ondelete="CASCADE",
+        ),
+        Index(
+            "idx_registrant_remarks_participant_status_created",
+            "event_id",
+            "attestation_participant_id",
+            "status",
+            "created_at",
+        ),
+        Index("idx_registrant_remarks_creator", "created_by_user_id"),
+        Index("idx_registrant_remarks_resolver", "resolved_by_user_id"),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    attestation_participant_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    remark: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'pending'")
+    )
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ID_TYPE, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    resolved_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ID_TYPE, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+    updated_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+    resolved_at: Mapped[Optional[object]] = mapped_column(DateTime)
+
+    created_by: Mapped[Optional[User]] = relationship(
+        foreign_keys=[created_by_user_id]
+    )
+    resolved_by: Mapped[Optional[User]] = relationship(
+        foreign_keys=[resolved_by_user_id]
     )
 
 

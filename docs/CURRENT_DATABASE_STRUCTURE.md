@@ -17,7 +17,7 @@ Event
       -> rebuildable curated rows
 ```
 
-The current schema has sixteen application tables:
+The current schema has twenty application tables:
 
 1. `users`
 2. `events`
@@ -27,14 +27,18 @@ The current schema has sixteen application tables:
 6. `buyers`
 7. `tickets`
 8. `registrants`
-9. `attestation_verifications`
-10. `curated_registrants`
-11. `curated_registrant_sources`
-12. `satellites`
-13. `satellite_source_variations`
-14. `curated_registrant_satellites`
-15. `satellite_datasets`
-16. `satellite_dataset_satellites`
+9. `attestation_participants`
+10. `attestation_participant_identifiers`
+11. `attestation_participant_registrants`
+12. `attestation_verifications`
+13. `registrant_remarks`
+14. `curated_registrants`
+15. `curated_registrant_sources`
+16. `satellites`
+17. `satellite_source_variations`
+18. `curated_registrant_satellites`
+19. `satellite_datasets`
+20. `satellite_dataset_satellites`
 
 ## Relationship diagram
 
@@ -46,8 +50,15 @@ erDiagram
     IMPORT_BATCHES ||--o{ BUYERS : imports
     IMPORT_BATCHES ||--o{ TICKETS : imports
     IMPORT_BATCHES ||--o{ REGISTRANTS : imports
-    REGISTRANTS ||--o| ATTESTATION_VERIFICATIONS : has_current_review
+    EVENTS ||--o{ ATTESTATION_PARTICIPANTS : scopes
+    ATTESTATION_PARTICIPANTS ||--|{ ATTESTATION_PARTICIPANT_IDENTIFIERS : aliases
+    ATTESTATION_PARTICIPANTS ||--o{ ATTESTATION_PARTICIPANT_REGISTRANTS : maps
+    REGISTRANTS ||--|| ATTESTATION_PARTICIPANT_REGISTRANTS : resolves
+    ATTESTATION_PARTICIPANTS ||--o| ATTESTATION_VERIFICATIONS : has_current_review
+    ATTESTATION_PARTICIPANTS ||--o{ REGISTRANT_REMARKS : has_operational_notes
+    REGISTRANTS ||--o| ATTESTATION_VERIFICATIONS : latest_provenance
     USERS ||--o{ ATTESTATION_VERIFICATIONS : reviews
+    USERS ||--o{ REGISTRANT_REMARKS : authors_and_resolves
     IMPORT_BATCHES ||--o{ CURATED_REGISTRANTS : derives
     IMPORT_BATCHES ||--o{ SATELLITES : derives
     CURATED_REGISTRANTS ||--|{ CURATED_REGISTRANT_SOURCES : traces
@@ -201,25 +212,42 @@ files remain available.
 The Registrations module is a composed operational view, not a copied
 registration table. It reads one `registrants` row per displayed registration,
 extracts focused contact/logistics/attestation fields from `source_data_json`,
-and left joins `tickets` on `(batch_id, ticket_code)` for Payment Status. Phase
-2 adds only the separate current-state table described below; imported rows and
-source values remain immutable.
+and left joins `tickets` on `(batch_id, ticket_code)` for Payment Status.
+Imported rows and source values remain immutable.
+
+### Durable attestation participant identity
+
+`attestation_participants` supplies one durable identity inside an Event. It is
+not deleted when an individual technical import batch is deleted.
+
+`attestation_participant_identifiers` attaches normalized exact source ID,
+registration code, and ticket code aliases. Its
+`UNIQUE(event_id, identifier_type, identifier_value)` constraint prevents one
+source identity from being assigned to multiple participants.
+
+`attestation_participant_registrants` maps every replaceable source row to the
+durable participant. `(batch_id, registrant_id)` is unique and cascades when a
+technical batch is deleted. Curation may group duplicate rows inside one import
+run, but its mutable demographic key is not stored as durable identity.
 
 ### `attestation_verifications`
 
-Stores the application-owned current attestation decision for an imported
-registration:
+Stores the application-owned current attestation decision for a durable
+Event-scoped participant:
 
 ```text
-id, registrant_id, status, updated_by_user_id, created_at, updated_at
+id, event_id, attestation_participant_id, registrant_id,
+status, updated_by_user_id, created_at, updated_at
 ```
 
 Important constraints:
 
 ```text
-registrant_id -> registrants.id ON DELETE CASCADE
+event_id + attestation_participant_id
+    -> attestation_participants(event_id, id) ON DELETE CASCADE
+registrant_id -> registrants.id ON DELETE SET NULL
 updated_by_user_id -> users.id ON DELETE SET NULL
-UNIQUE(registrant_id)
+UNIQUE(event_id, attestation_participant_id)
 status IN ('pending', 'verified', 'invalid')
 INDEX(status)
 INDEX(updated_by_user_id)
@@ -227,11 +255,39 @@ INDEX(updated_by_user_id)
 
 The absence of a row is interpreted as `pending`, with no reviewer or reviewed
 timestamp. Every actual update records the authenticated administrator or
-Registration operator and a server-generated timestamp. Deleting a
-registration or its batch cascades the
-verification row; deleting a reviewer retains the state and timestamp while
-setting reviewer ID to null. This is a current-state record, not a full audit
-history.
+Registration operator and a server-generated timestamp. `registrant_id` is
+nullable provenance for the row used during review, not the ownership key.
+Deleting a technical import sets that provenance to null while preserving the
+decision. Deleting a reviewer retains the state and timestamp while setting
+reviewer ID to null. This is a current-state record, not a full audit history.
+
+### `registrant_remarks`
+
+Stores multiple application-owned operational notes for one durable
+Event-scoped participant:
+
+```text
+id, event_id, attestation_participant_id, remark, status,
+created_by_user_id, resolved_by_user_id,
+created_at, updated_at, resolved_at
+```
+
+The composite participant foreign key uses `ON DELETE CASCADE`, while both
+operator foreign keys use `ON DELETE SET NULL`. Status is constrained to
+`pending` or `resolved`; Pending requires a null `resolved_at`, and Resolved
+requires a non-null `resolved_at`. The server trims text, rejects blank text,
+and limits creation to 4,000 characters. There is no uniqueness constraint on
+remark text because multiple notes are intentional.
+
+The ownership/index path is:
+
+```text
+(event_id, attestation_participant_id, status, created_at)
+```
+
+Remarks have no `batch_id` or authoritative `registrant_id`. Imports only add
+new source-row mappings to the durable participant, so they cannot reset,
+duplicate, or delete remark content, status, timestamps, or attribution.
 
 ## Curated analytical tables
 

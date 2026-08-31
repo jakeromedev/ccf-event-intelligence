@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from .auth import (
     admin_required,
     can_edit_attestation_verification,
+    can_edit_registrant_remarks,
     can_view_admin_tables,
     can_view_registrations,
     event_mutation_required,
@@ -39,7 +40,13 @@ from .admin_tables import (
 from .db import get_db
 from .import_history import IMPORT_HISTORY_STATUSES, import_history
 from .importer import activate_batch, process_batch, stage_upload_set, store_validation, validate_batch
-from .registrations import registrations_data, update_attestation_verification
+from .registrations import (
+    create_registrant_remark,
+    list_registrant_remarks,
+    registrations_data,
+    resolve_registrant_remark,
+    update_attestation_verification,
+)
 from .satellite_datasets import (
     create_satellite_dataset,
     delete_satellite_dataset,
@@ -457,6 +464,7 @@ def event_registrations(event_id):
         selected_batch=selected_batch,
         batches=event_batches(db, event_id),
         attestation_edit_allowed=can_edit_attestation_verification(),
+        remarks_edit_allowed=can_edit_registrant_remarks(),
     )
 
 
@@ -511,6 +519,106 @@ def update_registration_attestation(event_id, registrant_id):
             "registrant_id": registrant_id,
             "user_id": current_user.id,
             "status": result["status"],
+        },
+    )
+    return jsonify(result)
+
+
+@bp.route(
+    "/events/<int:event_id>/registrations/<int:registrant_id>/remarks",
+    methods=("GET", "POST"),
+)
+@registrations_access_required
+def registration_remarks(event_id, registrant_id):
+    if request.method == "POST" and not can_edit_registrant_remarks():
+        abort(403)
+    db = get_db()
+    get_event_or_404(event_id)
+    batch = active_batch(db, event_id)
+    try:
+        if request.method == "GET":
+            result = list_registrant_remarks(
+                db,
+                event_id,
+                batch["id"] if batch else None,
+                registrant_id,
+                request.args.get("batch"),
+            )
+        else:
+            payload = request.get_json(silent=True)
+            if not isinstance(payload, dict):
+                return jsonify({"error": "A JSON request body is required."}), 400
+            if set(payload) != {"remark"}:
+                return jsonify({"error": "Only remark text may be supplied."}), 400
+            result = create_registrant_remark(
+                db,
+                event_id,
+                batch["id"] if batch else None,
+                registrant_id,
+                request.args.get("batch"),
+                payload.get("remark"),
+                current_user.id,
+            )
+    except AdminTableQueryError as exc:
+        return jsonify({"error": str(exc)}), 400
+    if result is None:
+        abort(404)
+    if request.method == "POST":
+        current_app.logger.info(
+            "registrant_remark_created",
+            extra={
+                "event": "registrant_remark_created",
+                "event_id": event_id,
+                "batch_id": result["batch_id"],
+                "registrant_id": registrant_id,
+                "remark_id": result["remark"]["id"],
+                "user_id": current_user.id,
+            },
+        )
+        return jsonify(result), 201
+    return jsonify(result)
+
+
+@bp.patch(
+    "/events/<int:event_id>/registrations/<int:registrant_id>/remarks/"
+    "<int:remark_id>"
+)
+@registrations_access_required
+def resolve_registration_remark(event_id, registrant_id, remark_id):
+    if not can_edit_registrant_remarks():
+        abort(403)
+    db = get_db()
+    get_event_or_404(event_id)
+    batch = active_batch(db, event_id)
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "A JSON request body is required."}), 400
+    if set(payload) != {"status"}:
+        return jsonify({"error": "Only remark status may be supplied."}), 400
+    try:
+        result = resolve_registrant_remark(
+            db,
+            event_id,
+            batch["id"] if batch else None,
+            registrant_id,
+            request.args.get("batch"),
+            remark_id,
+            payload.get("status"),
+            current_user.id,
+        )
+    except AdminTableQueryError as exc:
+        return jsonify({"error": str(exc)}), 400
+    if result is None:
+        abort(404)
+    current_app.logger.info(
+        "registrant_remark_resolved",
+        extra={
+            "event": "registrant_remark_resolved",
+            "event_id": event_id,
+            "batch_id": result["batch_id"],
+            "registrant_id": registrant_id,
+            "remark_id": remark_id,
+            "user_id": current_user.id,
         },
     )
     return jsonify(result)

@@ -19,21 +19,22 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    identifier = mysql.BIGINT(unsigned=True).with_variant(sa.Integer(), "sqlite")
     op.create_table(
         "users",
-        sa.Column(
-            "id", mysql.BIGINT(unsigned=True), autoincrement=True, nullable=False
-        ),
+        sa.Column("id", identifier, autoincrement=True, nullable=False),
         sa.Column(
             "username",
-            mysql.VARCHAR(length=64, collation="utf8mb4_unicode_ci"),
+            mysql.VARCHAR(
+                length=64, collation="utf8mb4_unicode_ci"
+            ).with_variant(sa.String(length=64, collation="NOCASE"), "sqlite"),
             nullable=False,
         ),
         sa.Column("password_hash", sa.String(length=512), nullable=False),
         sa.Column("role", sa.String(length=16), nullable=False),
         sa.Column("status", sa.String(length=16), nullable=False),
         sa.Column("approved_at", sa.DateTime(), nullable=True),
-        sa.Column("approved_by", mysql.BIGINT(unsigned=True), nullable=True),
+        sa.Column("approved_by", identifier, nullable=True),
         sa.Column(
             "auth_version", sa.Integer(), server_default=sa.text("1"), nullable=False
         ),

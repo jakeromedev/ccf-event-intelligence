@@ -291,7 +291,7 @@ def upgrade() -> None:
     sa.Column('event_id', mysql.BIGINT(unsigned=True).with_variant(sa.Integer(), 'sqlite'), nullable=False),
     sa.Column('batch_id', mysql.BIGINT(unsigned=True).with_variant(sa.Integer(), 'sqlite'), nullable=False),
     sa.Column('satellite_id', mysql.BIGINT(unsigned=True).with_variant(sa.Integer(), 'sqlite'), nullable=False),
-    sa.Column('source_value', sa.String(length=512, collation='utf8mb4_bin'), nullable=False),
+    sa.Column('source_value', mysql.VARCHAR(length=512, collation='utf8mb4_bin').with_variant(sa.String(length=512), 'sqlite'), nullable=False),
     sa.Column('normalized_source_value', sa.String(length=512), nullable=False),
     sa.Column('affiliation', sa.String(length=32), nullable=False),
     sa.Column('source_record_count', mysql.BIGINT(unsigned=True).with_variant(sa.Integer(), 'sqlite'), server_default=sa.text('0'), nullable=False),

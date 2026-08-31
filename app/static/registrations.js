@@ -55,6 +55,24 @@
     const zoomLevel = modal.querySelector("[data-attestation-zoom-level]");
     const openOriginal = modal.querySelector("[data-attestation-original]");
     const canEditAttestation = root.dataset.canEditAttestation === "true";
+    const remarksModal = document.querySelector("[data-remarks-modal]");
+    const remarksDialog = remarksModal.querySelector("[role='dialog']");
+    const remarksCloseButton = remarksModal.querySelector(".registrant-modal-close");
+    const remarksName = remarksModal.querySelector("[data-remarks-name]");
+    const remarksForm = remarksModal.querySelector("[data-remarks-form]");
+    const remarksText = remarksModal.querySelector("[data-remarks-text]");
+    const remarksSave = remarksModal.querySelector("[data-remarks-save]");
+    const remarksCharacterCount = remarksModal.querySelector("[data-remarks-character-count]");
+    const remarksFeedback = remarksModal.querySelector("[data-remarks-feedback]");
+    const remarksLoading = remarksModal.querySelector("[data-remarks-loading]");
+    const remarksContent = remarksModal.querySelector("[data-remarks-content]");
+    const pendingRemarksList = remarksModal.querySelector("[data-pending-remarks-list]");
+    const resolvedRemarksList = remarksModal.querySelector("[data-resolved-remarks-list]");
+    const pendingRemarksEmpty = remarksModal.querySelector("[data-pending-remarks-empty]");
+    const resolvedRemarksEmpty = remarksModal.querySelector("[data-resolved-remarks-empty]");
+    const pendingRemarksCount = remarksModal.querySelector("[data-pending-remarks-count]");
+    const resolvedRemarksCount = remarksModal.querySelector("[data-resolved-remarks-count]");
+    const canEditRemarks = root.dataset.canEditRemarks === "true";
 
     const columnGroupOrder = ["Attestation & Payment", "Registrant Details", "Logistics"];
     const groupPreferenceVersion = 1;
@@ -86,6 +104,10 @@
     let previewLoaded = false;
     let previewLoadTimer = null;
     let filterReturnFocus = null;
+    let activeRemarksRow = null;
+    let remarksReturnFocus = null;
+    let remarksMutationPending = false;
+    let remarksRequestSession = 0;
 
     const operatorLabels = {
         equals: "Equals", in: "Is Any Of", is_empty: "Is Empty",
@@ -626,6 +648,193 @@
             });
     };
 
+    const setRemarksFeedback = (message, isError = false) => {
+        remarksFeedback.hidden = !message;
+        remarksFeedback.textContent = message || "";
+        remarksFeedback.classList.toggle("is-error", isError);
+        remarksFeedback.setAttribute("role", isError ? "alert" : "status");
+    };
+
+    const remarksCollectionUrl = (row) => root.dataset.remarksUrl.replace(
+        "/0/remarks", `/${row.id}/remarks`,
+    );
+
+    const remarksRequestUrl = (row, remarkId = null) => {
+        const base = remarksCollectionUrl(row);
+        const path = remarkId === null ? base : `${base}/${remarkId}`;
+        return `${path}?${new URLSearchParams({batch: batchSelect.value})}`;
+    };
+
+    const responsePayload = (response, fallback) => response.json()
+        .catch(() => ({}))
+        .then((payload) => {
+            if (!response.ok) throw new Error(payload.error || fallback);
+            return payload;
+        });
+
+    const remarkMetadata = (label, user, timestamp) => {
+        const metadata = document.createElement("p");
+        metadata.className = "remark-metadata";
+        metadata.textContent = `${label} ${user || "Former operator"} · ${displayValue(timestamp)}`;
+        return metadata;
+    };
+
+    const resolveRemark = (remark, button) => {
+        if (!canEditRemarks || !activeRemarksRow || remarksMutationPending) return;
+        remarksMutationPending = true;
+        button.disabled = true;
+        button.textContent = "Resolving…";
+        setRemarksFeedback("Resolving remark…");
+        fetch(remarksRequestUrl(activeRemarksRow, remark.id), {
+            method: "PATCH",
+            credentials: "same-origin",
+            headers: {
+                Accept: "application/json",
+                "Content-Type": "application/json",
+                "X-CSRFToken": root.dataset.csrfToken,
+            },
+            body: JSON.stringify({status: "resolved"}),
+        })
+            .then((response) => responsePayload(response, "Remark could not be resolved."))
+            .then(() => {
+                setRemarksFeedback("Remark marked Resolved.");
+                return loadRemarks(true);
+            })
+            .catch((error) => {
+                setRemarksFeedback(error.message || "Remark could not be resolved.", true);
+                button.disabled = false;
+                button.textContent = "Mark Resolved";
+            })
+            .finally(() => { remarksMutationPending = false; });
+    };
+
+    const renderRemark = (remark) => {
+        const article = document.createElement("article");
+        article.className = `remark-card is-${remark.status}`;
+        const text = document.createElement("p");
+        text.className = "remark-text";
+        text.textContent = remark.remark;
+        article.append(text, remarkMetadata("Created by", remark.created_by, remark.created_at));
+        if (remark.status === "resolved") {
+            article.append(remarkMetadata("Resolved by", remark.resolved_by, remark.resolved_at));
+        } else if (canEditRemarks) {
+            const resolveButton = document.createElement("button");
+            resolveButton.type = "button";
+            resolveButton.className = "button secondary remark-resolve-button";
+            resolveButton.textContent = "Mark Resolved";
+            resolveButton.addEventListener("click", () => resolveRemark(remark, resolveButton));
+            article.append(resolveButton);
+        }
+        return article;
+    };
+
+    const renderRemarks = (remarks) => {
+        const pending = remarks.filter((remark) => remark.status === "pending");
+        const resolved = remarks.filter((remark) => remark.status === "resolved");
+        pendingRemarksList.replaceChildren(...pending.map(renderRemark));
+        resolvedRemarksList.replaceChildren(...resolved.map(renderRemark));
+        pendingRemarksCount.textContent = String(pending.length);
+        resolvedRemarksCount.textContent = String(resolved.length);
+        pendingRemarksEmpty.hidden = pending.length > 0;
+        resolvedRemarksEmpty.hidden = resolved.length > 0;
+        remarksLoading.hidden = true;
+        remarksContent.hidden = false;
+    };
+
+    const loadRemarks = (refreshTable = false) => {
+        if (!activeRemarksRow) return Promise.resolve();
+        const row = activeRemarksRow;
+        const session = ++remarksRequestSession;
+        remarksLoading.hidden = false;
+        remarksContent.hidden = true;
+        return fetch(remarksRequestUrl(row), {
+            credentials: "same-origin",
+            headers: {Accept: "application/json"},
+        })
+            .then((response) => responsePayload(response, "Remarks could not be loaded."))
+            .then((payload) => {
+                if (session !== remarksRequestSession || row !== activeRemarksRow) return;
+                renderRemarks(payload.remarks || []);
+                if (refreshTable) loadData(false);
+            })
+            .catch((error) => {
+                if (session !== remarksRequestSession || row !== activeRemarksRow) return;
+                remarksLoading.hidden = true;
+                remarksContent.hidden = true;
+                setRemarksFeedback(error.message || "Remarks could not be loaded.", true);
+            });
+    };
+
+    const closeRemarksModal = () => {
+        if (remarksModal.hidden || remarksMutationPending) return false;
+        remarksRequestSession += 1;
+        remarksModal.hidden = true;
+        document.body.classList.remove("registrant-modal-open");
+        activeRemarksRow = null;
+        if (remarksText) remarksText.value = "";
+        if (remarksCharacterCount) remarksCharacterCount.textContent = "0";
+        setRemarksFeedback("");
+        const focusTarget = remarksReturnFocus;
+        remarksReturnFocus = null;
+        if (focusTarget && typeof focusTarget.focus === "function") focusTarget.focus();
+        return true;
+    };
+
+    const openRemarksModal = (row, trigger) => {
+        activeRemarksRow = row;
+        remarksReturnFocus = trigger;
+        remarksName.textContent = [row.first_name, row.last_name].filter(Boolean).join(" ") || "Unnamed registrant";
+        if (remarksText) remarksText.value = "";
+        if (remarksCharacterCount) remarksCharacterCount.textContent = "0";
+        setRemarksFeedback("");
+        remarksModal.hidden = false;
+        document.body.classList.add("registrant-modal-open");
+        window.requestAnimationFrame(() => remarksCloseButton.focus());
+        loadRemarks();
+    };
+
+    const saveRemark = (event) => {
+        event.preventDefault();
+        if (!canEditRemarks || !activeRemarksRow || !remarksText || remarksMutationPending) return;
+        const remark = remarksText.value.trim();
+        if (!remark) {
+            setRemarksFeedback("Enter a remark before saving.", true);
+            remarksText.focus();
+            return;
+        }
+        remarksMutationPending = true;
+        remarksText.disabled = true;
+        remarksSave.disabled = true;
+        remarksSave.textContent = "Saving…";
+        setRemarksFeedback("Saving remark…");
+        fetch(remarksRequestUrl(activeRemarksRow), {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+                Accept: "application/json",
+                "Content-Type": "application/json",
+                "X-CSRFToken": root.dataset.csrfToken,
+            },
+            body: JSON.stringify({remark}),
+        })
+            .then((response) => responsePayload(response, "Remark could not be saved."))
+            .then(() => {
+                remarksText.value = "";
+                remarksCharacterCount.textContent = "0";
+                setRemarksFeedback("Remark saved as Pending.");
+                return loadRemarks(true);
+            })
+            .catch((error) => {
+                setRemarksFeedback(error.message || "Remark could not be saved.", true);
+            })
+            .finally(() => {
+                remarksMutationPending = false;
+                remarksText.disabled = false;
+                remarksSave.disabled = false;
+                remarksSave.textContent = "Save Remark";
+            });
+    };
+
     const editIcon = () => {
         const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
         svg.setAttribute("viewBox", "0 0 24 24");
@@ -662,6 +871,23 @@
             const badge = document.createElement("span");
             setStatusBadge(badge, value);
             cell.append(badge);
+            return;
+        }
+        if (column.renderer === "remarks") {
+            const pending = Number(row.pending_remark_count || 0);
+            const resolved = Number(row.resolved_remark_count || 0);
+            const button = document.createElement("button");
+            const name = [row.first_name, row.last_name].filter(Boolean).join(" ") || "registrant";
+            button.type = "button";
+            button.className = `registration-remarks-button${pending ? " has-pending" : ""}`;
+            button.setAttribute("aria-haspopup", "dialog");
+            button.setAttribute("aria-label", `Open Remarks for ${name}`);
+            if (pending && resolved) button.textContent = `${pending} Pending · ${resolved} Resolved`;
+            else if (pending) button.textContent = `${pending} Pending`;
+            else if (resolved) button.textContent = `${resolved} Resolved`;
+            else button.textContent = "No Remarks";
+            button.addEventListener("click", () => openRemarksModal(row, button));
+            cell.append(button);
             return;
         }
         if (column.renderer === "payment_status") {
@@ -967,6 +1193,14 @@
     actualSizeButton.addEventListener("click", () => setManualZoom(1));
     modalSave?.addEventListener("click", saveAttestationStatus);
     modalStatus?.addEventListener("change", () => setModalFeedback(""));
+    remarksModal.querySelectorAll("[data-remarks-close]").forEach((control) => {
+        control.addEventListener("click", closeRemarksModal);
+    });
+    remarksForm?.addEventListener("submit", saveRemark);
+    remarksText?.addEventListener("input", () => {
+        remarksCharacterCount.textContent = String(remarksText.value.length);
+        setRemarksFeedback("");
+    });
 
     if (typeof window.ResizeObserver === "function") {
         const viewerResizeObserver = new window.ResizeObserver(() => {
@@ -985,6 +1219,28 @@
         if (!columnsMenu.hidden && !event.target.closest(".admin-column-control")) setColumnsMenuOpen(false);
     });
     document.addEventListener("keydown", (event) => {
+        if (!remarksModal.hidden) {
+            if (event.key === "Escape") {
+                event.preventDefault();
+                closeRemarksModal();
+                return;
+            }
+            if (event.key !== "Tab") return;
+            const focusable = [...remarksDialog.querySelectorAll(
+                "button:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])",
+            )].filter((element) => !element.hidden);
+            if (!focusable.length) return;
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+            return;
+        }
         if (!modal.hidden) {
             if (event.key === "Escape") {
                 event.preventDefault();
