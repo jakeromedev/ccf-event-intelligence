@@ -40,6 +40,50 @@ PASSWORD_MAX_LENGTH = 128
 LOGIN_FAILURE_LIMIT = 5
 LOGIN_LOCK_MINUTES = 15
 
+CAPABILITY_VIEW_DASHBOARD = "dashboard.view"
+CAPABILITY_VIEW_REGISTRATIONS = "registrations.view"
+CAPABILITY_EDIT_ATTESTATION = "registrations.attestation.edit"
+CAPABILITY_VIEW_ANALYTICS = "analytics.view"
+CAPABILITY_VIEW_SATELLITES = "satellites.view"
+CAPABILITY_VIEW_DATA_QUALITY = "data_quality.view"
+CAPABILITY_VIEW_IMPORTS = "imports.view"
+CAPABILITY_CREATE_EVENTS = "events.create"
+CAPABILITY_VIEW_EVENT_SETTINGS = "events.settings.view"
+CAPABILITY_VIEW_ADMIN_TABLES = "admin_tables.view"
+CAPABILITY_MANAGE_USERS = "users.manage"
+
+REGISTRATION_CAPABILITIES = frozenset(
+    {
+        CAPABILITY_VIEW_DASHBOARD,
+        CAPABILITY_VIEW_REGISTRATIONS,
+        CAPABILITY_EDIT_ATTESTATION,
+    }
+)
+STANDARD_USER_CAPABILITIES = frozenset(
+    {
+        CAPABILITY_VIEW_DASHBOARD,
+        CAPABILITY_VIEW_ANALYTICS,
+        CAPABILITY_VIEW_SATELLITES,
+        CAPABILITY_VIEW_DATA_QUALITY,
+        CAPABILITY_VIEW_IMPORTS,
+        CAPABILITY_CREATE_EVENTS,
+        CAPABILITY_VIEW_EVENT_SETTINGS,
+    }
+)
+
+# A Registration operator is intentionally deny-by-default. Every endpoint in
+# this set still performs its own Event/batch ownership validation.
+REGISTRATION_ENDPOINT_CAPABILITIES = {
+    "auth.logout": CAPABILITY_VIEW_DASHBOARD,
+    "dashboard.index": CAPABILITY_VIEW_DASHBOARD,
+    "dashboard.events": CAPABILITY_VIEW_DASHBOARD,
+    "dashboard.event_overview": CAPABILITY_VIEW_DASHBOARD,
+    "dashboard.event_dashboard_api": CAPABILITY_VIEW_DASHBOARD,
+    "dashboard.event_registrations": CAPABILITY_VIEW_REGISTRATIONS,
+    "dashboard.event_registrations_data": CAPABILITY_VIEW_REGISTRATIONS,
+    "dashboard.update_registration_attestation": CAPABILITY_EDIT_ATTESTATION,
+}
+
 # Checking this when a username does not exist reduces timing differences
 # without creating or retaining any account-specific plaintext.
 DUMMY_PASSWORD_HASH = hash_password(secrets.token_urlsafe(24))
@@ -121,15 +165,90 @@ def admin_required(view):
     return protected
 
 
+def has_capability(capability: str) -> bool:
+    """Resolve one application capability without granting implicit privileges."""
+    if current_app.config.get("AUTHENTICATION_DISABLED", False):
+        return True
+    if not current_user.is_authenticated or current_user.status != "approved":
+        return False
+    if current_user.is_admin:
+        return True
+    if current_user.role == "registration":
+        return capability in REGISTRATION_CAPABILITIES
+    if current_user.role == "user":
+        return capability in STANDARD_USER_CAPABILITIES
+    return False
+
+
+def can_view_dashboard() -> bool:
+    return has_capability(CAPABILITY_VIEW_DASHBOARD)
+
+
+def can_view_registrations() -> bool:
+    return has_capability(CAPABILITY_VIEW_REGISTRATIONS)
+
+
+def can_edit_attestation_verification() -> bool:
+    # Status changes always require an attributable authenticated operator,
+    # including in local deployments where read authentication is disabled.
+    return bool(
+        current_user.is_authenticated
+        and current_user.status == "approved"
+        and (
+            current_user.is_admin
+            or (
+                current_user.role == "registration"
+                and CAPABILITY_EDIT_ATTESTATION in REGISTRATION_CAPABILITIES
+            )
+        )
+    )
+
+
+def can_view_analytics() -> bool:
+    return has_capability(CAPABILITY_VIEW_ANALYTICS)
+
+
+def can_view_satellites() -> bool:
+    return has_capability(CAPABILITY_VIEW_SATELLITES)
+
+
+def can_view_data_quality() -> bool:
+    return has_capability(CAPABILITY_VIEW_DATA_QUALITY)
+
+
+def can_view_imports() -> bool:
+    return has_capability(CAPABILITY_VIEW_IMPORTS)
+
+
+def can_view_admin_tables() -> bool:
+    return has_capability(CAPABILITY_VIEW_ADMIN_TABLES)
+
+
+def can_manage_users() -> bool:
+    return has_capability(CAPABILITY_MANAGE_USERS)
+
+
+def can_create_events() -> bool:
+    return has_capability(CAPABILITY_CREATE_EVENTS)
+
+
+def can_view_event_settings() -> bool:
+    return has_capability(CAPABILITY_VIEW_EVENT_SETTINGS)
+
+
 def event_mutations_allowed() -> bool:
     """Return whether the current operator may change Event/import state."""
     if current_app.config.get("AUTHENTICATION_DISABLED", False):
         return True
     if not current_user.is_authenticated:
         return False
+    if current_user.is_admin:
+        return True
+    # Registration operators are never covered by the optional standard-user
+    # mutation switch.
     return bool(
-        current_user.is_admin
-        or current_app.config.get("STANDARD_USER_MUTATIONS_ALLOWED", False)
+        current_user.role == "user"
+        and current_app.config.get("STANDARD_USER_MUTATIONS_ALLOWED", False)
     )
 
 
@@ -207,6 +326,8 @@ def login():
                     extra={"event": "authentication_succeeded", "user_id": user.id, "role": user.role},
                 )
                 destination = _safe_next_url(form.next_url.data)
+                if user.role == "registration":
+                    destination = None
                 return redirect(destination or url_for("dashboard.events"))
 
     return render_template("login.html", form=form)
@@ -259,7 +380,7 @@ def logout():
 def users():
     registered_users = get_db().session.scalars(
         select(User)
-        .where(User.role == "user")
+        .where(User.role.in_(("user", "registration")))
         .order_by(User.status.asc(), User.created_at.asc(), User.id.asc())
     ).all()
     return render_template(
@@ -272,10 +393,14 @@ def users():
 def approve_user(user_id):
     db = get_db()
     user = db.session.get(User, user_id)
-    if user is None or user.role != "user":
+    if user is None or user.role not in ("user", "registration"):
         abort(404)
     if user.status == "pending":
+        role = request.form.get("role", "user")
+        if role not in ("user", "registration"):
+            abort(400)
         now = datetime.now()
+        user.role = role
         user.status = "approved"
         user.approved_at = now
         user.approved_by = current_user.id
@@ -294,6 +419,33 @@ def approve_user(user_id):
     return redirect(url_for("auth.users"))
 
 
+@bp.post("/admin/users/<int:user_id>/role")
+@admin_required
+def update_user_role(user_id):
+    db = get_db()
+    user = db.session.get(User, user_id)
+    if user is None or user.is_admin:
+        abort(404)
+    role = request.form.get("role")
+    if role not in ("user", "registration"):
+        abort(400)
+    if user.role != role:
+        user.role = role
+        user.auth_version += 1
+        user.updated_at = datetime.now()
+        db.commit()
+        current_app.logger.info(
+            "user_role_updated",
+            extra={
+                "event": "user_role_updated",
+                "user_id": user.id,
+                "role": role,
+            },
+        )
+        flash("{} now has the {} role.".format(user.username, role.title()), "success")
+    return redirect(url_for("auth.users"))
+
+
 def init_app(app) -> None:
     login_manager.init_app(app)
     login_manager.login_view = "auth.login"
@@ -301,7 +453,17 @@ def init_app(app) -> None:
 
     @app.context_processor
     def authorization_context():
-        return {"event_mutations_allowed": event_mutations_allowed()}
+        return {
+            "dashboard_allowed": can_view_dashboard(),
+            "analytics_allowed": can_view_analytics(),
+            "satellites_allowed": can_view_satellites(),
+            "data_quality_allowed": can_view_data_quality(),
+            "imports_allowed": can_view_imports(),
+            "event_creation_allowed": can_create_events(),
+            "event_settings_visible": can_view_event_settings(),
+            "event_mutations_allowed": event_mutations_allowed(),
+            "user_management_allowed": can_manage_users(),
+        }
 
     @login_manager.user_loader
     def load_user(user_id):
@@ -329,6 +491,10 @@ def init_app(app) -> None:
         }:
             return None
         if current_user.is_authenticated:
+            if current_user.role == "registration":
+                capability = REGISTRATION_ENDPOINT_CAPABILITIES.get(request.endpoint)
+                if capability is None or not has_capability(capability):
+                    abort(403)
             return None
         next_url = request.full_path.rstrip("?") if request.method == "GET" else None
         return redirect(url_for("auth.login", next=next_url))

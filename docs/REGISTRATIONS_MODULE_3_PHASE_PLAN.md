@@ -48,14 +48,18 @@ Status: **Complete**
 - [x] Show the navigation item only to authorized users.
 - [x] Apply an active navigation state on the page and data endpoint.
 - [x] Protect page and data routes independently of navigation visibility.
-- [x] Keep PII-bearing Registrations access administrator-only in authenticated runtime.
+- [x] Keep PII-bearing Registrations access behind an explicit operational
+  capability (administrator initially; approved `registration` role added on
+  2026-08-30 without granting standard-user access).
 
 Implementation:
 
 - access decision: `app.routes.can_access_registrations`
 - route decorator: `app.routes.registrations_access_required`
 - navigation: `app/templates/base.html`
-- approved standard users receive HTTP 403 on direct page and data requests
+- approved standard users receive HTTP 403 on direct page and data requests;
+- approved Registration operators receive page/data access under the
+  deny-by-default role policy
 
 ### Row, Event, and batch scope
 
@@ -447,7 +451,8 @@ Implementation date: **2026-08-30**
 - `app/models.py` — `AttestationVerification` model and Registrant relationship
 - `migrations/versions/b7e4c1a9d306_add_attestation_verifications.py`
 - `app/registrations.py` — state composition, summaries, filtering, and updates
-- `app/routes.py` — CSRF-protected, administrator-only PATCH route
+- `app/routes.py` — CSRF-protected PATCH route for administrator and
+  Registration operators
 - `app/templates/registrations.html` — summary and update contract
 - `app/static/registrations.js` — inline update state and feedback
 - `app/static/app.css` — state, summary, and feedback styling
@@ -459,9 +464,10 @@ Implementation date: **2026-08-30**
 
 - no verification row derives Pending with reviewer/time `—`;
 - Pending, Verified, and Invalid are the only accepted application/database states;
-- the authenticated administrator and server timestamp are recorded on updates;
+- the authenticated administrator or Registration operator and server
+  timestamp are recorded on updates;
 - current state is inserted once and updated without duplicate rows;
-- CSRF, administrator authorization, Event ownership, batch ownership, and
+- CSRF, operational-role authorization, Event ownership, batch ownership, and
   registrant ownership are enforced server-side;
 - active and historical registration snapshots retain independent state;
 - registration/batch deletion cascades verification rows;
@@ -502,7 +508,8 @@ its state, ownership, or source-immutability contracts.
 ## Verified work and remaining evidence
 
 - [x] Exercise a scripted verification workflow with the administrator role.
-- [x] Retain identical administrator-only view/edit permissions after security review.
+- [x] Apply the approved deny-by-default Registration role: Dashboard and
+  Registrations access plus attestation editing only; standard users remain denied.
 - [x] Finalize All/Pending/Verified/Invalid quick filters using the existing server query path.
 - [x] Confirm summary cards and table filters reconcile.
 - [x] Document current attribution versus full-history limitations.
@@ -528,8 +535,9 @@ Implementation date: **2026-08-30**
   batch, registrant, user, and status metadata without names, email addresses,
   attachment URLs, or source rows.
 - Route inspection confirms no Registrations CSV/XLSX/download endpoint.
-- Permission review retains administrator-only view/edit behavior; standard-user
-  Event/import mutation configuration does not grant Registrations access.
+- Permission review grants view/edit to the administrator and Registration role
+  only; standard-user Event/import mutation configuration does not grant
+  Registrations access, and Registration cannot reach unrelated modules.
 - Retention review confirms state follows registration/batch lifetime, reviewer
   deletion uses `SET NULL`, no automatic deletion exists, and organization owner
   and duration remain governance decisions.
@@ -540,10 +548,11 @@ Implementation date: **2026-08-30**
   every case included summary and option queries.
 - Thirty disposable-MySQL state updates measured 0.86 ms median, 1.34 ms p95,
   and 2.77 ms maximum. These observations are not a production SLA.
-- Focused Registrations suites: **16 passed** on SQLite and disposable MySQL 8.4.
-- Complete suites: **98 passed** on SQLite and **98 passed** on disposable MySQL 8.4.
+- Focused Registrations suites: **19 passed** on SQLite and within disposable
+  MySQL 8.4 validation after the Registration-role update.
+- Complete suites: **104 passed** on SQLite and **104 passed** on disposable MySQL 8.4.
 - Empty-MySQL migration and MySQL downgrade/re-upgrade to head
-  `b7e4c1a9d306`: **passed**; `alembic check` found no schema operations.
+  `c8f5d2b0e417`: **passed**; `alembic check` found no schema operations.
 - Ruff, Python compilation, JavaScript syntax, whitespace validation,
   production configuration, local Gunicorn readiness, and graceful SIGTERM:
   **passed**.
@@ -556,8 +565,10 @@ Implementation date: **2026-08-30**
 - [ ] Execute the administrator workflow in the target browser/environment.
 - [ ] Confirm attachment opening, dropdown feedback, quick filters, summaries,
   responsive table behavior, and session timeout with the operational owner.
-- [ ] Record product-owner acceptance of the administrator-only permission and
-  current-state attribution contracts, or document approved changes.
+- [x] Record the approved Registration-role permission contract: Dashboard
+  read-only, Registrations view/edit, and deny-by-default elsewhere.
+- [ ] Record product-owner acceptance of current-state attribution and the
+  remaining target-browser workflow, or document approved changes.
 
 ## Exit criteria
 

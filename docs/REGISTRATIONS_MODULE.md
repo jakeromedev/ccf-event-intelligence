@@ -36,21 +36,21 @@ The table contains names, contact information, logistics responses, and
 attachment links. It therefore uses the same restrictive role boundary as
 detailed registration inspection:
 
-- normal authenticated runtime: approved administrator only;
+- normal authenticated runtime: approved administrator or approved
+  `registration` role;
 - approved standard user: denied with HTTP 403;
 - unauthenticated request: redirected by the global authentication guard;
 - authentication-disabled development/test mode: read access is allowed for
   the established local workflow, but verification updates are disabled because
   an authenticated reviewer is required.
 
-Phase 2 does not introduce a new role or broaden Event-data permissions. The
-PATCH endpoint requires an authenticated administrator even when read-only local
-access is enabled, and global Flask-WTF CSRF validation remains mandatory.
-
-The Phase 3 permission review preserves one deny-by-default operational role:
-the administrator can both view and edit Registrations, while standard users
-can do neither. A future dedicated reviewer/viewer permission remains a product
-decision and is not inferred from Event/import mutation access.
+The Registration role is deny-by-default at the global endpoint guard. It may
+view the Dashboard and Registrations and may edit only the application-owned
+attestation state. It cannot access Analytics, Data Quality, Admin Tables,
+imports/batches, Event or Satellite Dataset settings, or user administration.
+Standard users can do neither Registrations action. The PATCH endpoint requires
+an attributable administrator or Registration operator even when read-only
+local access is enabled, and global Flask-WTF CSRF validation remains mandatory.
 
 ## Row definition and scope
 
@@ -101,26 +101,27 @@ Names and email addresses are never used as relationship keys.
 
 | Group | Display column | Source |
 |---|---|---|
-| Registrant | Registration Code | `registrants.registration_code` |
-| Registrant | Ticket Code | `registrants.ticket_code` |
-| Registrant | First Name | `registrants.first_name` |
-| Registrant | Last Name | `registrants.last_name` |
-| Registrant | Email Address | `registrants.source_data_json["Email Address"]` |
-| Registrant | Mobile Number | `registrants.source_data_json["Mobile Number"]` |
-| Registrant | Gender | `registrants.gender_raw` |
-| Registrant | Birth Month | `registrants.birth_month_raw` |
-| Registrant | Birth Year | `registrants.birth_year_raw` |
-| Registrant | Life Stage | `registrants.life_stage_raw` |
-| Registrant | Satellite | normalized/final `registrants.satellite_name` |
+| Attestation & Payment | Attestation Form | `source_data_json["Upload Your Accomplished Attestation Form Here"]` |
+| Attestation & Payment | Attestation Status | `COALESCE(attestation_verifications.status, 'pending')` |
+| Attestation & Payment | Payment Status | `tickets.payment_status` through the batch/ticket-code relationship |
+| Registrant Details | First Name | `registrants.first_name` |
+| Registrant Details | Last Name | `registrants.last_name` |
+| Registrant Details | Email Address | `registrants.source_data_json["Email Address"]` |
+| Registrant Details | Mobile Number | `registrants.source_data_json["Mobile Number"]` |
+| Registrant Details | Gender | `registrants.gender_raw` |
+| Registrant Details | Birth Month | `registrants.birth_month_raw` |
+| Registrant Details | Birth Year | `registrants.birth_year_raw` |
+| Registrant Details | Life Stage | `registrants.life_stage_raw` |
+| Registrant Details | Satellite | normalized/final `registrants.satellite_name` |
 | Logistics | Shirt Size | `source_data_json["Shirt Size"]` |
 | Logistics | Transportation To MMRC | `source_data_json["Transportation From Ccf To Mmrc"]` with supported header fallback |
 | Logistics | Transportation From MMRC | `source_data_json["Transportation From Mmrc To Ccf"]` with supported header fallback |
 | Logistics | Plate Number | `source_data_json["Plate No"]` with `Plate Number` fallback |
-| Requirements | Attestation Form | `source_data_json["Upload Your Accomplished Attestation Form Here"]` |
-| Requirements | Attestation Status | `COALESCE(attestation_verifications.status, 'pending')` |
-| Requirements | Last Reviewed By | `users.username` through `updated_by_user_id` |
-| Requirements | Last Reviewed At | `attestation_verifications.updated_at` |
-| Requirements | Payment Status | `tickets.payment_status` through the batch/ticket-code relationship |
+| Attestation & Payment | Last Reviewed By | `users.username` through `updated_by_user_id` |
+| Attestation & Payment | Last Reviewed At | `attestation_verifications.updated_at` |
+
+Registration Code and Ticket Code remain searchable query fields but are not
+part of the displayed column contract and have no table sorting controls.
 
 The module does not expose medical information, allergies, emergency contacts,
 full residential addresses, Dgroup leader contacts, buyer monetary values, or
@@ -133,11 +134,16 @@ It returns a value only when it is a complete HTTP or HTTPS URL. Blank,
 malformed, control-character, `javascript:`, `data:`, and `file:` values become
 the standard `—` state.
 
-The browser repeats the protocol allow-list as defense in depth and creates the
-link through DOM properties rather than source HTML:
+The browser repeats the protocol allow-list as defense in depth. The
+Attestation Form button opens the in-page review modal immediately, paints a
+loading state, and then requests the image asynchronously. Successful image
+previews default to Fit to View and provide 25%–300% zoom, 100% natural size,
+and document-only horizontal/vertical scrolling. Other file types receive a
+preview-unavailable state. Only a validated URL can activate the optional
+original-file link:
 
 ```text
-label: View Form
+label: Open Original
 target: _blank
 rel: noopener noreferrer
 ```
@@ -154,9 +160,11 @@ The application owns exactly three verification states:
 
 No `attestation_verifications` row means **Pending** with reviewer and reviewed
 time displayed as `—`. This derived default avoids materializing a row for
-every imported registration. An administrator can change the state through the
-inline dropdown. The server, never the browser, supplies `current_user.id` and
-the review timestamp.
+every imported registration. The Attestation Review modal shows the registrant,
+Satellite, Payment Status, submitted form, and current state. An administrator
+or Registration operator can change the state in that modal; read-only viewers
+receive the same preview without editing controls. The server, never the
+browser, supplies `current_user.id` and the review timestamp.
 
 Updates validate the Event, selected active/historical batch, registration
 ownership, and exact status allow-list before writing. The JSON response is
@@ -215,10 +223,12 @@ page one, and preserve the resulting state in the URL.
 
 ### Sorting
 
-Allow-listed sorting is available for Registration Code, Ticket Code, First
-Name, Last Name, Shirt Size, Attestation Status, and Payment Status. The default is Registration
-Code ascending. An unavailable field falls back to the default; direction is
-limited to ascending or descending. Record ID is the deterministic tie-breaker.
+Visible sorting controls are available for First Name, Last Name, Shirt Size,
+Attestation Status, and Payment Status. Registration Code remains the internal
+default order, and Registration Code and Ticket Code remain allow-listed for
+the existing server query contract without being shown in the table. An
+unavailable field falls back to the default; direction is limited to ascending
+or descending. Record ID is the deterministic tie-breaker.
 
 ### Pagination and URL state
 
@@ -231,14 +241,21 @@ in query parameters.
 
 The table uses the existing design system and provides:
 
-- grouped Registrant, Logistics, and Requirements headers;
-- sticky headers and first identifier column;
+- fixed operational ordering beginning with Attestation Form, Attestation
+  Status, and Payment Status;
+- three persisted column-group controls for Attestation & Payment, Registrant
+  Details, and Logistics, plus Reset to Default;
+- sticky headers and the first operational-action column;
 - horizontal and vertical scrolling;
 - loading, empty, and failure states;
 - filter chips and clear-all behavior;
 - page-size and page navigation controls;
 - emphasized but restrained Attestation Form and Payment Status treatments;
-- inline Pending/Verified/Invalid status updates with saving and failure feedback;
+- an accessible Attestation Review modal with image loading/failure states,
+  safe original-file access, focus trapping/restoration, and unsaved-change
+  protection;
+- modal-based Pending/Verified/Invalid status updates with saving and failure
+  feedback;
 - Total Registrations, Attestation Pending, Attestation Verified, Attestation
   Invalid, and Payment Validated summary cards using the current server scope.
 
@@ -298,6 +315,8 @@ Hosted CI was not executed from the local implementation environment.
 |---|---|---|
 | Administrator page and data access | Pass | Direct route/navigation tests |
 | Standard-user and unauthenticated denial | Pass | Page, data, and PATCH authorization tests |
+| Registration-role page/data/edit access | Pass | Capability, CSRF, and reviewer-attribution tests |
+| Registration-role restricted-module denial | Pass | Direct page/API/mutation requests return 403 |
 | Default Pending presentation | Pass | Missing-row query and UI contract tests |
 | Pending/Verified/Invalid transitions | Pass | CSRF-protected endpoint tests |
 | Active and historical batch isolation | Pass | Independent-state and ownership tests |
@@ -312,12 +331,36 @@ Hosted CI was not executed from the local implementation environment.
 
 Phase 3 local verification:
 
-- Focused Registrations suite: **16 passed** on SQLite and disposable MySQL.
-- Complete suite: **98 passed** on SQLite.
-- Complete suite: **98 passed** on disposable MySQL 8.4.
+- Focused Registrations suite: **19 passed** on SQLite and within disposable
+  MySQL validation.
+- Complete suite: **104 passed** on SQLite.
+- Complete suite: **104 passed** on disposable MySQL 8.4.
 - Empty MySQL migration, downgrade/re-upgrade, and `alembic check`: **passed**.
 - Ruff, Python compilation, JavaScript syntax, and whitespace validation: **passed**.
 - Production configuration/schema check: **passed**.
+
+## Registration role implementation evidence
+
+Implementation verified: **2026-08-31**
+
+- Internal role value: `registration`; display label: **Registration**.
+- Administrator assignment works during approval and through the protected
+  role-update form; public registration remains `user/pending` and ignores any
+  submitted role value.
+- Centralized capabilities grant Dashboard read access, Registrations page/data
+  access, and attestation verification editing only.
+- Direct restricted page, API, import/batch, settings, source-lineage, and user
+  administration requests return HTTP 403.
+- Registration operator attestation updates retain CSRF, status allow-list,
+  Event/batch/registrant ownership, server timestamp, and reviewer attribution.
+- Alembic revision `c8f5d2b0e417` adds the role to database constraints; a
+  downgrade converts Registration accounts to ordinary `user` accounts before
+  restoring the former constraint.
+- Fresh disposable-MySQL migration to `c8f5d2b0e417`, migration
+  downgrade/re-upgrade, and `alembic check` passed.
+- Ruff, compilation, production configuration/schema validation, Gunicorn
+  readiness, and graceful SIGTERM passed. Hosted CI and container execution
+  were not run locally.
 - Local production-mode readiness and graceful SIGTERM: **passed**.
 - Hosted CI and manual target-browser acceptance: **not executed**.
 

@@ -233,11 +233,25 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         self.assertEqual(200, page.status_code)
         self.assertIn(b">Registrations</span>", page.data)
         self.assertIn(b"Registration Records", page.data)
+        self.assertIn(b'class="application-header-page"', page.data)
+        self.assertNotIn(b"overview-header admin-tables-header", page.data)
         self.assertIn(b"registrations.js", page.data)
         self.assertIn(b'data-attestation-quick="all"', page.data)
         self.assertIn(b'data-attestation-quick="pending"', page.data)
         self.assertIn(b'data-attestation-quick="verified"', page.data)
         self.assertIn(b'data-attestation-quick="invalid"', page.data)
+        self.assertIn(b'data-attestation-modal', page.data)
+        self.assertIn(b'aria-labelledby="attestation-review-title"', page.data)
+        self.assertIn(b'data-attestation-zoom-out', page.data)
+        self.assertIn(b'data-attestation-zoom-in', page.data)
+        self.assertIn(b'data-attestation-fit', page.data)
+        self.assertIn(b'data-attestation-actual-size', page.data)
+        self.assertIn(b'data-attestation-canvas', page.data)
+        self.assertIn(b'Loading form', page.data)
+        self.assertIn(b'data-columns-toggle', page.data)
+        self.assertIn(b'Attestation &amp; Payment', page.data)
+        self.assertIn(b'Reset to Default', page.data)
+        self.assertNotIn(b'data-attestation-save', page.data)
 
         payload = self._data(per_page=25)
         self.assertEqual(batch_id, payload["batch"])
@@ -245,14 +259,19 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         labels = [column["label"] for column in payload["columns"]]
         self.assertEqual(
             [
-                "Registration Code", "Ticket Code", "First Name", "Last Name",
-                "Email Address", "Mobile Number", "Gender", "Birth Month",
-                "Birth Year", "Life Stage", "Satellite", "Shirt Size",
+                "Attestation Form", "Attestation Status", "Payment Status",
+                "First Name", "Last Name", "Email Address", "Mobile Number",
+                "Gender", "Birth Month", "Birth Year", "Life Stage", "Satellite", "Shirt Size",
                 "Transportation To MMRC", "Transportation From MMRC",
-                "Plate Number", "Attestation Form", "Attestation Status",
-                "Last Reviewed By", "Last Reviewed At", "Payment Status",
+                "Plate Number", "Last Reviewed By", "Last Reviewed At",
             ],
             labels,
+        )
+        self.assertNotIn("Registration Code", labels)
+        self.assertNotIn("Ticket Code", labels)
+        self.assertEqual(
+            ["Attestation & Payment", "Attestation & Payment", "Attestation & Payment"],
+            [column["group"] for column in payload["columns"][:3]],
         )
         row = next(item for item in payload["rows"] if item["registration_code"] == "R-001")
         self.assertEqual("T-001", row["ticket_code"])
@@ -288,6 +307,15 @@ class RegistrationsIntegrationTests(unittest.TestCase):
             },
             payload["summary"],
         )
+        self.assertEqual(
+            {
+                "total_registrations": 30,
+                "attestation_pending": 30,
+                "attestation_verified": 0,
+                "attestation_invalid": 0,
+            },
+            payload["quick_filter_counts"],
+        )
 
     def test_attestation_values_are_sanitized_and_ui_contract_is_safe(self):
         self._process(self.event_a)
@@ -304,13 +332,18 @@ class RegistrationsIntegrationTests(unittest.TestCase):
 
         script = (Path(__file__).parents[1] / "app/static/registrations.js").read_text()
         self.assertIn('["http:", "https:"]', script)
-        self.assertIn('link.textContent = "View Form"', script)
-        self.assertIn('link.target = "_blank"', script)
-        self.assertIn('link.rel = "noopener noreferrer"', script)
+        self.assertIn('label.textContent = "Attestation Form"', script)
+        self.assertIn('button.setAttribute("aria-haspopup", "dialog")', script)
+        self.assertIn('openOriginal.href = url', script)
+        self.assertIn('previewImage.src = url', script)
+        self.assertIn('previewImage.onerror', script)
         self.assertIn('method: "PATCH"', script)
         self.assertIn('"X-CSRFToken": root.dataset.csrfToken', script)
-        self.assertIn('[["pending", "Pending"], ["verified", "Verified"], ["invalid", "Invalid"]]', script)
+        self.assertIn('const allowedStatuses = ["pending", "verified", "invalid"]', script)
         self.assertIn('filters.filter((item) => item.field !== "attestation_status")', script)
+        self.assertIn("window.localStorage.setItem", script)
+        self.assertIn("hasUnsavedModalChange", script)
+        self.assertIn('event.key === "Escape"', script)
         self.assertNotIn("innerHTML", script)
 
         registration_routes = {
@@ -328,6 +361,67 @@ class RegistrationsIntegrationTests(unittest.TestCase):
                 json={"status": "verified"},
             ).status_code,
         )
+
+    def test_attestation_document_viewer_interaction_contract(self):
+        self._process(self.event_a)
+        page = self.app.test_client().get(
+            "/events/{}/registrations".format(self.event_a)
+        ).get_data(as_text=True)
+        root = Path(__file__).parents[1]
+        script = (root / "app/static/registrations.js").read_text()
+        styles = (root / "app/static/app.css").read_text()
+
+        open_flow = script[
+            script.index("const openAttestationModal"):
+            script.index("const saveAttestationStatus")
+        ]
+        self.assertLess(
+            open_flow.index("modal.hidden = false"),
+            open_flow.index("loadPreview(row.attestation_form, session)"),
+        )
+        self.assertIn("const session = preparePreview(name)", open_flow)
+        self.assertIn("window.requestAnimationFrame", open_flow)
+
+        self.assertIn('aria-busy="true"', page)
+        self.assertIn('role="status" aria-live="polite"', page)
+        self.assertIn('aria-label="Zoom out"', page)
+        self.assertIn('aria-label="Zoom in"', page)
+        self.assertIn('aria-label="Fit document to view"', page)
+        self.assertIn('aria-label="Show document at 100 percent"', page)
+        self.assertIn('target="_blank" rel="noopener noreferrer"', page)
+        self.assertNotIn("<iframe", page)
+
+        self.assertIn("previewImage.onload", script)
+        self.assertIn("fitDocumentToView(true)", script)
+        self.assertIn("const minimumZoom = 0.25", script)
+        self.assertIn("const maximumZoom = 3", script)
+        self.assertIn("const zoomStep = 0.25", script)
+        self.assertIn("Math.min(Math.max(scale, minimumZoom), maximumZoom)", script)
+        self.assertIn('previewImage.style.width = `${renderedWidth}px`', script)
+        self.assertIn('previewImage.style.height = "auto"', script)
+        self.assertNotIn("transform: scale", script)
+        self.assertIn('actualSizeButton.addEventListener("click", () => setManualZoom(1))', script)
+        self.assertIn('zoomOutButton.addEventListener("click", () => changeZoom(-1))', script)
+        self.assertIn('zoomInButton.addEventListener("click", () => changeZoom(1))', script)
+        self.assertIn('fitButton.addEventListener("click", () => fitDocumentToView(true))', script)
+
+        self.assertIn("previewImage.onerror = () => showPreviewFailure(session)", script)
+        self.assertIn("window.setTimeout(() => showPreviewFailure(session), 15000)", script)
+        self.assertIn("session !== previewSession", script)
+        self.assertIn("previewSession += 1", script)
+        self.assertIn('previewImage.removeAttribute("src")', script)
+        self.assertIn("previewViewer.scrollLeft = 0", script)
+        self.assertIn("previewViewer.scrollTop = 0", script)
+        self.assertIn('openOriginal.href = url', script)
+        self.assertIn('return ["http:", "https:"].includes(parsed.protocol)', script)
+
+        self.assertIn(".attestation-preview { position: relative;", styles)
+        self.assertIn("overflow: auto", styles)
+        self.assertIn("max-width: 100%", styles)
+        self.assertIn(".attestation-document-canvas { position: relative", styles)
+        self.assertIn(".attestation-status-panel", styles)
+        self.assertIn("grid-template-columns: minmax(0, 1fr) 285px", styles)
+        self.assertIn("height: min(820px, 92vh)", styles)
 
     def test_search_uses_codes_names_email_and_mobile(self):
         self._process(self.event_a)
@@ -481,6 +575,15 @@ class RegistrationsIntegrationTests(unittest.TestCase):
             self.assertEqual(expected, payload["summary"]["total_registrations"])
             self.assertEqual(expected, payload["summary"]["attestation_{}".format(status)])
             self.assertTrue(all(row["attestation_status"] == status for row in payload["rows"]))
+            self.assertEqual(
+                {
+                    "total_registrations": 30,
+                    "attestation_pending": 25,
+                    "attestation_verified": 2,
+                    "attestation_invalid": 3,
+                },
+                payload["quick_filter_counts"],
+            )
 
         combined = json.dumps(
             [
@@ -514,7 +617,14 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
             admin.set_password("Admin-Registrations-Password-1!")
             user = User(username="operator", role="user", status="approved", approved_at=now)
             user.set_password("User-Registrations-Password-1!")
-            get_db().session.add_all([admin, user])
+            registration_user = User(
+                username="registration-operator",
+                role="registration",
+                status="approved",
+                approved_at=now,
+            )
+            registration_user.set_password("Registration-Operator-Password-1!")
+            get_db().session.add_all([admin, user, registration_user])
             get_db().session.flush()
             self.event_id = get_db().execute(
                 "INSERT INTO events (name) VALUES ('Protected Event')"
@@ -587,7 +697,7 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
             ),
         ).lastrowid
 
-    def test_page_data_and_navigation_are_administrator_only(self):
+    def test_page_data_and_navigation_require_registration_capability(self):
         page_url = "/events/{}/registrations".format(self.event_id)
         data_url = page_url + "/data"
         update_url = "{}/{}/attestation".format(page_url, self.registrant_id)
@@ -620,7 +730,158 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
         self.assertEqual(200, page.status_code)
         self.assertIn(('href="{}"'.format(page_url)).encode(), page.data)
         self.assertIn(b'class="nav-link active"', page.data)
+        self.assertIn(b'data-attestation-save', page.data)
+        self.assertIn(b'data-attestation-status', page.data)
         self.assertEqual(200, self.client.get(data_url).status_code)
+
+        self.client.post("/logout", data={"csrf_token": self._csrf_token()})
+        self._login(
+            "registration-operator", "Registration-Operator-Password-1!"
+        )
+        page = self.client.get(page_url)
+        self.assertEqual(200, page.status_code)
+        self.assertEqual(200, self.client.get(data_url).status_code)
+        self.assertIn(b'data-attestation-save', page.data)
+        self.assertIn(b">Dashboard</span>", page.data)
+        self.assertIn(b">Registrations</span>", page.data)
+        for label in (
+            b">Analytics</span>",
+            b">Satellites</span>",
+            b">Data Quality</span>",
+            b">Imports</span>",
+            b">Admin Tables</span>",
+            b">Users</span>",
+        ):
+            self.assertNotIn(label, page.data)
+
+    def test_registration_role_dashboard_is_read_only_and_modules_are_denied(self):
+        self._login(
+            "registration-operator", "Registration-Operator-Password-1!"
+        )
+        overview_url = "/events/{}".format(self.event_id)
+        overview = self.client.get(overview_url)
+        self.assertEqual(200, overview.status_code)
+        self.assertEqual(
+            200,
+            self.client.get(
+                "/events/{}/dashboard".format(self.event_id)
+            ).status_code,
+        )
+        self.assertNotIn(b"Dashboard configuration", overview.data)
+        self.assertNotIn(b"Manage Satellite Targets", overview.data)
+        self.assertNotIn(b"Open Imports", overview.data)
+        self.assertNotIn(b"Create Event", self.client.get("/events").data)
+
+        denied_gets = (
+            "/events/new",
+            "/events/{}/analytics".format(self.event_id),
+            "/api/events/{}/analytics".format(self.event_id),
+            "/api/events/{}/analytics/trends".format(self.event_id),
+            "/events/{}/overview/registrants".format(self.event_id),
+            "/analytics/compare?events={},{}".format(
+                self.event_id, self.other_event_id
+            ),
+            "/api/analytics/compare?events={},{}".format(
+                self.event_id, self.other_event_id
+            ),
+            "/events/{}/data-quality".format(self.event_id),
+            "/events/{}/data-quality/issues".format(self.event_id),
+            "/events/{}/admin-tables/registrants".format(self.event_id),
+            "/events/{}/admin-tables/registrants/data".format(self.event_id),
+            "/events/{}/admin-tables/registrants/curated/1/sources".format(
+                self.event_id
+            ),
+            "/events/{}/imports".format(self.event_id),
+            "/events/{}/satellites".format(self.event_id),
+            "/events/{}/satellites/registrants".format(self.event_id),
+            "/admin/users",
+        )
+        for path in denied_gets:
+            with self.subTest(path=path):
+                self.assertEqual(403, self.client.get(path).status_code)
+
+        token = self._csrf_token()
+        denied_posts = (
+            ("/events", {"name": "Denied Event"}),
+            (
+                "/events/{}/settings".format(self.event_id),
+                {"participant_target": "99"},
+            ),
+            (
+                "/events/{}/satellite-datasets".format(self.event_id),
+                {"name": "Denied", "participant_target": "10"},
+            ),
+            ("/events/{}/imports/validate".format(self.event_id), {}),
+            (
+                "/events/{}/imports/{}/process".format(
+                    self.event_id, self.batch_id
+                ),
+                {},
+            ),
+            (
+                "/events/{}/imports/{}/activate".format(
+                    self.event_id, self.batch_id
+                ),
+                {},
+            ),
+            (
+                "/events/{}/imports/{}/delete".format(
+                    self.event_id, self.batch_id
+                ),
+                {},
+            ),
+            ("/admin/users/1/approve", {"role": "registration"}),
+            ("/admin/users/1/role", {"role": "registration"}),
+        )
+        for path, data in denied_posts:
+            with self.subTest(path=path):
+                data["csrf_token"] = token
+                self.assertEqual(403, self.client.post(path, data=data).status_code)
+
+    def test_registration_role_updates_attestation_with_own_audit_identity(self):
+        self._login(
+            "registration-operator", "Registration-Operator-Password-1!"
+        )
+        response = self.client.patch(
+            "/events/{}/registrations/{}/attestation".format(
+                self.event_id, self.registrant_id
+            ),
+            json={"status": "verified"},
+            headers={"X-CSRFToken": self._csrf_token()},
+        )
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("registration-operator", response.get_json()["updated_by"])
+        with self.app.app_context():
+            reviewer = get_db().execute(
+                """
+                SELECT u.username
+                FROM attestation_verifications av
+                JOIN users u ON u.id = av.updated_by_user_id
+                WHERE av.registrant_id = ?
+                """,
+                (self.registrant_id,),
+            ).fetchone()
+            self.assertEqual("registration-operator", reviewer["username"])
+
+    def test_registration_role_cannot_cross_event_batch_boundaries(self):
+        self._login(
+            "registration-operator", "Registration-Operator-Password-1!"
+        )
+        data_url = "/events/{}/registrations/data".format(self.event_id)
+        self.assertEqual(
+            400,
+            self.client.get(
+                data_url, query_string={"batch": self.other_batch_id}
+            ).status_code,
+        )
+        response = self.client.patch(
+            "/events/{}/registrations/{}/attestation".format(
+                self.event_id, self.other_registrant_id
+            ),
+            json={"status": "invalid"},
+            headers={"X-CSRFToken": self._csrf_token()},
+        )
+        self.assertEqual(404, response.status_code)
 
     def test_attestation_workflow_is_csrf_protected_attributed_and_reconciled(self):
         self._login("admin", "Admin-Registrations-Password-1!")

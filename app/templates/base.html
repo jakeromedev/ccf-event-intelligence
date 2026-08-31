@@ -6,7 +6,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}CCF Event Dashboard{% endblock %}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v='20260828-attestation-link') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v='20260831-admin-table-header-2') }}">
 </head>
 <body>
     <aside class="sidebar" id="application-sidebar">
@@ -17,14 +17,14 @@
 
         {% if event %}
             <nav aria-label="Event workspace navigation">
-                <a class="nav-link {% if request.endpoint == 'dashboard.event_overview' %}active{% endif %}" href="{{ url_for('dashboard.event_overview', event_id=event['id']) }}">{{ icon('overview') }}<span>Overview</span></a>
-                <a class="nav-link {% if request.endpoint == 'dashboard.event_analytics_page' %}active{% endif %}" href="{{ url_for('dashboard.event_analytics_page', event_id=event['id']) }}">{{ icon('overview') }}<span>Analytics</span></a>
+                {% if dashboard_allowed %}<a class="nav-link {% if request.endpoint == 'dashboard.event_overview' %}active{% endif %}" href="{{ url_for('dashboard.event_overview', event_id=event['id']) }}">{{ icon('overview') }}<span>Dashboard</span></a>{% endif %}
+                {% if analytics_allowed %}<a class="nav-link {% if request.endpoint == 'dashboard.event_analytics_page' %}active{% endif %}" href="{{ url_for('dashboard.event_analytics_page', event_id=event['id']) }}">{{ icon('overview') }}<span>Analytics</span></a>{% endif %}
                 {% if registrations_allowed %}
                     <a class="nav-link {% if request.endpoint in ('dashboard.event_registrations', 'dashboard.event_registrations_data') %}active{% endif %}" href="{{ url_for('dashboard.event_registrations', event_id=event['id']) }}">{{ icon('registrations') }}<span>Registrations</span></a>
                 {% endif %}
-                <a class="nav-link {% if request.endpoint in ('dashboard.event_satellites', 'dashboard.event_satellite_registrants') %}active{% endif %}" href="{{ url_for('dashboard.event_satellites', event_id=event['id']) }}">{{ icon('satellites') }}<span>Satellites</span></a>
-                <a class="nav-link {% if request.endpoint == 'dashboard.event_quality' %}active{% endif %}" href="{{ url_for('dashboard.event_quality', event_id=event['id']) }}">{{ icon('quality') }}<span>Data Quality</span></a>
-                <a class="nav-link {% if request.endpoint == 'dashboard.event_imports' %}active{% endif %}" href="{{ url_for('dashboard.event_imports', event_id=event['id']) }}">{{ icon('imports') }}<span>Imports</span></a>
+                {% if satellites_allowed %}<a class="nav-link {% if request.endpoint in ('dashboard.event_satellites', 'dashboard.event_satellite_registrants') %}active{% endif %}" href="{{ url_for('dashboard.event_satellites', event_id=event['id']) }}">{{ icon('satellites') }}<span>Satellites</span></a>{% endif %}
+                {% if data_quality_allowed %}<a class="nav-link {% if request.endpoint == 'dashboard.event_quality' %}active{% endif %}" href="{{ url_for('dashboard.event_quality', event_id=event['id']) }}">{{ icon('quality') }}<span>Data Quality</span></a>{% endif %}
+                {% if imports_allowed %}<a class="nav-link {% if request.endpoint == 'dashboard.event_imports' %}active{% endif %}" href="{{ url_for('dashboard.event_imports', event_id=event['id']) }}">{{ icon('imports') }}<span>Imports</span></a>{% endif %}
                 {% if admin_tables_allowed %}
                     {% set admin_tables_active = request.endpoint in ('dashboard.event_admin_table', 'dashboard.event_admin_table_data', 'dashboard.event_admin_registration_sources') %}
                     <div class="nav-module {{ 'active expanded' if admin_tables_active else '' }}" data-nav-group>
@@ -42,8 +42,8 @@
                         </div>
                     </div>
                 {% endif %}
-                {% if current_user.is_authenticated and current_user.is_admin %}
-                    <a class="nav-link {% if request.endpoint in ('auth.users', 'auth.approve_user') %}active{% endif %}" href="{{ url_for('auth.users') }}">{{ icon('users') }}<span>Users</span></a>
+                {% if user_management_allowed %}
+                    <a class="nav-link {% if request.endpoint in ('auth.users', 'auth.approve_user', 'auth.update_user_role') %}active{% endif %}" href="{{ url_for('auth.users') }}">{{ icon('users') }}<span>Users</span></a>
                 {% endif %}
             </nav>
             <div class="sidebar-spacer"></div>
@@ -51,8 +51,8 @@
         {% else %}
             <nav aria-label="Application navigation">
                 <a class="nav-link {% if request.endpoint == 'dashboard.events' %}active{% endif %}" href="{{ url_for('dashboard.events') }}">{{ icon('events') }}<span>Events</span></a>
-                {% if current_user.is_authenticated and current_user.is_admin %}
-                    <a class="nav-link {% if request.endpoint in ('auth.users', 'auth.approve_user') %}active{% endif %}" href="{{ url_for('auth.users') }}">{{ icon('users') }}<span>Users</span></a>
+                {% if user_management_allowed %}
+                    <a class="nav-link {% if request.endpoint in ('auth.users', 'auth.approve_user', 'auth.update_user_role') %}active{% endif %}" href="{{ url_for('auth.users') }}">{{ icon('users') }}<span>Users</span></a>
                 {% endif %}
             </nav>
             <div class="sidebar-spacer"></div>
@@ -81,6 +81,7 @@
                 {% else %}
                     <span class="event-selector static"><strong>Events</strong></span>
                 {% endif %}
+                {% block application_header_page %}{% endblock %}
             </div>
             {% if event %}
                 <div class="application-header-meta" aria-label="Current dataset metadata">

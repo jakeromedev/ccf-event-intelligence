@@ -177,6 +177,27 @@ class AuthenticationTests(unittest.TestCase):
         protected = self.client.get("/events")
         self.assertEqual(302, protected.status_code)
 
+    def test_public_registration_cannot_self_assign_registration_role(self):
+        token = self.csrf("/register")
+        response = self.client.post(
+            "/register",
+            data={
+                "csrf_token": token,
+                "username": "role-requester",
+                "password": "StrongPassword12!",
+                "confirm_password": "StrongPassword12!",
+                "role": "registration",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(200, response.status_code)
+        with self.app.app_context():
+            user = get_db().session.scalar(
+                select(User).where(User.username == "role-requester")
+            )
+            self.assertEqual("user", user.role)
+            self.assertEqual("pending", user.status)
+
     def test_registration_rejects_reserved_duplicate_weak_and_mismatched_values(self):
         for reserved in ("admin", "Admin", "ADMIN", "  AdMiN  "):
             with self.subTest(reserved=reserved):
@@ -289,6 +310,22 @@ class AuthenticationTests(unittest.TestCase):
         self.assertIn("HttpOnly", cookie_headers)
         self.assertIn("SameSite=Lax", cookie_headers)
 
+    def test_registration_role_lands_on_dashboard_instead_of_restricted_next(self):
+        self.create_user("registration-landing", role="registration")
+        token = self.csrf("/login?next=/analytics/compare")
+        response = self.client.post(
+            "/login",
+            data={
+                "csrf_token": token,
+                "username": "registration-landing",
+                "password": "StrongPassword12!",
+                "next_url": "/analytics/compare",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(302, response.status_code)
+        self.assertTrue(response.headers["Location"].endswith("/events"))
+
     def test_login_lockout_blocks_correct_password_until_expiry(self):
         user_id = self.create_user("lockout-operator")
         for _attempt in range(5):
@@ -348,6 +385,48 @@ class AuthenticationTests(unittest.TestCase):
         self.logout()
         self.assertEqual(
             200, self.login("awaiting-user", "StrongPassword12!").status_code
+        )
+
+    def test_admin_can_assign_registration_role_during_and_after_approval(self):
+        _, admin_password = self.initialize_admin()
+        pending_id = self.create_user("registration-request", status="pending")
+        existing_id = self.create_user("existing-operator")
+        self.login("admin", admin_password)
+
+        page = self.client.get("/admin/users")
+        self.assertIn(b">Registration</option>", page.data)
+        token = CSRF_PATTERN.search(page.data).group(1).decode("utf-8")
+        approved = self.client.post(
+            "/admin/users/{}/approve".format(pending_id),
+            data={"csrf_token": token, "role": "registration"},
+            follow_redirects=True,
+        )
+        self.assertEqual(200, approved.status_code)
+        with self.app.app_context():
+            assigned = get_db().session.get(User, pending_id)
+            self.assertEqual("registration", assigned.role)
+            self.assertEqual("approved", assigned.status)
+
+        token = CSRF_PATTERN.search(approved.data).group(1).decode("utf-8")
+        changed = self.client.post(
+            "/admin/users/{}/role".format(existing_id),
+            data={"csrf_token": token, "role": "registration"},
+            follow_redirects=True,
+        )
+        self.assertEqual(200, changed.status_code)
+        self.assertIn(b"now has the Registration role", changed.data)
+        with self.app.app_context():
+            self.assertEqual(
+                "registration", get_db().session.get(User, existing_id).role
+            )
+
+        token = CSRF_PATTERN.search(changed.data).group(1).decode("utf-8")
+        self.assertEqual(
+            400,
+            self.client.post(
+                "/admin/users/{}/role".format(existing_id),
+                data={"csrf_token": token, "role": "admin"},
+            ).status_code,
         )
 
     def test_database_and_web_paths_cannot_create_a_second_admin(self):

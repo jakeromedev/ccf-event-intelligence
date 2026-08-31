@@ -546,19 +546,25 @@ No placeholder analytics or data from another Event are displayed.
 ## Authentication, Authorization, and Privacy
 
 Normal runtime applies the application's global authentication guard to the
-dashboard page, settings action, and JSON endpoints. Only authenticated,
-approved users can reach them. Test deployments may explicitly enable
-`AUTHENTICATION_DISABLED`.
+dashboard page, settings action, and JSON endpoints. Authenticated approved
+administrators, standard users, and Registration operators may view the normal
+Dashboard. Registration operators receive the aggregate dashboard only: the
+Event settings panel, create/import actions, and Satellite Dataset management
+controls are absent, and direct mutation requests are denied with HTTP 403.
+Test deployments may explicitly enable `AUTHENTICATION_DISABLED`.
 
 The `CCF_STANDARD_USER_MUTATIONS_ALLOWED` policy controls Event settings and
 related import mutations. Development/testing default to the Phase 1 approved-
 user workflow. Staging/production default to administrator-only mutation until
-the product owner approves broader access. Admin Tables remain administrator-only.
+the product owner approves broader access. This switch applies only to the
+`user` role and can never grant Registration operators mutation access. Admin
+Tables remain administrator-only.
 
 The rendered overview and `/dashboard` JSON response are aggregate-only. They
 do not include names, email addresses, mobile numbers, registration codes,
 ticket codes, or raw birth values. The separate `/overview/registrants` endpoint
-is row-level and has the global authenticated-user boundary described above.
+is row-level and remains denied to the Registration role; registration staff
+use the focused, Event-scoped Registrations module instead.
 
 ## Database and Performance Notes
 

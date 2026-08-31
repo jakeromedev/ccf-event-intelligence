@@ -17,23 +17,24 @@ Event
       -> rebuildable curated rows
 ```
 
-The current schema has fifteen application tables:
+The current schema has sixteen application tables:
 
-1. `events`
-2. `import_batches`
-3. `import_files`
-4. `validation_issues`
-5. `buyers`
-6. `tickets`
-7. `registrants`
-8. `attestation_verifications`
-9. `curated_registrants`
-10. `curated_registrant_sources`
-11. `satellites`
-12. `satellite_source_variations`
-13. `curated_registrant_satellites`
-14. `satellite_datasets`
-15. `satellite_dataset_satellites`
+1. `users`
+2. `events`
+3. `import_batches`
+4. `import_files`
+5. `validation_issues`
+6. `buyers`
+7. `tickets`
+8. `registrants`
+9. `attestation_verifications`
+10. `curated_registrants`
+11. `curated_registrant_sources`
+12. `satellites`
+13. `satellite_source_variations`
+14. `curated_registrant_satellites`
+15. `satellite_datasets`
+16. `satellite_dataset_satellites`
 
 ## Relationship diagram
 
@@ -61,6 +62,21 @@ erDiagram
 
 `buyers` to `tickets` and `tickets` to `registrants` are batch-scoped logical
 relationships using source identifiers. They are validated during import.
+
+## Application operators
+
+### `users`
+
+`users` stores application operators, not event registrants. Its `role` check
+permits `admin`, `user`, and `registration`; the administrator identity check
+still reserves the single approved `admin` username/role combination. Public
+accounts are created as `user/pending`, and only the administrator may assign
+`registration` during approval or role management.
+
+The `registration` role does not require a separate Event or registration data
+table. Its access is enforced by application capabilities and Event/batch query
+ownership. Alembic revision `c8f5d2b0e417` expands the existing role and
+administrator-identity constraints without changing existing users.
 
 ## Source and import tables
 
@@ -210,8 +226,9 @@ INDEX(updated_by_user_id)
 ```
 
 The absence of a row is interpreted as `pending`, with no reviewer or reviewed
-timestamp. Every actual update records the authenticated administrator and a
-server-generated timestamp. Deleting a registration or its batch cascades the
+timestamp. Every actual update records the authenticated administrator or
+Registration operator and a server-generated timestamp. Deleting a
+registration or its batch cascades the
 verification row; deleting a reviewer retains the state and timestamp while
 setting reviewer ID to null. This is a current-state record, not a full audit
 history.

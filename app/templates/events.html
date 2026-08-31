@@ -8,7 +8,7 @@
         <h2>Event Dashboard</h2>
         <p>Create an event, upload its registration exports, and view attendance and church-affiliation insights in one place.</p>
     </div>
-    <a class="button hero-button" href="{{ url_for('dashboard.new_event') }}">{{ icon('plus', 18) }} Create Event</a>
+    {% if event_creation_allowed %}<a class="button hero-button" href="{{ url_for('dashboard.new_event') }}">{{ icon('plus', 18) }} Create Event</a>{% endif %}
 </section>
 
 <section class="events-section">
@@ -47,7 +47,7 @@
             <p class="eyebrow">Get started</p>
             <h2>No events yet</h2>
             <p>Create your first event to begin importing registration data and viewing event insights.</p>
-            <a class="button primary" href="{{ url_for('dashboard.new_event') }}">{{ icon('plus', 17) }} Create Event</a>
+            {% if event_creation_allowed %}<a class="button primary" href="{{ url_for('dashboard.new_event') }}">{{ icon('plus', 17) }} Create Event</a>{% endif %}
         </div>
     {% endif %}
 </section>

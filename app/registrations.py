@@ -59,6 +59,7 @@ def _registration_column(
     filterable=False,
     sortable=False,
     renderer=None,
+    hidden=False,
 ):
     column = _column(
         key,
@@ -72,11 +73,12 @@ def _registration_column(
     )
     column["filterable"] = filterable
     column["sortable"] = sortable
+    column["hidden"] = hidden
     return column
 
 
 def registration_columns(db):
-    """Return the fixed, intentionally small Registrations column contract."""
+    """Return query columns, including search-only identifiers hidden from the UI."""
     return [
         _registration_column(
             "registration_code",
@@ -84,6 +86,7 @@ def registration_columns(db):
             "record.registration_code",
             searchable=True,
             sortable=True,
+            hidden=True,
         ),
         _registration_column(
             "ticket_code",
@@ -91,11 +94,40 @@ def registration_columns(db):
             "record.ticket_code",
             searchable=True,
             sortable=True,
+            hidden=True,
+        ),
+        _registration_column(
+            "attestation_form",
+            "Attestation Form",
+            _source_expression(db, "attestation_form"),
+            group="Attestation & Payment",
+            renderer="attestation_review",
+        ),
+        _registration_column(
+            "attestation_status",
+            "Attestation Status",
+            "COALESCE(verification.status, 'pending')",
+            data_type="select",
+            group="Attestation & Payment",
+            filterable=True,
+            sortable=True,
+            renderer="attestation_status",
+        ),
+        _registration_column(
+            "payment_status",
+            "Payment Status",
+            "ticket.payment_status",
+            data_type="select",
+            group="Attestation & Payment",
+            filterable=True,
+            sortable=True,
+            renderer="payment_status",
         ),
         _registration_column(
             "first_name",
             "First Name",
             "record.first_name",
+            group="Registrant Details",
             searchable=True,
             sortable=True,
         ),
@@ -103,6 +135,7 @@ def registration_columns(db):
             "last_name",
             "Last Name",
             "record.last_name",
+            group="Registrant Details",
             searchable=True,
             sortable=True,
         ),
@@ -110,12 +143,14 @@ def registration_columns(db):
             "email_address",
             "Email Address",
             _source_expression(db, "email_address"),
+            group="Registrant Details",
             searchable=True,
         ),
         _registration_column(
             "mobile_number",
             "Mobile Number",
             _source_expression(db, "mobile_number"),
+            group="Registrant Details",
             searchable=True,
         ),
         _registration_column(
@@ -123,6 +158,7 @@ def registration_columns(db):
             "Gender",
             "record.gender_raw",
             data_type="select",
+            group="Registrant Details",
             filterable=True,
         ),
         _registration_column(
@@ -130,23 +166,27 @@ def registration_columns(db):
             "Birth Month",
             "record.birth_month_raw",
             data_type="select",
+            group="Registrant Details",
         ),
         _registration_column(
             "birth_year",
             "Birth Year",
             "record.birth_year_raw",
+            group="Registrant Details",
         ),
         _registration_column(
             "life_stage",
             "Life Stage",
             "record.life_stage_raw",
             data_type="select",
+            group="Registrant Details",
         ),
         _registration_column(
             "satellite",
             "Satellite",
             "record.satellite_name",
             data_type="select",
+            group="Registrant Details",
             filterable=True,
         ),
         _registration_column(
@@ -181,44 +221,17 @@ def registration_columns(db):
             group="Logistics",
         ),
         _registration_column(
-            "attestation_form",
-            "Attestation Form",
-            _source_expression(db, "attestation_form"),
-            group="Requirements",
-            renderer="attestation_form_link",
-        ),
-        _registration_column(
-            "attestation_status",
-            "Attestation Status",
-            "COALESCE(verification.status, 'pending')",
-            data_type="select",
-            group="Requirements",
-            filterable=True,
-            sortable=True,
-            renderer="attestation_status",
-        ),
-        _registration_column(
             "last_reviewed_by",
             "Last Reviewed By",
             "reviewer.username",
-            group="Requirements",
+            group="Attestation & Payment",
         ),
         _registration_column(
             "last_reviewed_at",
             "Last Reviewed At",
             "verification.updated_at",
-            group="Requirements",
+            group="Attestation & Payment",
             renderer="reviewed_at",
-        ),
-        _registration_column(
-            "payment_status",
-            "Payment Status",
-            "ticket.payment_status",
-            data_type="select",
-            group="Requirements",
-            filterable=True,
-            sortable=True,
-            renderer="payment_status",
         ),
     ]
 
@@ -288,14 +301,20 @@ def registrations_data(db, event_id, active_batch_id, args):
         )
         params.extend(["%{}%".format(search)] * len(searchable))
 
+    quick_filter_conditions = list(conditions)
+    quick_filter_params = list(params)
     for item in filters:
         clause, values = _filter_clause(
             column_map[item["field"]], item["operator"], item["value"]
         )
         conditions.append(clause)
         params.extend(values)
+        if item["field"] != "attestation_status":
+            quick_filter_conditions.append(clause)
+            quick_filter_params.extend(values)
 
     where_sql = " AND ".join(conditions)
+    quick_filter_where_sql = " AND ".join(quick_filter_conditions)
     total = db.execute(
         "SELECT COUNT(*) {} WHERE {}".format(base_sql, where_sql), params
     ).fetchone()[0]
@@ -337,6 +356,21 @@ def registrations_data(db, event_id, active_batch_id, args):
         """.format(base=base_sql, where=where_sql),
         params,
     ).fetchone()
+    quick_filter_counts = db.execute(
+        """
+        SELECT
+            COUNT(*) AS total_registrations,
+            COUNT(CASE
+                WHEN COALESCE(verification.status, 'pending') = 'pending' THEN 1
+            END) AS attestation_pending,
+            COUNT(CASE WHEN verification.status = 'verified' THEN 1 END)
+                AS attestation_verified,
+            COUNT(CASE WHEN verification.status = 'invalid' THEN 1 END)
+                AS attestation_invalid
+        {base} WHERE {where}
+        """.format(base=base_sql, where=quick_filter_where_sql),
+        quick_filter_params,
+    ).fetchone()
 
     serialized_rows = []
     for row in rows:
@@ -348,6 +382,7 @@ def registrations_data(db, event_id, active_batch_id, args):
     public_columns = [
         {key: value for key, value in column.items() if key != "expression"}
         for column in columns
+        if not column["hidden"]
     ]
     column_options = _categorical_options(
         db, base_sql, options_conditions, options_params, filter_columns
@@ -362,6 +397,7 @@ def registrations_data(db, event_id, active_batch_id, args):
         "column_options": column_options,
         "rows": serialized_rows,
         "summary": dict(summary),
+        "quick_filter_counts": dict(quick_filter_counts),
         "query": {
             "search": search,
             "filters": filters,

@@ -20,7 +20,40 @@
     const filterChips = root.querySelector("[data-filter-chips]");
     const filterCount = root.querySelector("[data-filter-count]");
     const updateFeedback = root.querySelector("[data-update-feedback]");
+    const columnsMenu = root.querySelector("[data-columns-menu]");
+    const columnsToggle = root.querySelector("[data-columns-toggle]");
+    const columnGroupControls = [...root.querySelectorAll("[data-column-group]")];
+    const modal = document.querySelector("[data-attestation-modal]");
+    const modalDialog = modal.querySelector("[role='dialog']");
+    const modalCloseButton = modal.querySelector(".registrant-modal-close");
+    const modalName = modal.querySelector("[data-attestation-name]");
+    const modalSatellite = modal.querySelector("[data-attestation-satellite]");
+    const modalPayment = modal.querySelector("[data-attestation-payment]");
+    const modalCurrentStatus = modal.querySelector("[data-attestation-current-status]");
+    const modalStatus = modal.querySelector("[data-attestation-status]");
+    const modalSave = modal.querySelector("[data-attestation-save]");
+    const modalFeedback = modal.querySelector("[data-attestation-feedback]");
+    const previewViewer = modal.querySelector("[data-attestation-preview]");
+    const previewState = modal.querySelector("[data-attestation-preview-state]");
+    const previewUnavailable = modal.querySelector("[data-attestation-preview-unavailable]");
+    const previewCanvas = modal.querySelector("[data-attestation-canvas]");
+    const previewImage = modal.querySelector("[data-attestation-image]");
+    const zoomOutButton = modal.querySelector("[data-attestation-zoom-out]");
+    const zoomInButton = modal.querySelector("[data-attestation-zoom-in]");
+    const fitButton = modal.querySelector("[data-attestation-fit]");
+    const actualSizeButton = modal.querySelector("[data-attestation-actual-size]");
+    const zoomLevel = modal.querySelector("[data-attestation-zoom-level]");
+    const openOriginal = modal.querySelector("[data-attestation-original]");
     const canEditAttestation = root.dataset.canEditAttestation === "true";
+
+    const columnGroupOrder = ["Attestation & Payment", "Registrant Details", "Logistics"];
+    const groupPreferenceVersion = 1;
+    const groupVisibility = Object.fromEntries(columnGroupOrder.map((group) => [group, true]));
+    const allowedStatuses = ["pending", "verified", "invalid"];
+    const statusLabels = {pending: "Pending", verified: "Verified", invalid: "Invalid"};
+    const minimumZoom = 0.25;
+    const maximumZoom = 3;
+    const zoomStep = 0.25;
 
     let columns = [];
     let columnValues = {};
@@ -31,11 +64,27 @@
     let defaultSort = "registration_code";
     let requestController = null;
     let searchTimer = null;
+    let latestPayload = null;
+    let activeRow = null;
+    let returnFocus = null;
+    let savePending = false;
+    let previewSession = 0;
+    let zoomMode = "fit";
+    let zoomScale = 1;
+    let fitScale = 1;
+    let previewLoaded = false;
+    let previewLoadTimer = null;
 
     const operatorLabels = {
         equals: "Equals", in: "Is Any Of", is_empty: "Is Empty",
         is_not_empty: "Is Not Empty",
     };
+
+    const displayValue = (value) => value === null || value === undefined || value === ""
+        ? "—"
+        : String(value);
+
+    const normalizeStatus = (value) => allowedStatuses.includes(value) ? value : "pending";
 
     const readUrl = () => {
         const params = new URLSearchParams(window.location.search);
@@ -74,6 +123,43 @@
         window.history.replaceState({}, "", `${window.location.pathname}${params.toString() ? `?${params}` : ""}`);
     };
 
+    const loadGroupPreference = () => {
+        try {
+            const saved = JSON.parse(window.localStorage.getItem(root.dataset.columnPreferenceKey));
+            if (!saved || saved.version !== groupPreferenceVersion || typeof saved.groups !== "object") return;
+            columnGroupOrder.forEach((group) => {
+                if (typeof saved.groups[group] === "boolean") groupVisibility[group] = saved.groups[group];
+            });
+        } catch (_error) {
+            // Column visibility remains usable when local storage is unavailable.
+        }
+    };
+
+    const saveGroupPreference = () => {
+        try {
+            window.localStorage.setItem(root.dataset.columnPreferenceKey, JSON.stringify({
+                version: groupPreferenceVersion,
+                groups: groupVisibility,
+            }));
+        } catch (_error) {
+            // Column visibility remains usable when local storage is unavailable.
+        }
+    };
+
+    const renderColumnGroupControls = () => {
+        columnGroupControls.forEach((control) => {
+            control.checked = groupVisibility[control.value] !== false;
+        });
+    };
+
+    const visibleTableColumns = () => columns.filter((column) => groupVisibility[column.group] !== false);
+
+    const setColumnsMenuOpen = (open) => {
+        columnsMenu.hidden = !open;
+        columnsToggle.setAttribute("aria-expanded", String(open));
+        if (open) columnGroupControls[0]?.focus();
+    };
+
     const filterableColumns = () => columns.filter((column) => column.filterable);
 
     const populateFilterFields = () => {
@@ -85,9 +171,7 @@
             option.textContent = column.label;
             filterField.append(option);
         });
-        if (filterableColumns().some((column) => column.key === selected)) {
-            filterField.value = selected;
-        }
+        if (filterableColumns().some((column) => column.key === selected)) filterField.value = selected;
         refreshFilterControls();
     };
 
@@ -130,10 +214,10 @@
         filters.forEach((filter, index) => {
             const column = columns.find((item) => item.key === filter.field);
             if (!column) return;
-            const displayValue = Array.isArray(filter.value) ? filter.value.join(", ") : filter.value;
+            const value = Array.isArray(filter.value) ? filter.value.join(", ") : filter.value;
             const chip = document.createElement("button");
             chip.type = "button";
-            chip.textContent = `${column.label}: ${operatorLabels[filter.operator] || filter.operator}${displayValue ? ` ${displayValue}` : ""} ×`;
+            chip.textContent = `${column.label}: ${operatorLabels[filter.operator] || filter.operator}${value ? ` ${value}` : ""} ×`;
             chip.addEventListener("click", () => {
                 filters.splice(index, 1);
                 page = 1;
@@ -148,14 +232,11 @@
         const activeStatus = statusFilters.find((item) => item.operator === "equals");
         root.querySelectorAll("[data-attestation-quick]").forEach((button) => {
             const value = button.dataset.attestationQuick;
-            button.classList.toggle(
-                "active",
-                value === "all" ? statusFilters.length === 0 : activeStatus && activeStatus.value === value,
-            );
-            button.setAttribute(
-                "aria-pressed",
-                String(value === "all" ? statusFilters.length === 0 : Boolean(activeStatus && activeStatus.value === value)),
-            );
+            const active = value === "all"
+                ? statusFilters.length === 0
+                : Boolean(activeStatus && activeStatus.value === value);
+            button.classList.toggle("active", active);
+            button.setAttribute("aria-pressed", String(active));
         });
     };
 
@@ -177,16 +258,235 @@
         updateFeedback.classList.toggle("is-error", isError);
     };
 
-    const saveAttestationStatus = (select, row) => {
-        const previous = select.dataset.previousValue;
-        const status = select.value;
-        const updateUrl = root.dataset.updateUrl.replace(
-            "/0/attestation", `/${row.id}/attestation`,
+    const setModalFeedback = (message, isError = false) => {
+        modalFeedback.hidden = !message;
+        modalFeedback.textContent = message || "";
+        modalFeedback.classList.toggle("is-error", isError);
+    };
+
+    const setStatusBadge = (badge, value) => {
+        const status = normalizeStatus(value);
+        badge.className = `registration-attestation-badge is-${status}`;
+        badge.textContent = statusLabels[status];
+    };
+
+    const paymentBadge = (value) => {
+        const badge = document.createElement("span");
+        const normalized = displayValue(value).toLocaleLowerCase();
+        badge.className = `registration-payment-badge${normalized.includes("validated") ? " is-validated" : normalized.includes("failed") || normalized.includes("cancel") ? " is-problem" : ""}`;
+        badge.textContent = displayValue(value);
+        return badge;
+    };
+
+    const setZoomControls = (enabled) => {
+        const scale = zoomMode === "fit" ? fitScale : zoomScale;
+        zoomOutButton.disabled = !enabled || scale <= minimumZoom;
+        zoomInButton.disabled = !enabled || scale >= maximumZoom;
+        fitButton.disabled = !enabled;
+        actualSizeButton.disabled = !enabled;
+        fitButton.setAttribute("aria-pressed", String(enabled && zoomMode === "fit"));
+        actualSizeButton.setAttribute(
+            "aria-pressed",
+            String(enabled && zoomMode === "manual" && Math.abs(zoomScale - 1) < 0.001),
         );
+    };
+
+    const calculateFitScale = () => {
+        if (!previewImage.naturalWidth || !previewImage.naturalHeight) return 1;
+        const availableWidth = Math.max(previewViewer.clientWidth - 32, 1);
+        const availableHeight = Math.max(previewViewer.clientHeight - 32, 1);
+        return Math.min(
+            availableWidth / previewImage.naturalWidth,
+            availableHeight / previewImage.naturalHeight,
+            1,
+        );
+    };
+
+    const renderDocumentScale = (scale, mode, resetScroll = false) => {
+        if (!previewLoaded || !previewImage.naturalWidth || !previewImage.naturalHeight) return;
+        const oldWidth = Math.max(previewViewer.scrollWidth, 1);
+        const oldHeight = Math.max(previewViewer.scrollHeight, 1);
+        const centerX = (previewViewer.scrollLeft + previewViewer.clientWidth / 2) / oldWidth;
+        const centerY = (previewViewer.scrollTop + previewViewer.clientHeight / 2) / oldHeight;
+        const renderedWidth = Math.max(Math.round(previewImage.naturalWidth * scale), 1);
+        const renderedHeight = Math.max(Math.round(previewImage.naturalHeight * scale), 1);
+        const canvasWidth = Math.max(previewViewer.clientWidth, renderedWidth + 32);
+        const canvasHeight = Math.max(previewViewer.clientHeight, renderedHeight + 32);
+
+        zoomMode = mode;
+        zoomScale = scale;
+        previewCanvas.hidden = false;
+        previewImage.hidden = false;
+        previewImage.style.width = `${renderedWidth}px`;
+        previewImage.style.height = "auto";
+        previewCanvas.style.width = `${canvasWidth}px`;
+        previewCanvas.style.height = `${canvasHeight}px`;
+        previewImage.style.left = `${Math.max((canvasWidth - renderedWidth) / 2, 16)}px`;
+        previewImage.style.top = `${Math.max((canvasHeight - renderedHeight) / 2, 16)}px`;
+        zoomLevel.value = mode === "fit"
+            ? `Fit · ${Math.round(scale * 100)}%`
+            : `${Math.round(scale * 100)}%`;
+        zoomLevel.textContent = zoomLevel.value;
+        setZoomControls(true);
+
+        if (resetScroll) {
+            previewViewer.scrollLeft = 0;
+            previewViewer.scrollTop = 0;
+        } else {
+            previewViewer.scrollLeft = centerX * previewViewer.scrollWidth - previewViewer.clientWidth / 2;
+            previewViewer.scrollTop = centerY * previewViewer.scrollHeight - previewViewer.clientHeight / 2;
+        }
+    };
+
+    const fitDocumentToView = (resetScroll = true) => {
+        fitScale = calculateFitScale();
+        renderDocumentScale(fitScale, "fit", resetScroll);
+    };
+
+    const setManualZoom = (scale) => {
+        const bounded = Math.min(Math.max(scale, minimumZoom), maximumZoom);
+        renderDocumentScale(bounded, "manual");
+    };
+
+    const changeZoom = (direction) => {
+        const current = zoomMode === "fit" ? fitScale : zoomScale;
+        const stepIndex = direction > 0
+            ? Math.floor((current + 0.0001) / zoomStep) + 1
+            : Math.ceil((current - 0.0001) / zoomStep) - 1;
+        setManualZoom(stepIndex * zoomStep);
+    };
+
+    const resetPreview = () => {
+        previewSession += 1;
+        window.clearTimeout(previewLoadTimer);
+        previewLoadTimer = null;
+        previewImage.onload = null;
+        previewImage.onerror = null;
+        previewImage.removeAttribute("src");
+        previewImage.removeAttribute("style");
+        previewImage.hidden = true;
+        previewCanvas.removeAttribute("style");
+        previewCanvas.hidden = true;
+        previewUnavailable.hidden = true;
+        previewState.hidden = true;
+        previewViewer.setAttribute("aria-busy", "false");
+        previewViewer.scrollLeft = 0;
+        previewViewer.scrollTop = 0;
+        openOriginal.hidden = true;
+        openOriginal.removeAttribute("href");
+        zoomMode = "fit";
+        zoomScale = 1;
+        fitScale = 1;
+        previewLoaded = false;
+        zoomLevel.value = "—";
+        zoomLevel.textContent = "—";
+        setZoomControls(false);
+        return previewSession;
+    };
+
+    const preparePreview = (registrantName) => {
+        const session = resetPreview();
+        previewImage.alt = `${registrantName || "Registrant"} submitted Attestation Form`;
+        previewState.hidden = false;
+        previewViewer.setAttribute("aria-busy", "true");
+        return session;
+    };
+
+    const showPreviewFailure = (session) => {
+        if (session !== previewSession) return;
+        window.clearTimeout(previewLoadTimer);
+        previewLoadTimer = null;
+        previewImage.onload = null;
+        previewImage.onerror = null;
+        previewImage.removeAttribute("src");
+        previewImage.hidden = true;
+        previewCanvas.hidden = true;
+        previewState.hidden = true;
+        previewUnavailable.hidden = false;
+        previewViewer.setAttribute("aria-busy", "false");
+        previewLoaded = false;
+        setZoomControls(false);
+    };
+
+    const loadPreview = (value, session) => {
+        if (session !== previewSession) return;
+        const url = safeExternalUrl(value);
+        if (!url) {
+            showPreviewFailure(session);
+            return;
+        }
+        openOriginal.href = url;
+        openOriginal.hidden = false;
+        previewImage.onload = () => {
+            if (session !== previewSession) return;
+            window.clearTimeout(previewLoadTimer);
+            previewLoadTimer = null;
+            previewLoaded = true;
+            previewState.hidden = true;
+            previewUnavailable.hidden = true;
+            previewCanvas.hidden = false;
+            previewImage.hidden = false;
+            previewViewer.setAttribute("aria-busy", "false");
+            window.requestAnimationFrame(() => {
+                if (session === previewSession) fitDocumentToView(true);
+            });
+        };
+        previewImage.onerror = () => showPreviewFailure(session);
+        previewLoadTimer = window.setTimeout(() => showPreviewFailure(session), 15000);
+        previewImage.src = url;
+    };
+
+    const hasUnsavedModalChange = () => Boolean(
+        canEditAttestation && activeRow && modalStatus
+        && modalStatus.value !== normalizeStatus(activeRow.attestation_status)
+    );
+
+    const closeAttestationModal = (force = false) => {
+        if (modal.hidden || savePending) return false;
+        if (!force && hasUnsavedModalChange() && !window.confirm("Discard the unsaved Attestation Status change?")) return false;
+        modal.hidden = true;
+        document.body.classList.remove("registrant-modal-open");
+        resetPreview();
+        activeRow = null;
+        const focusTarget = returnFocus;
+        returnFocus = null;
+        if (focusTarget && typeof focusTarget.focus === "function") focusTarget.focus();
+        return true;
+    };
+
+    const openAttestationModal = (row, trigger) => {
+        activeRow = row;
+        returnFocus = trigger;
+        const name = [row.first_name, row.last_name].filter(Boolean).join(" ");
+        modalName.textContent = name || "Unnamed registrant";
+        modalSatellite.textContent = displayValue(row.satellite);
+        modalPayment.replaceChildren(paymentBadge(row.payment_status));
+        setStatusBadge(modalCurrentStatus, row.attestation_status);
+        if (modalStatus) modalStatus.value = normalizeStatus(row.attestation_status);
+        setModalFeedback("");
+        const session = preparePreview(name);
+        modal.hidden = false;
+        document.body.classList.add("registrant-modal-open");
+        window.requestAnimationFrame(() => {
+            modalCloseButton.focus();
+            window.requestAnimationFrame(() => loadPreview(row.attestation_form, session));
+        });
+    };
+
+    const saveAttestationStatus = () => {
+        if (!canEditAttestation || !activeRow || !modalStatus || !modalSave) return;
+        const status = modalStatus.value;
+        if (status === normalizeStatus(activeRow.attestation_status)) {
+            closeAttestationModal(true);
+            return;
+        }
+        const updateUrl = root.dataset.updateUrl.replace("/0/attestation", `/${activeRow.id}/attestation`);
         const params = new URLSearchParams({batch: batchSelect.value});
-        select.disabled = true;
-        select.classList.add("is-saving");
-        showUpdateFeedback("Saving attestation status…");
+        savePending = true;
+        modalStatus.disabled = true;
+        modalSave.disabled = true;
+        modalSave.textContent = "Saving…";
+        setModalFeedback("Saving Attestation Status…");
         fetch(`${updateUrl}?${params}`, {
             method: "PATCH",
             credentials: "same-origin",
@@ -200,108 +500,83 @@
             .then((response) => response.ok
                 ? response.json()
                 : response.json().catch(() => ({})).then((payload) => Promise.reject(
-                    new Error(payload.error || "Attestation status could not be updated."),
+                    new Error(payload.error || "Attestation Status could not be updated."),
                 )))
             .then((payload) => {
-                select.dataset.previousValue = payload.status;
-                showUpdateFeedback(`Attestation status changed to ${payload.label}.`);
+                activeRow.attestation_status = payload.status;
+                activeRow.last_reviewed_by = payload.updated_by;
+                activeRow.last_reviewed_at = payload.updated_at;
+                showUpdateFeedback(`Attestation Status changed to ${payload.label}.`);
+                savePending = false;
+                closeAttestationModal(true);
                 loadData();
             })
             .catch((error) => {
-                select.value = previous;
-                showUpdateFeedback(error.message || "Attestation status could not be updated.", true);
+                setModalFeedback(error.message || "Attestation Status could not be updated.", true);
             })
             .finally(() => {
-                select.disabled = false;
-                select.classList.remove("is-saving");
+                savePending = false;
+                modalStatus.disabled = false;
+                modalSave.disabled = false;
+                modalSave.textContent = "Save Status";
             });
     };
 
+    const editIcon = () => {
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.setAttribute("width", "14");
+        svg.setAttribute("height", "14");
+        svg.setAttribute("fill", "none");
+        svg.setAttribute("stroke", "currentColor");
+        svg.setAttribute("stroke-width", "1.8");
+        svg.setAttribute("stroke-linecap", "round");
+        svg.setAttribute("stroke-linejoin", "round");
+        svg.setAttribute("aria-hidden", "true");
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", "M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z");
+        svg.append(path);
+        return svg;
+    };
+
     const renderCellValue = (cell, value, column, row) => {
-        if (column.renderer === "attestation_form_link") {
-            const url = safeExternalUrl(value);
-            if (!url) {
-                cell.textContent = "—";
-                return;
-            }
-            const link = document.createElement("a");
-            link.className = "registration-form-link";
-            link.href = url;
-            link.target = "_blank";
-            link.rel = "noopener noreferrer";
-            link.textContent = "View Form";
-            link.setAttribute("aria-label", "View Attestation Form (opens in a new tab)");
-            cell.append(link);
+        if (column.renderer === "attestation_review") {
+            const button = document.createElement("button");
+            const name = [row.first_name, row.last_name].filter(Boolean).join(" ") || "registrant";
+            button.type = "button";
+            button.className = "registration-form-button";
+            button.setAttribute("aria-haspopup", "dialog");
+            button.setAttribute("aria-label", `Review Attestation Form for ${name}`);
+            const label = document.createElement("span");
+            label.textContent = "Attestation Form";
+            button.append(label, editIcon());
+            button.addEventListener("click", () => openAttestationModal(row, button));
+            cell.append(button);
             return;
         }
         if (column.renderer === "attestation_status") {
-            const status = ["pending", "verified", "invalid"].includes(value) ? value : "pending";
-            if (!canEditAttestation) {
-                const badge = document.createElement("span");
-                badge.className = `registration-attestation-badge is-${status}`;
-                badge.textContent = status.charAt(0).toLocaleUpperCase() + status.slice(1);
-                cell.append(badge);
-                return;
-            }
-            const control = document.createElement("select");
-            control.className = `registration-attestation-select is-${status}`;
-            control.setAttribute("aria-label", `Attestation status for registration ${row.registration_code}`);
-            [["pending", "Pending"], ["verified", "Verified"], ["invalid", "Invalid"]]
-                .forEach(([optionValue, label]) => {
-                    const option = document.createElement("option");
-                    option.value = optionValue;
-                    option.textContent = label;
-                    option.selected = optionValue === status;
-                    control.append(option);
-                });
-            control.dataset.previousValue = status;
-            control.addEventListener("change", () => saveAttestationStatus(control, row));
-            cell.append(control);
-            return;
-        }
-        if (column.renderer === "payment_status") {
-            if (value === null || value === undefined || value === "") {
-                cell.textContent = "—";
-                return;
-            }
             const badge = document.createElement("span");
-            const normalized = String(value).toLocaleLowerCase();
-            badge.className = `registration-payment-badge${normalized.includes("validated") ? " is-validated" : normalized.includes("failed") || normalized.includes("cancel") ? " is-problem" : ""}`;
-            badge.textContent = String(value);
+            setStatusBadge(badge, value);
             cell.append(badge);
             return;
         }
-        const displayed = value === null || value === undefined || value === "" ? "—" : String(value);
+        if (column.renderer === "payment_status") {
+            cell.append(paymentBadge(value));
+            return;
+        }
+        const displayed = displayValue(value);
         cell.textContent = displayed;
         cell.title = displayed;
     };
 
-    const renderHeaders = () => {
+    const renderHeaders = (visibleColumns) => {
         tableHead.replaceChildren();
-        const groupRow = document.createElement("tr");
-        groupRow.className = "registrations-group-row";
-        const groups = [];
-        columns.forEach((column) => {
-            const last = groups[groups.length - 1];
-            if (last && last.name === column.group) last.count += 1;
-            else groups.push({name: column.group, count: 1});
-        });
-        groups.forEach((group) => {
-            const th = document.createElement("th");
-            th.colSpan = group.count;
-            th.textContent = group.name;
-            th.className = `registration-group-${group.name.toLocaleLowerCase()}`;
-            groupRow.append(th);
-        });
-        tableHead.append(groupRow);
-
         const headerRow = document.createElement("tr");
         let previousGroup = null;
-        columns.forEach((column, index) => {
+        visibleColumns.forEach((column, index) => {
             const th = document.createElement("th");
             if (index === 0) th.classList.add("sticky-key");
             if (previousGroup !== null && previousGroup !== column.group) th.classList.add("registration-group-start");
-            if (column.group === "Requirements") th.classList.add("registration-requirement-cell");
             const button = document.createElement("button");
             button.type = "button";
             button.disabled = !column.sortable;
@@ -325,16 +600,17 @@
     };
 
     const renderTable = (payload) => {
-        renderHeaders();
+        latestPayload = payload;
+        const visibleColumns = visibleTableColumns();
+        renderHeaders(visibleColumns);
         tableBody.replaceChildren();
         payload.rows.forEach((row) => {
             const tr = document.createElement("tr");
             let previousGroup = null;
-            columns.forEach((column, index) => {
+            visibleColumns.forEach((column, index) => {
                 const td = document.createElement("td");
                 if (index === 0) td.classList.add("sticky-key");
                 if (previousGroup !== null && previousGroup !== column.group) td.classList.add("registration-group-start");
-                if (column.group === "Requirements") td.classList.add("registration-requirement-cell");
                 renderCellValue(td, row[column.key], column, row);
                 tr.append(td);
                 previousGroup = column.group;
@@ -363,10 +639,13 @@
         pagination.append(makePageButton("Next", info.page + 1, !info.has_next));
 
         const hasRows = payload.rows.length > 0;
-        tableWrap.hidden = !hasRows;
+        const hasVisibleColumns = visibleColumns.length > 0;
+        tableWrap.hidden = !hasRows || !hasVisibleColumns;
         tableFooter.hidden = false;
-        stateMessage.hidden = hasRows;
-        if (!hasRows) {
+        stateMessage.hidden = hasRows && hasVisibleColumns;
+        if (hasRows && !hasVisibleColumns) {
+            stateMessage.textContent = "All column groups are hidden. Use Columns to show a group.";
+        } else if (!hasRows) {
             stateMessage.textContent = (filters.length || search.value.trim())
                 ? "No registrations match the current search and filters."
                 : "No registrations are available for this Event and Batch.";
@@ -374,9 +653,13 @@
         renderFilterChips();
     };
 
-    const renderSummary = (values) => {
+    const renderSummary = (values, quickFilterCounts) => {
         root.querySelectorAll("[data-summary]").forEach((element) => {
             const value = values && values[element.dataset.summary];
+            element.textContent = Number(value || 0).toLocaleString();
+        });
+        root.querySelectorAll("[data-attestation-quick-count]").forEach((element) => {
+            const value = quickFilterCounts && quickFilterCounts[element.dataset.attestationQuickCount];
             element.textContent = Number(value || 0).toLocaleString();
         });
     };
@@ -395,7 +678,7 @@
         });
         if (sort) params.set("sort", sort);
         if (filters.length) params.set("filters", JSON.stringify(filters));
-        fetch(`${root.dataset.dataUrl}?${params}`, {
+        return fetch(`${root.dataset.dataUrl}?${params}`, {
             headers: {Accept: "application/json"}, signal: requestController.signal,
         })
             .then((response) => response.ok ? response.json() : response.json().then((payload) => Promise.reject(new Error(payload.error || "Registrations could not be loaded."))))
@@ -409,7 +692,7 @@
                 page = payload.pagination.page;
                 root.querySelector("[data-reset-sort]").hidden = sort === defaultSort && direction === "asc";
                 if (changed) populateFilterFields(); else refreshFilterControls();
-                renderSummary(payload.summary);
+                renderSummary(payload.summary, payload.quick_filter_counts);
                 renderTable(payload);
                 updateUrl();
             })
@@ -423,6 +706,8 @@
             .finally(() => root.classList.remove("loading"));
     };
 
+    loadGroupPreference();
+    renderColumnGroupControls();
     readUrl();
     batchSelect.value = new URLSearchParams(window.location.search).get("batch") || "active";
     loadData(false);
@@ -453,15 +738,85 @@
         button.addEventListener("click", () => {
             filters = filters.filter((item) => item.field !== "attestation_status");
             if (button.dataset.attestationQuick !== "all") {
-                filters.push({
-                    field: "attestation_status",
-                    operator: "equals",
-                    value: button.dataset.attestationQuick,
-                });
+                filters.push({field: "attestation_status", operator: "equals", value: button.dataset.attestationQuick});
             }
             page = 1;
             loadData();
         });
+    });
+
+    columnsToggle.addEventListener("click", () => setColumnsMenuOpen(columnsMenu.hidden));
+    root.querySelector("[data-columns-close]").addEventListener("click", () => {
+        setColumnsMenuOpen(false);
+        columnsToggle.focus();
+    });
+    columnGroupControls.forEach((control) => {
+        control.addEventListener("change", () => {
+            groupVisibility[control.value] = control.checked;
+            saveGroupPreference();
+            if (latestPayload) renderTable(latestPayload);
+        });
+    });
+    root.querySelector("[data-reset-column-groups]").addEventListener("click", () => {
+        columnGroupOrder.forEach((group) => { groupVisibility[group] = true; });
+        saveGroupPreference();
+        renderColumnGroupControls();
+        if (latestPayload) renderTable(latestPayload);
+    });
+
+    modal.querySelectorAll("[data-attestation-close]").forEach((control) => {
+        control.addEventListener("click", () => closeAttestationModal());
+    });
+    zoomOutButton.addEventListener("click", () => changeZoom(-1));
+    zoomInButton.addEventListener("click", () => changeZoom(1));
+    fitButton.addEventListener("click", () => fitDocumentToView(true));
+    actualSizeButton.addEventListener("click", () => setManualZoom(1));
+    modalSave?.addEventListener("click", saveAttestationStatus);
+    modalStatus?.addEventListener("change", () => setModalFeedback(""));
+
+    if (typeof window.ResizeObserver === "function") {
+        const viewerResizeObserver = new window.ResizeObserver(() => {
+            if (!modal.hidden && previewLoaded && zoomMode === "fit") {
+                window.requestAnimationFrame(() => fitDocumentToView(false));
+            }
+        });
+        viewerResizeObserver.observe(previewViewer);
+    } else {
+        window.addEventListener("resize", () => {
+            if (!modal.hidden && previewLoaded && zoomMode === "fit") fitDocumentToView(false);
+        });
+    }
+
+    document.addEventListener("click", (event) => {
+        if (!columnsMenu.hidden && !event.target.closest(".admin-column-control")) setColumnsMenuOpen(false);
+    });
+    document.addEventListener("keydown", (event) => {
+        if (!modal.hidden) {
+            if (event.key === "Escape") {
+                event.preventDefault();
+                closeAttestationModal();
+                return;
+            }
+            if (event.key !== "Tab") return;
+            const focusable = [...modalDialog.querySelectorAll(
+                "a[href], button:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex='-1'])",
+            )].filter((element) => !element.hidden);
+            if (!focusable.length) return;
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+            return;
+        }
+        if (event.key === "Escape" && !columnsMenu.hidden) {
+            setColumnsMenuOpen(false);
+            columnsToggle.focus();
+        }
     });
     window.addEventListener("popstate", () => { readUrl(); loadData(false); });
 })();

@@ -9,12 +9,36 @@ from event `registrants` and the curated participant identity model.
   always `admin`, and it is always approved.
 - `user`: a normal operator created through public registration. Every new
   account starts as `pending` and cannot enter the application until approved.
+- `registration`: operational event-registration staff. This role is assigned
+  only by the administrator and has deny-by-default access to Dashboard and
+  Registrations, including attestation verification.
 
 Usernames are normalized to lowercase and are unique under a case-insensitive
 MySQL collation. The database reserves every case variant of `admin` and checks
-that no other username can have the `admin` role. The web application has no
-role selector, promotion endpoint, admin registration route, or admin deletion
-operation.
+that no other username can have the `admin` role. Public registration never
+accepts a role selection. The administrator can select Standard User or
+Registration during approval and can change an existing non-admin account
+between those two roles. The web application has no admin promotion, admin
+registration, or admin deletion operation.
+
+## Role matrix
+
+| Capability | Administrator | Registration |
+|---|---:|---:|
+| Dashboard | Yes | Yes, read-only |
+| Registrations | Yes | Yes |
+| Edit attestation verification | Yes | Yes |
+| Analytics and Compare | Yes | No |
+| Data Quality | Yes | No |
+| Admin Tables and source lineage | Yes | No |
+| Imports and batch administration | Yes | No |
+| Event and Participant Target settings | Yes | No |
+| Satellite pages and Dataset settings | Yes | No |
+| User approval and role management | Yes | No |
+
+The existing `user` role retains its established approved-user behavior. It is
+not silently converted to Registration, and the optional standard-user mutation
+configuration never grants privileges to a Registration operator.
 
 ## First-time administrator initialization
 
@@ -66,32 +90,31 @@ authentication version, invalidating existing admin sessions.
 1. A user opens `/register` and provides a username and strong password.
 2. The server creates a `user/pending` account and does not log it in.
 3. Valid credentials for a pending account produce an awaiting-approval notice.
-4. The admin opens **Users** in the application navigation and selects
-   **Approve**.
+4. The admin opens **Users**, chooses **Standard User** or **Registration**, and
+   selects **Approve**.
 5. Approval records the timestamp and administrator ID. The user can then log
    in normally.
 
 Approval and user-management endpoints enforce the admin role on the server.
-Existing event dashboards, imports, Data Quality endpoints, settings, and APIs
-all require an approved authenticated account. Existing PII-bearing Admin
-Tables additionally require the administrator role.
-The PII-bearing Registrations page, data endpoint, and Phase 2 attestation
-verification endpoint use an administrator-only role boundary. The PATCH route
-also requires an attributable authenticated administrator and global CSRF
-validation; enabling authentication-disabled local reads does not permit an
-anonymous verification update.
+The centralized capability map grants Registration only `dashboard.view`,
+`registrations.view`, and `registrations.attestation.edit`. A global
+Registration-role endpoint allow-list then denies every unlisted route with
+HTTP 403, while the listed Registrations routes still validate Event, batch,
+and registrant ownership. Sidebar visibility is presentation only and is not
+the security boundary.
 
-The Phase 3 permission review retains the same administrator-only boundary for
-viewing and editing. The current role model has no dedicated Registrations
-reviewer permission, and Phase 3 does not broaden access by coupling it to the
-separate standard-user Event/import mutation setting. A future split between
-view and edit permissions requires an explicit authorization design and
-product-owner approval.
+The attestation PATCH route requires global CSRF validation and supplies the
+reviewer ID and timestamp from the authenticated server context. Enabling
+authentication-disabled local reads never permits an anonymous verification
+update. Imported registration fields remain immutable.
 
-Phase 3 Analytics pages and aggregate APIs follow the same approved-user access
-boundary as the normal Event dashboard. They expose aggregates only and require
-explicit Event scope. The current application has no per-user Event ACL, so an
-approved operator can view every normal Event dashboard. Phase 3 introduces no
+Phase 3 Analytics pages and aggregate APIs remain available under the existing
+administrator/standard-user boundary, but are expressly denied to Registration.
+The current application has no per-user Event ACL, so the role does not invent
+one: an approved Registration operator can select the same project Events as
+other approved operators. Within every selected Event, active and historical
+batch identifiers and registration records are validated against that Event;
+cross-Event batch/registrant manipulation is rejected. Phase 3 introduces no
 row-level export permission: downloadable reports remain disabled pending the
 separate decision in `PHASE_3_DECISIONS.md`. `REPORTING.md` records the required
 future server-side permission and safety contract. Admin Tables remains
@@ -118,8 +141,10 @@ secure cookies, authentication, CSRF, MySQL, and Alembic head before serving.
 Safe relative-only login redirects continue to work through the trusted proxy.
 
 While the standard-user settings/import policy is unresolved, production and
-staging default those mutations to administrator-only. This does not weaken the
-permanent administrator-only boundaries for Users, Admin Tables, or batch deletion.
+staging default those mutations to administrator-only. Registration is always
+excluded from that optional policy. Users, Admin Tables, Event configuration,
+imports/batches, Satellite Dataset settings, and all advanced analytical
+modules remain denied to Registration.
 
 ## Tests
 
@@ -132,3 +157,10 @@ Run the complete suite against the dedicated MySQL test schema:
 
 `MYSQL_TEST_DATABASE_URL` must point to a disposable database whose name
 contains `test`; the suite recreates its application tables.
+
+The 2026-08-31 Registration-role verification passed **104 SQLite tests** and
+the identical **104-test disposable MySQL 8.4 suite**. It also passed a fresh
+MySQL Alembic upgrade to `c8f5d2b0e417`, the role revision's
+downgrade/re-upgrade contract, `alembic check`, Ruff, compilation, production
+configuration validation, and local Gunicorn readiness/graceful shutdown.
+Hosted CI was not executed from the local working tree.

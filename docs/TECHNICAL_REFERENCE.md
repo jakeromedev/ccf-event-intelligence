@@ -103,7 +103,7 @@ Database characteristics:
   commit and rollback behavior.
 - Alembic exclusively owns schema creation and upgrades; application startup
   does not create or modify tables.
-- The current Alembic head is `a9d3c7e5f102`.
+- The current Alembic head is `c8f5d2b0e417`.
 - Application timestamps are stored as naive MySQL `DATETIME` values. Database
   and application hosts should use the same operational timezone convention.
 
@@ -205,6 +205,13 @@ The MySQL test setup drops and recreates application tables. Never point
   categories: lowercase, uppercase, digits, and symbols.
 - The built-in `admin` username is reserved and is initialized only through the
   terminal command.
+- Authorization uses centralized application capabilities. The `registration`
+  role is deny-by-default and receives only Dashboard read access,
+  Registrations access, and attestation-verification editing. Its endpoint
+  allow-list independently blocks Analytics, Data Quality, Admin Tables,
+  satellites, imports/batches, Event settings, and user administration.
+- Public registration always creates `user/pending`; only the administrator can
+  assign `registration` during approval or later role management.
 
 ## Local and sensitive files
 

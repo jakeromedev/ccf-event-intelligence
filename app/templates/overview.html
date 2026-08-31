@@ -59,7 +59,7 @@
 {% endblock %}
 
 {% block content %}
-<section class="phase1-settings panel" id="event-settings" aria-labelledby="event-settings-title">
+{% if event_settings_visible %}<section class="phase1-settings panel" id="event-settings" aria-labelledby="event-settings-title">
     <form id="event-settings-form" method="post" action="{{ url_for('dashboard.update_event_settings', event_id=event['id']) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <header class="phase1-section-heading settings-heading">
@@ -86,13 +86,13 @@
             </aside>
         </div>
     </form>
-</section>
+</section>{% endif %}
 
 {% if not active_batch %}
 <aside class="phase1-import-empty">
     {{ icon('imports', 20) }}
     <div><strong>No active dataset for this event</strong><span>Metrics remain at zero until the three required exports are imported.</span></div>
-    <a class="button secondary" href="{{ url_for('dashboard.event_imports', event_id=event['id']) }}">Open Imports</a>
+    {% if imports_allowed %}<a class="button secondary" href="{{ url_for('dashboard.event_imports', event_id=event['id']) }}">Open Imports</a>{% endif %}
 </aside>
 {% endif %}
 

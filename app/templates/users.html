@@ -19,21 +19,36 @@
     {% if users %}
         <div class="users-table-wrap">
             <table class="users-table">
-                <thead><tr><th>Username</th><th>Status</th><th>Registered</th><th>Approved</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+                <thead><tr><th>Username</th><th>Status</th><th>Role</th><th>Registered</th><th>Approved</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
                 <tbody>
                 {% for user in users %}
                     <tr>
-                        <td><strong>{{ user.username }}</strong><small>Standard user</small></td>
+                        <td><strong>{{ user.username }}</strong><small>{{ 'Registration staff' if user.role == 'registration' else 'Standard user' }}</small></td>
                         <td><span class="user-status {{ user.status }}"><i></i>{{ user.status|capitalize }}</span></td>
+                        <td>{{ 'Registration' if user.role == 'registration' else 'Standard User' }}</td>
                         <td>{{ user.created_at|datetime_short }}</td>
                         <td>{{ user.approved_at|datetime_short if user.approved_at else '—' }}</td>
                         <td class="users-action">
                             {% if user.status == 'pending' %}
                                 <form method="post" action="{{ url_for('auth.approve_user', user_id=user.id) }}">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <label class="visually-hidden" for="approval-role-{{ user.id }}">Role</label>
+                                    <select id="approval-role-{{ user.id }}" name="role">
+                                        <option value="user" {{ 'selected' if user.role == 'user' else '' }}>Standard User</option>
+                                        <option value="registration" {{ 'selected' if user.role == 'registration' else '' }}>Registration</option>
+                                    </select>
                                     <button class="button primary compact" type="submit">{{ icon('active', 14) }} Approve</button>
                                 </form>
-                            {% else %}<span class="approved-label">Approved</span>{% endif %}
+                            {% else %}
+                                <form method="post" action="{{ url_for('auth.update_user_role', user_id=user.id) }}">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <label class="visually-hidden" for="user-role-{{ user.id }}">Role</label>
+                                    <select id="user-role-{{ user.id }}" name="role" onchange="this.form.submit()">
+                                        <option value="user" {{ 'selected' if user.role == 'user' else '' }}>Standard User</option>
+                                        <option value="registration" {{ 'selected' if user.role == 'registration' else '' }}>Registration</option>
+                                    </select>
+                                </form>
+                            {% endif %}
                         </td>
                     </tr>
                 {% endfor %}

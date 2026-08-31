@@ -88,6 +88,10 @@ separately and do not block the current phase.
 - [x] Provide login, logout, registration, pending approval, and administrator approval.
 - [x] Restrict application access to approved users.
 - [x] Restrict Admin Tables, user approval, and batch deletion to the administrator.
+- [x] Provide the deny-by-default Registration role with Dashboard read access,
+  Registrations operational access, and attestation verification editing only.
+- [x] Deny Registration-role access to Analytics, Data Quality, Admin Tables,
+  imports/batches, Event/Satellite Dataset settings, and user administration.
 - [x] Hash passwords with Argon2id.
 - [x] Protect state-changing requests with CSRF validation.
 - [x] Apply session hardening, login lockout, and safe redirect validation.

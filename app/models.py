@@ -70,11 +70,13 @@ class User(UserMixin, Base):
 
     __tablename__ = "users"
     __table_args__ = (
-        CheckConstraint("role IN ('admin','user')", name="ck_users_role"),
+        CheckConstraint(
+            "role IN ('admin','user','registration')", name="ck_users_role"
+        ),
         CheckConstraint("status IN ('pending','approved')", name="ck_users_status"),
         CheckConstraint(
             "(role = 'admin' AND username = 'admin' AND status = 'approved') OR "
-            "(role = 'user' AND username <> 'admin')",
+            "(role IN ('user','registration') AND username <> 'admin')",
             name="ck_users_single_admin_identity",
         ),
         CheckConstraint(

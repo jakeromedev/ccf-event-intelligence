@@ -7,7 +7,13 @@ from flask import Blueprint, abort, current_app, flash, jsonify, redirect, rende
 from flask_login import current_user
 from sqlalchemy.exc import IntegrityError
 
-from .auth import admin_required, event_mutation_required
+from .auth import (
+    admin_required,
+    can_edit_attestation_verification,
+    can_view_admin_tables,
+    can_view_registrations,
+    event_mutation_required,
+)
 from .analytics import AnalyticsFilterError, compare_events, event_analytics, historical_trends
 from .aggregation import (
     active_batch,
@@ -51,7 +57,7 @@ def can_access_admin_tables():
     if not current_app.config.get("ADMIN_TABLES_ENABLED", True):
         return False
     if not current_app.config.get("AUTHENTICATION_DISABLED", False):
-        if not current_user.is_authenticated or not current_user.is_admin:
+        if not can_view_admin_tables():
             return False
     authorizer = current_app.config.get("ADMIN_TABLES_AUTHORIZER")
     return True if authorizer is None else bool(authorizer(request))
@@ -68,10 +74,8 @@ def admin_tables_access_required(view):
 
 
 def can_access_registrations():
-    """Keep the new PII-bearing operational table administrator-only."""
-    if current_app.config.get("AUTHENTICATION_DISABLED", False):
-        return True
-    return bool(current_user.is_authenticated and current_user.is_admin)
+    """Allow only explicitly authorized operational registration users."""
+    return can_view_registrations()
 
 
 def registrations_access_required(view):
@@ -82,11 +86,6 @@ def registrations_access_required(view):
         return view(*args, **kwargs)
 
     return protected
-
-
-def can_edit_attestation_verification():
-    """Verification changes require an attributable administrator account."""
-    return bool(current_user.is_authenticated and current_user.is_admin)
 
 
 def get_event_or_404(event_id):

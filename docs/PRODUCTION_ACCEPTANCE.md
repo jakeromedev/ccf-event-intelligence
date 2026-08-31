@@ -78,6 +78,23 @@ read access with administrator-only Event settings, Satellite Dataset mutation,
 and import validation/processing/activation. Test both the approved policy and
 server-side denial; do not change it based only on UAT preference.
 
+## Registration-role UAT
+
+- [ ] Administrator assigns **Registration** during approval and to an existing
+  non-admin account; public registration cannot self-select the role.
+- [ ] Login lands on Events/Dashboard and the Event sidebar contains only
+  **Dashboard** and **Registrations** plus ordinary account actions.
+- [ ] Dashboard aggregates load, while Event Date, Participant Target,
+  Satellite Dataset, create/import, and other configuration actions are absent.
+- [ ] Registrations page/data search, filtering, sorting, pagination, logistics,
+  safe form links, and Payment Status work within the selected Event/batch.
+- [ ] Pending/Verified/Invalid updates succeed and attribute the authenticated
+  Registration operator and server timestamp.
+- [ ] Direct Analytics, Compare, Satellite, Data Quality, Admin Tables/source
+  lineage, Imports/batches, settings, and Users requests return HTTP 403.
+- [ ] Cross-Event batch and registrant URL manipulation is rejected.
+- [ ] Administrator access to every existing module and action remains intact.
+
 ## Acceptance decision
 
 The final production release approver is **Decision Required**. Acceptance must
