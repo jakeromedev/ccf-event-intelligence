@@ -1879,12 +1879,24 @@ body.sidebar-collapsed .nav-module-link > .nav-module-icon { width: 32px; height
 }
 @keyframes admin-loading { from { transform: translateX(-65%); } to { transform: translateX(65%); } }
 .admin-table-heading { min-height: 92px; padding: 18px 20px 14px; display: flex; align-items: center; justify-content: space-between; gap: 24px; border-bottom: 1px solid #e4ecee; }
-.admin-table-heading-controls { min-height: 62px; padding-block: 12px; justify-content: flex-end; }
+.admin-table-heading-controls { min-height: 62px; padding-block: 12px; justify-content: space-between; }
 .admin-table-heading > div { min-width: 0; }
 .admin-breadcrumb { margin: 0 0 3px; color: #6d8490; font-size: 9px; font-weight: 650; text-transform: uppercase; letter-spacing: .05em; }
 .admin-breadcrumb span { margin: 0 4px; color: #a3b3ba; }
 .admin-table-heading h1 { margin: 0; color: #102d3e; font-size: 20px; line-height: 1.15; }
 .admin-table-heading > div > p:last-child { margin: 4px 0 0; color: #6a808b; font-size: 10px; }
+.page-module-panel { overflow: hidden; }
+.page-module-panel + .panel,
+.page-module-panel + form.panel,
+.page-module-panel + aside.panel { margin-top: 14px; }
+.events-panel { overflow: hidden; }
+.events-panel .events-section { padding: 20px; }
+.events-panel .section-heading { margin-top: 0; }
+.create-event-card.admin-table-panel { padding: 0; overflow: hidden; }
+.create-event-body { padding: 30px 38px 38px; }
+.create-event-body > p:not(.eyebrow) { margin: 0 0 26px; color: var(--muted); }
+.error-panel { overflow: hidden; }
+.error-reference { margin: 0; padding: 18px 20px; color: var(--b1g-text-muted); font-size: 10px; }
 .admin-batch-selector { min-width: 205px; display: grid; gap: 5px; color: #59717d; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
 .admin-batch-selector select,
 .admin-table-toolbar input,
@@ -2123,6 +2135,8 @@ body.admin-drawer-open { overflow: hidden; }
     .admin-columns-menu { position: fixed; inset: auto 12px 12px; width: auto; max-height: 72vh; }
     .admin-filter-fields { grid-template-columns: 1fr; }
     .admin-pagination-controls { align-items: flex-start; flex-direction: column; }
+    .events-panel .events-section { padding: 14px; }
+    .create-event-body { padding: 24px 20px 28px; }
     .admin-pagination-controls nav { max-width: 100%; overflow-x: auto; }
     .attestation-review-context { padding: 8px 12px; grid-template-columns: 1fr; }
     .attestation-preview-panel { min-height: 460px; padding: 14px 12px; }

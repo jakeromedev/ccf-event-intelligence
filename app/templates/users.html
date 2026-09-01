@@ -1,19 +1,17 @@
 {% extends "base.html" %}
 {% from "_icons.html" import icon %}
+{% from "_page_header.html" import render_application_header %}
 {% block title %}Users · {{ app_name }}{% endblock %}
-{% block page_header %}
-<section class="overview-header users-header">
-    <div class="overview-header-content">
-        <p class="eyebrow">Administration</p>
-        <h1>Users</h1>
-        <p class="overview-description">Review registrations and approve access to the application.</p>
-    </div>
-</section>
-{% endblock %}
+{% block application_header_page %}{{ render_application_header('Users', 'Review account requests, approvals, and application access roles.') }}{% endblock %}
+{% block page_header %}{% endblock %}
 {% block content %}
 <section class="panel users-panel">
-    <header class="users-panel-heading">
-        <div><h2>Registered users</h2><p>Public registrations remain pending until approved here.</p></div>
+    <header class="users-panel-heading admin-table-heading">
+        <div>
+            <p class="admin-breadcrumb">Administration <span>/</span> Users</p>
+            <h1>Registered Users</h1>
+            <p>Public registrations remain pending until approved here.</p>
+        </div>
         <span>{{ users|length }} account{{ '' if users|length == 1 else 's' }}</span>
     </header>
     {% if users %}

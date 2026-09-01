@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_icons.html" import icon %}
-{% from "_page_header.html" import render_page_header %}
+{% from "_page_header.html" import render_application_header, render_panel_header %}
 
 {% macro quality_url(page_number) -%}
 {{ url_for('dashboard.event_quality', event_id=event['id'], q=quality.filters.query, severity=quality.filters.severity, category=quality.filters.category, entity=quality.filters.entity, page=page_number, per_page=quality.pagination.per_page, sort=quality.filters.sort, direction=quality.filters.direction, duplicate_page=curation.pagination.duplicate_groups.page, incomplete_page=curation.pagination.incomplete_identity.page, satellite_page=curation.pagination.satellites.page, multiple_page=curation.pagination.multi_satellite.page) }}#quality-issues
@@ -45,11 +45,13 @@
 
 {% block title %}Data Quality · {{ app_name }}{% endblock %}
 
-{% block page_header %}
-{{ render_page_header('Data Quality', event, active_batch, 'Review data issues and validation results from the active dataset.', variant='workspace', header_class='quality-header') }}
-{% endblock %}
+{% block application_header_page %}{{ render_application_header('Data Quality', 'Review validation findings and curation quality in the active dataset.') }}{% endblock %}
+{% block page_header %}{% endblock %}
 
 {% block content %}
+<section class="admin-table-panel page-module-panel">
+    {{ render_panel_header('Event Operations', 'Data Quality', 'Review data issues and validation results from the active dataset.') }}
+</section>
 {% if not active_batch %}
     {% include "_empty.html" %}
 {% else %}

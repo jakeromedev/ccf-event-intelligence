@@ -93,6 +93,44 @@ def write_csv(path, fields, rows):
         writer.writerows(rows)
 
 
+class HeaderDesignContractTests(unittest.TestCase):
+    def test_authenticated_pages_use_shared_application_and_panel_headers(self):
+        template_names = (
+            "admin_table.html",
+            "analytics.html",
+            "analytics_compare.html",
+            "data_quality.html",
+            "error.html",
+            "event_new.html",
+            "events.html",
+            "imports.html",
+            "overview.html",
+            "registrations.html",
+            "satellite_registrants.html",
+            "satellites.html",
+            "users.html",
+        )
+        for template_name in template_names:
+            template = (ROOT / "app" / "templates" / template_name).read_text()
+            with self.subTest(template=template_name):
+                self.assertIn("block application_header_page", template)
+                self.assertIn("block page_header", template)
+                self.assertTrue(
+                    "admin-table-heading" in template
+                    or "render_panel_header" in template
+                )
+                self.assertNotIn("render_page_header(", template)
+
+        styles = (ROOT / "app" / "static" / "app.css").read_text()
+        for selector in (
+            ".application-header-page",
+            ".admin-table-panel",
+            ".admin-table-heading",
+            ".admin-breadcrumb",
+        ):
+            self.assertIn(selector, styles)
+
+
 class ClassifierTests(unittest.TestCase):
     def test_approved_precedence_and_categories(self):
         cases = [
@@ -1724,8 +1762,8 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertIn(b'class="application-header-page"', page.data)
         self.assertIn(b"Inspect complete imported source records without deduplication", page.data)
         self.assertNotIn(b"overview-header admin-tables-header", page.data)
-        self.assertNotIn(b'class="admin-breadcrumb"', page.data)
-        self.assertEqual(1, page.data.count(b"<h1"))
+        self.assertIn(b'class="admin-breadcrumb"', page.data)
+        self.assertEqual(2, page.data.count(b"<h1"))
         self.assertNotIn(b"Registrant-Satellite Links", page.data)
 
         overview_page = client.get("/events/{}".format(self.event_a))

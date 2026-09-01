@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_page_header.html" import render_page_header %}
+{% from "_page_header.html" import render_application_header, render_panel_header %}
 
 {% macro count_value(value) -%}
 {{ value.display }}
@@ -7,11 +7,13 @@
 
 {% block title %}Analytics · {{ app_name }}{% endblock %}
 
-{% block page_header %}
-{{ render_page_header('Advanced Analytics', event, active_batch, 'Composable, privacy-aware analytics over the active Event snapshot.', variant='workspace', header_class='analytics-header') }}
-{% endblock %}
+{% block application_header_page %}{{ render_application_header('Analytics', 'Explore privacy-aware participation trends and filtered event insights.') }}{% endblock %}
+{% block page_header %}{% endblock %}
 
 {% block content %}
+<section class="admin-table-panel page-module-panel">
+    {{ render_panel_header('Event Insights', 'Advanced Analytics', 'Composable, privacy-aware analytics over the active event snapshot.') }}
+</section>
 {% if not active_batch %}
     {% include "_empty.html" %}
 {% else %}

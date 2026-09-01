@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_icons.html" import icon %}
-{% from "_page_header.html" import render_page_header %}
+{% from "_page_header.html" import render_application_header, render_panel_header %}
 
 {% macro sort_url(field) -%}
 {% set next_direction = 'asc' if history.filters.sort != field or history.filters.direction == 'desc' else 'desc' %}
@@ -17,12 +17,12 @@
 
 {% block title %}Imports · {{ app_name }}{% endblock %}
 
-{% block page_header %}
-{{ render_page_header('Event Imports', event, active_batch, 'Upload the required CSV exports, validate the files, and activate the dataset for this event.', variant='workspace', header_class='imports-header') }}
-{% endblock %}
+{% block application_header_page %}{{ render_application_header('Imports', 'Upload, validate, activate, and review event registration datasets.') }}{% endblock %}
+{% block page_header %}{% endblock %}
 
 {% block content %}
 <form class="panel import-upload-panel" action="{{ url_for('dashboard.validate_import', event_id=event['id']) }}" method="post" enctype="multipart/form-data" id="import-form">
+    {{ render_panel_header('Event Operations', 'Imports', 'Upload the required CSV exports, validate the files, and activate the event dataset.') }}
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <header class="imports-section-heading">
         <div><h2><span>1.</span> Upload Complete Export Set</h2><p>All 3 files are required and validated together.</p></div>

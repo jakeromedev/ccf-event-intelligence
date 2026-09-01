@@ -1,11 +1,19 @@
 {% extends "base.html" %}
+{% from "_page_header.html" import render_application_header %}
 
 {% block title %}Service error · {{ app_name }}{% endblock %}
+{% block application_header_page %}{{ render_application_header('Service Error', 'The requested operation could not be completed safely.') }}{% endblock %}
+{% block page_header %}{% endblock %}
 
 {% block content %}
-<section class="panel empty-state">
-    <h1>We could not complete that request.</h1>
-    <p>The service recorded the failure without exposing application or personal data.</p>
-    {% if request_id %}<p>Reference: <code>{{ request_id }}</code></p>{% endif %}
+<section class="admin-table-panel error-panel">
+    <header class="admin-table-heading">
+        <div>
+            <p class="admin-breadcrumb">Application <span>/</span> Service Error</p>
+            <h1>We could not complete that request.</h1>
+            <p>The service recorded the failure without exposing application or personal data.</p>
+        </div>
+    </header>
+    {% if request_id %}<p class="error-reference">Reference: <code>{{ request_id }}</code></p>{% endif %}
 </section>
 {% endblock %}

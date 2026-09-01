@@ -1,17 +1,20 @@
 {% extends "base.html" %}
 {% from "_icons.html" import icon %}
+{% from "_page_header.html" import render_application_header, render_panel_header %}
 {% block title %}Events · {{ app_name }}{% endblock %}
+{% block application_header_page %}{{ render_application_header('Events', 'Create and manage event workspaces and their registration datasets.') }}{% endblock %}
+{% block page_header %}{% endblock %}
 {% block content %}
-<section class="events-hero">
-    <div>
-        <p class="hero-kicker">{{ app_name }}</p>
-        <h2>Event Dashboard</h2>
-        <p>Create an event, upload its registration exports, and view attendance and church-affiliation insights in one place.</p>
-    </div>
-    {% if event_creation_allowed %}<a class="button hero-button" href="{{ url_for('dashboard.new_event') }}">{{ icon('plus', 18) }} Create Event</a>{% endif %}
-</section>
-
-<section class="events-section">
+<section class="admin-table-panel events-panel">
+    <header class="admin-table-heading">
+        <div>
+            <p class="admin-breadcrumb">Application <span>/</span> Events</p>
+            <h1>Events</h1>
+            <p>Create an event, upload registration exports, and review event insights.</p>
+        </div>
+        {% if event_creation_allowed %}<a class="button primary" href="{{ url_for('dashboard.new_event') }}">{{ icon('plus', 18) }} Create Event</a>{% endif %}
+    </header>
+<div class="events-section">
     <div class="section-heading">
         <div><p class="eyebrow">Event management</p><h2>Your Events</h2></div>
         {% if event_summaries %}<span>{{ event_summaries|length }} event{{ '' if event_summaries|length == 1 else 's' }}</span>{% endif %}
@@ -50,5 +53,6 @@
             {% if event_creation_allowed %}<a class="button primary" href="{{ url_for('dashboard.new_event') }}">{{ icon('plus', 17) }} Create Event</a>{% endif %}
         </div>
     {% endif %}
+</div>
 </section>
 {% endblock %}

@@ -1,5 +1,22 @@
 {% from "_icons.html" import icon %}
 
+{% macro render_application_header(title, description) -%}
+<div class="application-header-page">
+    <h1><span class="application-header-module">{{ title }}</span></h1>
+    <p>{{ description }}</p>
+</div>
+{%- endmacro %}
+
+{% macro render_panel_header(section, title, description, heading_id=none) -%}
+<header class="admin-table-heading">
+    <div>
+        <p class="admin-breadcrumb">{{ section }} <span>/</span> {{ title }}</p>
+        <h1{% if heading_id %} id="{{ heading_id }}"{% endif %}>{{ title }}</h1>
+        <p>{{ description }}</p>
+    </div>
+</header>
+{%- endmacro %}
+
 {% macro render_page_header(title, event=none, active_batch=none, description=none, subtitle=none, variant='standard', header_class='', action_form_id=none, action_label=none) -%}
 {% if variant == 'workspace' %}
 <header class="overview-header{% if header_class %} {{ header_class }}{% endif %}">

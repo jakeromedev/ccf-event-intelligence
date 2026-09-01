@@ -1,9 +1,13 @@
 {% extends "base.html" %}
-{% from "_page_header.html" import render_page_header %}
+{% from "_page_header.html" import render_application_header, render_panel_header %}
 
 {% block title %}Compare Events · {{ app_name }}{% endblock %}
-{% block page_header %}{{ render_page_header('Compare Events', description='Explicit, aggregate-only comparison across selected Events.') }}{% endblock %}
+{% block application_header_page %}{{ render_application_header('Compare Events', 'Compare aggregate participation metrics across explicitly selected events.') }}{% endblock %}
+{% block page_header %}{% endblock %}
 {% block content %}
+<section class="admin-table-panel page-module-panel">
+    {{ render_panel_header('Event Insights', 'Compare Events', 'Explicit, aggregate-only comparison across selected events.') }}
+</section>
 <section class="analytics-compare-layout">
     <form class="analytics-panel panel analytics-compare-form" method="get">
         <header><p class="eyebrow">Event scope</p><h2>Select 2–10 Events</h2><p>Selections are always explicit. Cross-Event person matching is not performed.</p></header>

@@ -1,11 +1,14 @@
 {% extends "base.html" %}
 {% from "_icons.html" import icon %}
-{% from "_page_header.html" import render_page_header %}
+{% from "_page_header.html" import render_application_header, render_panel_header %}
 {% block title %}Create Event · {{ app_name }}{% endblock %}
-{% block page_header %}{{ render_page_header('Create Event', event, active_batch) }}{% endblock %}
+{% block application_header_page %}{{ render_application_header('Create Event', 'Start a new event workspace for imports, registration operations, and reporting.') }}{% endblock %}
+{% block page_header %}{% endblock %}
 {% block content %}
 <section class="create-event-wrap">
-    <div class="create-event-card panel">
+    <div class="create-event-card admin-table-panel">
+        {{ render_panel_header('Event Management', 'Create Event', 'Name the event now; source details will be detected during import.') }}
+        <div class="create-event-body">
         <span class="form-icon">{{ icon('events', 25) }}</span>
         <p class="eyebrow">New event</p>
         <h2>Name your event</h2>
@@ -19,6 +22,7 @@
                 <button class="button primary" type="submit">Create Event {{ icon('arrow', 17) }}</button>
             </div>
         </form>
+        </div>
     </div>
 </section>
 {% endblock %}

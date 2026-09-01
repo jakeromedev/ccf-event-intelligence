@@ -1,20 +1,11 @@
 {% extends "base.html" %}
 {% from "_icons.html" import icon %}
-{% from "_page_header.html" import render_page_header %}
+{% from "_page_header.html" import render_application_header %}
 
 {% block title %}Satellite Registrants · {{ app_name }}{% endblock %}
 
-{% block page_header %}
-{{ render_page_header(
-    'Satellite Registrants',
-    event,
-    active_batch,
-    ('Participant roster for this ' ~ satellite.scope|capitalize ~ ' Satellite.') if satellite else 'Satellite participant roster.',
-    subtitle=satellite.satellite_name if satellite else event['name'],
-    variant='workspace',
-    header_class='satellite-header'
-) }}
-{% endblock %}
+{% block application_header_page %}{{ render_application_header('Satellite Registrants', 'Review the participant roster for a selected satellite.') }}{% endblock %}
+{% block page_header %}{% endblock %}
 
 {% block content %}
 {% if not active_batch %}
@@ -43,9 +34,10 @@
     </section>
 
     <section class="participant-list-panel panel" id="participant-list">
-        <header class="participant-list-heading">
+        <header class="participant-list-heading admin-table-heading">
             <div>
-                <h2>{{ satellite.satellite_name }}</h2>
+                <p class="admin-breadcrumb">Event Insights <span>/</span> Satellite Registrants</p>
+                <h1>{{ satellite.satellite_name }}</h1>
                 <p>{{ satellite.scope_label }} · Names only; contact information is not displayed.</p>
             </div>
             <label class="page-size">

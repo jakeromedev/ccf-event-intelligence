@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_icons.html" import icon %}
-{% from "_page_header.html" import render_page_header %}
+{% from "_page_header.html" import render_application_header %}
 
 {% macro metric_card(label, value, icon_name, tone, note) -%}
 <article class="phase1-kpi-card {{ tone }}">
@@ -50,15 +50,20 @@
 
 {% block title %}Event Dashboard · {{ app_name }}{% endblock %}
 
-{% block page_header %}
-{% if event_mutations_allowed %}
-{{ render_page_header('Event Dashboard', event, active_batch, 'Overview and participant profile insights.', variant='workspace', action_form_id='event-settings-form', action_label='Save Changes') }}
-{% else %}
-{{ render_page_header('Event Dashboard', event, active_batch, 'Overview and participant profile insights.', variant='workspace') }}
-{% endif %}
-{% endblock %}
+{% block application_header_page %}{{ render_application_header('Dashboard', 'Review registration progress, participant profiles, and event targets.') }}{% endblock %}
+{% block page_header %}{% endblock %}
 
 {% block content %}
+<section class="admin-table-panel page-module-panel">
+    <header class="admin-table-heading">
+        <div>
+            <p class="admin-breadcrumb">Event Operations <span>/</span> Dashboard</p>
+            <h1>Event Dashboard</h1>
+            <p>Overview and participant profile insights for the selected event dataset.</p>
+        </div>
+        {% if event_mutations_allowed and event_settings_visible %}<button class="button primary" type="submit" form="event-settings-form" aria-label="Save Changes">{{ icon('save', 17) }} <span>Save Changes</span></button>{% endif %}
+    </header>
+</section>
 {% if event_settings_visible %}<section class="phase1-settings panel" id="event-settings" aria-labelledby="event-settings-title">
     <form id="event-settings-form" method="post" action="{{ url_for('dashboard.update_event_settings', event_id=event['id']) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
