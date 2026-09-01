@@ -408,9 +408,9 @@ def _categorical_options(db, base_sql, conditions, params, columns):
             ]
             continue
         rows = db.execute(
-            "SELECT DISTINCT {expression} value {base} WHERE {where} "
+            "SELECT DISTINCT {expression} AS value {base} WHERE {where} "
             "AND {expression} IS NOT NULL AND TRIM(CAST({expression} AS TEXT)) != '' "
-            "ORDER BY CAST({expression} AS TEXT) COLLATE NOCASE LIMIT 200".format(
+            "ORDER BY value COLLATE NOCASE LIMIT 200".format(
                 expression=column["expression"], base=base_sql, where=" AND ".join(conditions)
             ),
             params,

@@ -18,6 +18,7 @@ from app.attestation_identity import (
     AttestationIdentityConflict,
     resolve_attestation_participant,
 )
+from app.admin_tables import _categorical_options
 from app.db import get_db, get_engine
 from app.importer import process_batch, store_validation, validate_batch
 from app.models import Base, User
@@ -89,6 +90,46 @@ class SafeExternalUrlTests(unittest.TestCase):
         ):
             with self.subTest(value=value):
                 self.assertIsNone(safe_external_url(value))
+
+
+class CategoricalOptionsQueryTests(unittest.TestCase):
+    def test_distinct_options_order_by_selected_alias(self):
+        class EmptyResult:
+            @staticmethod
+            def fetchall():
+                return []
+
+        class RecordingDatabase:
+            def __init__(self):
+                self.statement = None
+
+            def execute(self, statement, _params):
+                self.statement = statement
+                return EmptyResult()
+
+        db = RecordingDatabase()
+        _categorical_options(
+            db,
+            "FROM registrations record",
+            ["record.event_id = ?"],
+            [1],
+            [
+                {
+                    "key": "status",
+                    "type": "select",
+                    "expression": "COALESCE(record.status, 'pending')",
+                }
+            ],
+        )
+
+        self.assertIn(
+            "SELECT DISTINCT COALESCE(record.status, 'pending') AS value",
+            db.statement,
+        )
+        self.assertIn("ORDER BY value COLLATE NOCASE", db.statement)
+        self.assertNotIn(
+            "ORDER BY CAST(COALESCE(record.status, 'pending')", db.statement
+        )
 
 
 class RegistrationsIntegrationTests(unittest.TestCase):
