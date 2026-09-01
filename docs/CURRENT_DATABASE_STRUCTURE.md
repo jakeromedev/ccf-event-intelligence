@@ -17,7 +17,7 @@ Event
       -> rebuildable curated rows
 ```
 
-The current schema has twenty application tables:
+The current schema has twenty-three application tables:
 
 1. `users`
 2. `events`
@@ -34,11 +34,14 @@ The current schema has twenty application tables:
 13. `registrant_remarks`
 14. `curated_registrants`
 15. `curated_registrant_sources`
-16. `satellites`
-17. `satellite_source_variations`
-18. `curated_registrant_satellites`
-19. `satellite_datasets`
-20. `satellite_dataset_satellites`
+16. `hub_groups`
+17. `satellite_hubs`
+18. `satellite_directory`
+19. `satellites`
+20. `satellite_source_variations`
+21. `curated_registrant_satellites`
+22. `satellite_datasets`
+23. `satellite_dataset_satellites`
 
 ## Relationship diagram
 
@@ -61,6 +64,9 @@ erDiagram
     USERS ||--o{ REGISTRANT_REMARKS : authors_and_resolves
     IMPORT_BATCHES ||--o{ CURATED_REGISTRANTS : derives
     IMPORT_BATCHES ||--o{ SATELLITES : derives
+    HUB_GROUPS ||--o{ SATELLITE_HUBS : classifies
+    SATELLITE_HUBS ||--o{ SATELLITE_DIRECTORY : groups
+    SATELLITE_DIRECTORY ||--o{ SATELLITES : identifies
     CURATED_REGISTRANTS ||--|{ CURATED_REGISTRANT_SOURCES : traces
     REGISTRANTS ||--|| CURATED_REGISTRANT_SOURCES : sourced_by
     CURATED_REGISTRANTS ||--o{ CURATED_REGISTRANT_SATELLITES : associates
@@ -330,15 +336,58 @@ UNIQUE(curated_registrant_id, registrant_id)
 UNIQUE(batch_id, registrant_id)
 ```
 
+## Satellite Settings directory tables
+
+### `hub_groups`
+
+Contains the two fixed classifications `Within Metro Manila Hubs` and `Outside
+Metro Manila Hubs`. The migration seeds these rows; Hub Group names are not
+free-text input.
+
+### `satellite_hubs`
+
+Stores a Hub under exactly one fixed Hub Group. The case-normalized name is
+unique within its Hub Group. Administrator-only Phase 2 operations create,
+rename, and move individual Hubs; moving a Hub preserves every assigned
+Satellite because ownership remains on the Hub row. Phase 3 bulk entry parses
+spreadsheet rows, columns, and comma-separated values into individual Hub rows,
+shows new and duplicate values for explicit review, then revalidates uniqueness
+inside the confirmation transaction before insertion.
+
+### `satellite_directory`
+
+Provides a stable, batch-independent identity for every encoded satellite.
+`hub_id` remains nullable for historical imports that do not contain a reliable
+Metro Manila classification. The Phase 1 migration backfills one directory
+entry for every existing normalized satellite name rather than guessing a Hub
+assignment. Administrator-only Phase 2 operations create, rename, assign, and
+move individual entries. `UNIQUE(hub_id, normalized_name)` provides
+case-insensitive duplicate protection within each Hub while allowing the same
+display name in different Hubs as specified by the module plan.
+Phase 3 provides the same review-and-confirm bulk workflow for Satellites. Each
+parsed value is stored as its own directory row; duplicate values are skipped
+within the selected Hub and never combined into a single field.
+
+Phase 4 treats `satellite_directory.name` as the canonical presentation name.
+Satellite rankings, registrant drilldowns, curation views, and Satellite
+Dataset selectors join through `satellites.directory_id` and display the
+directory name when one exists, while preserving the batch-scoped imported
+name as a fallback. Renaming a directory entry therefore appears immediately
+across existing analytical views without rewriting source import evidence.
+
+## Curated satellite tables
+
 ### `satellites`
 
 ```text
-id, event_id, batch_id, name, normalized_name, affiliation,
+id, event_id, batch_id, directory_id, name, normalized_name, affiliation,
 affiliation_conflict, source_record_count, created_at, updated_at
 ```
 
 `UNIQUE(batch_id, normalized_name)` prevents capitalization/formatting aliases
-from creating separate entities.
+from creating separate entities. `directory_id` links each batch-scoped
+analytical row to its canonical settings identity with `ON DELETE SET NULL`, so
+settings changes cannot cascade-delete imported analytical data.
 
 ### `satellite_source_variations`
 

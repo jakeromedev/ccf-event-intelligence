@@ -15,10 +15,12 @@ def satellite_dataset_options(db, event_id, batch_id):
         dict(row)
         for row in db.execute(
             """
-            SELECT id, name, affiliation, normalized_name
-            FROM satellites
-            WHERE event_id = ? AND batch_id = ?
-            ORDER BY affiliation, LOWER(name), id
+            SELECT s.id, COALESCE(directory.name, s.name) name,
+                   s.affiliation, s.normalized_name
+            FROM satellites s
+            LEFT JOIN satellite_directory directory ON directory.id = s.directory_id
+            WHERE s.event_id = ? AND s.batch_id = ?
+            ORDER BY s.affiliation, LOWER(COALESCE(directory.name, s.name)), s.id
             """,
             (event_id, batch_id),
         ).fetchall()

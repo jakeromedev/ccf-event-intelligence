@@ -21,7 +21,7 @@
                 {% if registrations_allowed %}
                     <a class="nav-link {% if request.endpoint in ('dashboard.event_registrations', 'dashboard.event_registrations_data') %}active{% endif %}" href="{{ url_for('dashboard.event_registrations', event_id=event['id']) }}">{{ icon('registrations') }}<span>Registrations</span></a>
                 {% endif %}
-                {% if satellites_allowed %}<a class="nav-link {% if request.endpoint in ('dashboard.event_satellites', 'dashboard.event_satellite_registrants') %}active{% endif %}" href="{{ url_for('dashboard.event_satellites', event_id=event['id']) }}">{{ icon('satellites') }}<span>Satellites</span></a>{% endif %}
+                {% if satellites_allowed %}<a class="nav-link {% if request.endpoint in ('dashboard.event_satellites', 'dashboard.event_satellite_registrants', 'dashboard.satellite_settings') %}active{% endif %}" href="{{ url_for('dashboard.event_satellites', event_id=event['id']) }}">{{ icon('satellites') }}<span>Satellites</span></a>{% endif %}
                 {% if data_quality_allowed %}<a class="nav-link {% if request.endpoint == 'dashboard.event_quality' %}active{% endif %}" href="{{ url_for('dashboard.event_quality', event_id=event['id']) }}">{{ icon('quality') }}<span>Data Quality</span></a>{% endif %}
                 {% if imports_allowed %}<a class="nav-link {% if request.endpoint == 'dashboard.event_imports' %}active{% endif %}" href="{{ url_for('dashboard.event_imports', event_id=event['id']) }}">{{ icon('imports') }}<span>Imports</span></a>{% endif %}
                 {% if admin_tables_allowed %}

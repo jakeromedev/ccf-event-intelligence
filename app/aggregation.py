@@ -284,7 +284,8 @@ def satellite_dataset_metrics(db, event_id, batch_id):
     configured_satellites = {dataset["id"]: [] for dataset in datasets}
     links = db.execute(
         """
-        SELECT dss.satellite_dataset_id, s.id, s.name, s.affiliation,
+        SELECT dss.satellite_dataset_id, s.id,
+               COALESCE(directory.name, s.name) name, s.affiliation,
                s.normalized_name, s.batch_id
         FROM satellite_dataset_satellites dss
         JOIN satellite_datasets d
@@ -293,8 +294,10 @@ def satellite_dataset_metrics(db, event_id, batch_id):
           ON s.id = dss.satellite_id
          AND s.event_id = dss.event_id
          AND s.batch_id = dss.satellite_batch_id
+        LEFT JOIN satellite_directory directory ON directory.id = s.directory_id
         WHERE d.event_id = ?
-        ORDER BY dss.satellite_dataset_id, s.affiliation, LOWER(s.name), s.id
+        ORDER BY dss.satellite_dataset_id, s.affiliation,
+                 LOWER(COALESCE(directory.name, s.name)), s.id
         """,
         (event_id,),
     ).fetchall()
@@ -560,7 +563,7 @@ def satellite_metrics(
     if query:
         filters += """
             AND (
-                LOWER(s.name) LIKE LOWER(?)
+                LOWER(COALESCE(directory.name, s.name)) LIKE LOWER(?)
                 OR EXISTS (
                     SELECT 1
                     FROM curated_registrant_sources source
@@ -579,7 +582,7 @@ def satellite_metrics(
     grouped_sql = """
         WITH grouped AS (
             SELECT s.id satellite_id,
-                   s.name satellite_name,
+                   COALESCE(directory.name, s.name) satellite_name,
                    CASE s.affiliation
                        WHEN 'Local Satellite' THEN 'Local'
                        ELSE 'International'
@@ -588,12 +591,13 @@ def satellite_metrics(
                    COALESCE(SUM(cr.checked_in), 0) checked_in,
                    CAST(COALESCE(SUM(cr.checked_in), 0) AS REAL) / COUNT(cr.id) * 100 attendance_rate
             FROM satellites s
+            LEFT JOIN satellite_directory directory ON directory.id = s.directory_id
             JOIN curated_registrant_satellites link ON link.satellite_id = s.id
             JOIN curated_registrants cr ON cr.id = link.curated_registrant_id
             WHERE s.batch_id = ?
               AND s.affiliation IN ('Local Satellite', 'International Satellite')
               {filters}
-            GROUP BY s.id, s.name, s.affiliation
+            GROUP BY s.id, directory.name, s.name, s.affiliation
         )
     """.format(filters=filters)
 
@@ -693,8 +697,11 @@ def satellite_registrants(db, batch_id, satellite_name, scope, page=1, per_page=
     per_page = per_page if per_page in (25, 50, 100) else 50
     satellite = db.execute(
         """
-        SELECT id, name FROM satellites
-        WHERE batch_id = ? AND affiliation = ? AND name = ? COLLATE NOCASE
+        SELECT s.id, COALESCE(directory.name, s.name) name
+        FROM satellites s
+        LEFT JOIN satellite_directory directory ON directory.id = s.directory_id
+        WHERE s.batch_id = ? AND s.affiliation = ?
+          AND COALESCE(directory.name, s.name) = ? COLLATE NOCASE
         """,
         (batch_id, affiliation, satellite_name),
     ).fetchone()
@@ -909,17 +916,20 @@ def curation_quality(db, batch_id, pages=None, per_page=10):
 
     satellites = db.execute(
         """
-        SELECT s.id, s.name, s.normalized_name, s.affiliation,
+        SELECT s.id, COALESCE(directory.name, s.name) name,
+               s.normalized_name, s.affiliation,
                s.source_record_count,
                COUNT(DISTINCT variation.id) variation_count,
                COUNT(DISTINCT link.curated_registrant_id) curated_registrants,
                GROUP_CONCAT(DISTINCT variation.source_value) source_values
         FROM satellites s
+        LEFT JOIN satellite_directory directory ON directory.id = s.directory_id
         LEFT JOIN satellite_source_variations variation ON variation.satellite_id = s.id
         LEFT JOIN curated_registrant_satellites link ON link.satellite_id = s.id
         WHERE s.batch_id = ?
-        GROUP BY s.id
-        ORDER BY curated_registrants DESC, s.name COLLATE NOCASE
+        GROUP BY s.id, directory.name
+        ORDER BY curated_registrants DESC,
+                 COALESCE(directory.name, s.name) COLLATE NOCASE
         LIMIT ? OFFSET ?
         """,
         (batch_id, per_page, pagination["satellites"]["offset"]),
@@ -930,10 +940,11 @@ def curation_quality(db, batch_id, pages=None, per_page=10):
         SELECT cr.id, cr.last_name, cr.birth_month, cr.birth_year, cr.gender,
                cr.source_registrant_count,
                COUNT(link.satellite_id) satellite_count,
-               GROUP_CONCAT(s.name, ' | ') satellite_names
+               GROUP_CONCAT(COALESCE(directory.name, s.name), ' | ') satellite_names
         FROM curated_registrants cr
         JOIN curated_registrant_satellites link ON link.curated_registrant_id = cr.id
         JOIN satellites s ON s.id = link.satellite_id
+        LEFT JOIN satellite_directory directory ON directory.id = s.directory_id
         WHERE cr.batch_id = ?
         GROUP BY cr.id
         HAVING COUNT(link.satellite_id) > 1
@@ -1008,12 +1019,13 @@ def curated_registrant_detail(db, batch_id, curated_registrant_id):
 def satellite_curation_detail(db, batch_id, satellite_id):
     satellite = db.execute(
         """
-        SELECT s.*,
+        SELECT s.*, COALESCE(directory.name, s.name) canonical_name,
                COUNT(DISTINCT link.curated_registrant_id) curated_registrants
         FROM satellites s
+        LEFT JOIN satellite_directory directory ON directory.id = s.directory_id
         LEFT JOIN curated_registrant_satellites link ON link.satellite_id = s.id
         WHERE s.id = ? AND s.batch_id = ?
-        GROUP BY s.id
+        GROUP BY s.id, directory.name
         """,
         (satellite_id, batch_id),
     ).fetchone()
@@ -1028,7 +1040,9 @@ def satellite_curation_detail(db, batch_id, satellite_id):
         """,
         (satellite_id, batch_id),
     ).fetchall()
-    return {"satellite": dict(satellite), "source_variations": [dict(row) for row in variations]}
+    satellite_data = dict(satellite)
+    satellite_data["name"] = satellite_data.pop("canonical_name")
+    return {"satellite": satellite_data, "source_variations": [dict(row) for row in variations]}
 
 
 QUALITY_LABELS = {

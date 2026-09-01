@@ -14,6 +14,7 @@ from .auth import (
     can_view_admin_tables,
     can_view_registrations,
     event_mutation_required,
+    satellite_settings_management_required,
 )
 from .analytics import AnalyticsFilterError, compare_events, event_analytics, historical_trends
 from .aggregation import (
@@ -53,6 +54,18 @@ from .satellite_datasets import (
     satellite_dataset_options,
     update_satellite_dataset,
     validate_satellite_dataset_form,
+)
+from .satellite_settings import (
+    SatelliteSettingsValidationError,
+    confirm_bulk_hubs,
+    confirm_bulk_satellites,
+    create_hub,
+    create_satellite,
+    review_bulk_hubs,
+    review_bulk_satellites,
+    satellite_settings_hierarchy,
+    update_hub,
+    update_satellite,
 )
 from .time_utils import format_operational_datetime
 
@@ -734,6 +747,231 @@ def event_satellites(event_id):
         query=query,
         sort=sort,
         direction=direction,
+    )
+
+
+def _render_satellite_settings(event_id=None, bulk_review=None, status=200):
+    db = get_db()
+    event = get_event_or_404(event_id) if event_id is not None else None
+    batch = active_batch(db, event_id) if event is not None else None
+    return render_template(
+        "satellite_settings.html",
+        event=event,
+        active_batch=batch,
+        hierarchy=satellite_settings_hierarchy(db),
+        bulk_review=bulk_review,
+    ), status
+
+
+@bp.get("/satellites/settings")
+@satellite_settings_management_required
+def satellite_settings():
+    return _render_satellite_settings(request.args.get("event_id", type=int))
+
+
+def _satellite_settings_redirect(anchor=""):
+    event_id = request.form.get("event_id", type=int)
+    location = url_for("dashboard.satellite_settings", event_id=event_id)
+    return redirect(location + anchor)
+
+
+@bp.post("/satellites/settings/hubs")
+@satellite_settings_management_required
+def create_satellite_hub():
+    db = get_db()
+    try:
+        hub_id, name = create_hub(
+            db, request.form.get("hub_group_id"), request.form.get("name")
+        )
+        db.commit()
+    except SatelliteSettingsValidationError as exc:
+        db.rollback()
+        flash(str(exc), "error")
+        return _satellite_settings_redirect("#hub-groups")
+    except IntegrityError:
+        db.rollback()
+        flash("That Hub already exists in the selected Hub Group.", "error")
+        return _satellite_settings_redirect("#hub-groups")
+    flash("Hub ‘{}’ created.".format(name), "success")
+    return _satellite_settings_redirect("#hub-{}".format(hub_id))
+
+
+@bp.post("/satellites/settings/hubs/<int:hub_id>")
+@satellite_settings_management_required
+def update_satellite_hub(hub_id):
+    db = get_db()
+    try:
+        name = update_hub(
+            db,
+            hub_id,
+            request.form.get("hub_group_id"),
+            request.form.get("name"),
+        )
+        db.commit()
+    except SatelliteSettingsValidationError as exc:
+        db.rollback()
+        flash(str(exc), "error")
+        return _satellite_settings_redirect("#hub-{}".format(hub_id))
+    except IntegrityError:
+        db.rollback()
+        flash("That Hub already exists in the selected Hub Group.", "error")
+        return _satellite_settings_redirect("#hub-{}".format(hub_id))
+    flash("Hub ‘{}’ updated.".format(name), "success")
+    return _satellite_settings_redirect("#hub-{}".format(hub_id))
+
+
+@bp.post("/satellites/settings/satellites")
+@satellite_settings_management_required
+def create_satellite_directory_entry():
+    db = get_db()
+    hub_id = request.form.get("hub_id", type=int)
+    try:
+        satellite_id, name = create_satellite(
+            db, hub_id, request.form.get("name")
+        )
+        db.commit()
+    except SatelliteSettingsValidationError as exc:
+        db.rollback()
+        flash(str(exc), "error")
+        return _satellite_settings_redirect(
+            "#hub-{}".format(hub_id) if hub_id else "#hub-groups"
+        )
+    except IntegrityError:
+        db.rollback()
+        flash("That Satellite already exists in the selected Hub.", "error")
+        return _satellite_settings_redirect(
+            "#hub-{}".format(hub_id) if hub_id else "#hub-groups"
+        )
+    flash("Satellite ‘{}’ created.".format(name), "success")
+    return _satellite_settings_redirect("#satellite-{}".format(satellite_id))
+
+
+@bp.post("/satellites/settings/satellites/<int:satellite_id>")
+@satellite_settings_management_required
+def update_satellite_directory_entry(satellite_id):
+    db = get_db()
+    try:
+        name = update_satellite(
+            db,
+            satellite_id,
+            request.form.get("hub_id"),
+            request.form.get("name"),
+        )
+        db.commit()
+    except SatelliteSettingsValidationError as exc:
+        db.rollback()
+        flash(str(exc), "error")
+        return _satellite_settings_redirect("#satellite-{}".format(satellite_id))
+    except IntegrityError:
+        db.rollback()
+        flash("That Satellite already exists in the selected Hub.", "error")
+        return _satellite_settings_redirect("#satellite-{}".format(satellite_id))
+    flash("Satellite ‘{}’ updated.".format(name), "success")
+    return _satellite_settings_redirect("#satellite-{}".format(satellite_id))
+
+
+@bp.post("/satellites/settings/bulk/hubs/review")
+@satellite_settings_management_required
+def review_bulk_satellite_hubs():
+    try:
+        review = review_bulk_hubs(
+            get_db(), request.form.get("hub_group_id"), request.form.get("values")
+        )
+    except SatelliteSettingsValidationError as exc:
+        flash(str(exc), "error")
+        return _satellite_settings_redirect("#hub-groups")
+    return _render_satellite_settings(
+        request.form.get("event_id", type=int), review
+    )
+
+
+@bp.post("/satellites/settings/bulk/hubs/confirm")
+@satellite_settings_management_required
+def confirm_bulk_satellite_hubs():
+    db = get_db()
+    try:
+        created, duplicates, target_name = confirm_bulk_hubs(
+            db,
+            request.form.get("hub_group_id"),
+            request.form.getlist("values"),
+        )
+        db.commit()
+    except SatelliteSettingsValidationError as exc:
+        db.rollback()
+        flash(str(exc), "error")
+        return _satellite_settings_redirect("#hub-groups")
+    except IntegrityError:
+        db.rollback()
+        flash("Hubs changed during review. Review the pasted values again.", "error")
+        return _satellite_settings_redirect("#hub-groups")
+    flash(
+        "Created {} {} in {}. Skipped {} {}.".format(
+            created,
+            "Hub" if created == 1 else "Hubs",
+            target_name,
+            duplicates,
+            "duplicate" if duplicates == 1 else "duplicates",
+        ),
+        "success",
+    )
+    return _satellite_settings_redirect("#hub-groups")
+
+
+@bp.post("/satellites/settings/bulk/satellites/review")
+@satellite_settings_management_required
+def review_bulk_satellite_entries():
+    hub_id = request.form.get("hub_id", type=int)
+    try:
+        review = review_bulk_satellites(
+            get_db(), hub_id, request.form.get("values")
+        )
+    except SatelliteSettingsValidationError as exc:
+        flash(str(exc), "error")
+        return _satellite_settings_redirect(
+            "#hub-{}".format(hub_id) if hub_id else "#hub-groups"
+        )
+    return _render_satellite_settings(
+        request.form.get("event_id", type=int), review
+    )
+
+
+@bp.post("/satellites/settings/bulk/satellites/confirm")
+@satellite_settings_management_required
+def confirm_bulk_satellite_entries():
+    db = get_db()
+    hub_id = request.form.get("hub_id", type=int)
+    try:
+        created, duplicates, target_name = confirm_bulk_satellites(
+            db, hub_id, request.form.getlist("values")
+        )
+        db.commit()
+    except SatelliteSettingsValidationError as exc:
+        db.rollback()
+        flash(str(exc), "error")
+        return _satellite_settings_redirect(
+            "#hub-{}".format(hub_id) if hub_id else "#hub-groups"
+        )
+    except IntegrityError:
+        db.rollback()
+        flash(
+            "Satellites changed during review. Review the pasted values again.",
+            "error",
+        )
+        return _satellite_settings_redirect(
+            "#hub-{}".format(hub_id) if hub_id else "#hub-groups"
+        )
+    flash(
+        "Created {} {} in {}. Skipped {} {}.".format(
+            created,
+            "Satellite" if created == 1 else "Satellites",
+            target_name,
+            duplicates,
+            "duplicate" if duplicates == 1 else "duplicates",
+        ),
+        "success",
+    )
+    return _satellite_settings_redirect(
+        "#hub-{}".format(hub_id) if hub_id else "#hub-groups"
     )
 
 

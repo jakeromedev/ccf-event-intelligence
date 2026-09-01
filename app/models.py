@@ -47,6 +47,12 @@ USERNAME_TYPE = mysql.VARCHAR(
 SATELLITE_DATASET_NAME_TYPE = mysql.VARCHAR(
     160, collation="utf8mb4_unicode_ci"
 ).with_variant(String(160, collation="NOCASE"), "sqlite")
+HUB_DIRECTORY_NAME_TYPE = mysql.VARCHAR(
+    160, collation="utf8mb4_unicode_ci"
+).with_variant(String(160, collation="NOCASE"), "sqlite")
+SATELLITE_DIRECTORY_NAME_TYPE = mysql.VARCHAR(
+    512, collation="utf8mb4_unicode_ci"
+).with_variant(String(512, collation="NOCASE"), "sqlite")
 PASSWORD_HASHER = PasswordHasher()
 
 
@@ -638,6 +644,80 @@ class CuratedRegistrantSource(Base):
     created_at: Mapped[object] = mapped_column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
 
 
+class HubGroup(Base):
+    """One of the two fixed geographic classifications for satellite hubs."""
+
+    __tablename__ = "hub_groups"
+    __table_args__ = (
+        CheckConstraint(
+            "code IN ('outside_metro_manila','within_metro_manila')",
+            name="ck_hub_groups_code",
+        ),
+        UniqueConstraint("code", name="uq_hub_groups_code"),
+        UniqueConstraint("name", name="uq_hub_groups_name"),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(32), nullable=False)
+    name: Mapped[str] = mapped_column(HUB_DIRECTORY_NAME_TYPE, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class SatelliteHub(Base):
+    """A user-managed hub belonging to one fixed hub group."""
+
+    __tablename__ = "satellite_hubs"
+    __table_args__ = (
+        UniqueConstraint(
+            "hub_group_id", "normalized_name", name="uq_satellite_hubs_group_name"
+        ),
+        Index("idx_satellite_hubs_group", "hub_group_id", "name"),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    hub_group_id: Mapped[int] = mapped_column(
+        ID_TYPE, ForeignKey("hub_groups.id", ondelete="RESTRICT"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(HUB_DIRECTORY_NAME_TYPE, nullable=False)
+    normalized_name: Mapped[str] = mapped_column(HUB_DIRECTORY_NAME_TYPE, nullable=False)
+    created_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+    updated_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+
+class SatelliteDirectoryEntry(Base):
+    """Canonical, batch-independent identity for an encoded satellite."""
+
+    __tablename__ = "satellite_directory"
+    __table_args__ = (
+        UniqueConstraint(
+            "hub_id", "normalized_name", name="uq_satellite_directory_hub_name"
+        ),
+        Index("idx_satellite_directory_hub", "hub_id", "name"),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    hub_id: Mapped[Optional[int]] = mapped_column(
+        ID_TYPE, ForeignKey("satellite_hubs.id", ondelete="SET NULL")
+    )
+    name: Mapped[str] = mapped_column(SATELLITE_DIRECTORY_NAME_TYPE, nullable=False)
+    normalized_name: Mapped[str] = mapped_column(
+        SATELLITE_DIRECTORY_NAME_TYPE, nullable=False
+    )
+    created_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+    updated_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+
 class Satellite(Base):
     __tablename__ = "satellites"
     __table_args__ = (
@@ -648,12 +728,16 @@ class Satellite(Base):
         UniqueConstraint("batch_id", "normalized_name", name="uq_satellites_batch_name"),
         UniqueConstraint("event_id", "batch_id", "id", name="uq_satellites_scope_id"),
         Index("idx_satellites_event_batch", "event_id", "batch_id"),
+        Index("idx_satellites_directory", "directory_id"),
         MYSQL_TABLE_OPTIONS,
     )
 
     id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
     event_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
     batch_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    directory_id: Mapped[Optional[int]] = mapped_column(
+        ID_TYPE, ForeignKey("satellite_directory.id", ondelete="SET NULL")
+    )
     name: Mapped[str] = mapped_column(String(512), nullable=False)
     normalized_name: Mapped[str] = mapped_column(String(512), nullable=False)
     affiliation: Mapped[str] = mapped_column(String(32), nullable=False)

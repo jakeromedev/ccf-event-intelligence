@@ -23,6 +23,7 @@ from app.aggregation import (
     registration_progress,
     satellite_curation_detail,
     satellite_metrics,
+    satellite_registrants,
 )
 from app.analytics import event_analytics
 from app.classifier import classify_affiliation
@@ -44,6 +45,7 @@ from app.normalization import (
     normalize_registration_type,
 )
 from app.models import Base
+from app.satellite_datasets import satellite_dataset_options
 from scripts.migrate_sqlite_to_mysql import MigrationError, migrate
 
 
@@ -1212,6 +1214,412 @@ class EventIntegrationTests(unittest.TestCase):
         empty = client.get("/events/{}/overview/registrants".format(self.event_b))
         self.assertEqual([], empty.get_json()["registrants"])
         self.assertEqual(404, client.get("/events/999999/overview/registrants").status_code)
+
+    def test_satellite_settings_foundation_preserves_and_displays_directory(self):
+        batch_id = self._process(self.event_a)
+        with self.app.app_context():
+            db = get_db()
+            db.executemany(
+                """
+                INSERT INTO hub_groups (id, code, name, sort_order)
+                VALUES (?, ?, ?, ?)
+                """,
+                [
+                    (1, "within_metro_manila", "Within Metro Manila Hubs", 1),
+                    (2, "outside_metro_manila", "Outside Metro Manila Hubs", 2),
+                ],
+            )
+            hub_id = db.execute(
+                """
+                INSERT INTO satellite_hubs (
+                    hub_group_id, name, normalized_name
+                ) VALUES (1, 'East Metro', 'east metro')
+                """
+            ).lastrowid
+            db.execute(
+                """
+                UPDATE satellite_directory SET hub_id = ?
+                WHERE normalized_name = 'ccf eastwood'
+                """,
+                (hub_id,),
+            )
+            db.commit()
+            self.assertEqual(
+                3, db.execute("SELECT COUNT(*) FROM satellite_directory").fetchone()[0]
+            )
+            self.assertEqual(
+                0,
+                db.execute(
+                    "SELECT COUNT(*) FROM satellites WHERE batch_id = ? "
+                    "AND directory_id IS NULL",
+                    (batch_id,),
+                ).fetchone()[0],
+            )
+
+        client = self.app.test_client()
+        satellites_page = client.get("/events/{}/satellites".format(self.event_a))
+        self.assertEqual(200, satellites_page.status_code)
+        self.assertIn(b"Settings", satellites_page.data)
+        self.assertIn(b"/satellites/settings?event_id=", satellites_page.data)
+
+        settings = client.get(
+            "/satellites/settings", query_string={"event_id": self.event_a}
+        )
+        self.assertEqual(200, settings.status_code)
+        self.assertIn(b"Within Metro Manila Hubs", settings.data)
+        self.assertIn(b"Outside Metro Manila Hubs", settings.data)
+        self.assertIn(b"East Metro", settings.data)
+        self.assertIn(b"CCF Eastwood", settings.data)
+        self.assertIn(b"CCF Main", settings.data)
+        self.assertIn(b"CCF Singapore", settings.data)
+        self.assertIn(b"Awaiting Hub Assignment", settings.data)
+
+    def test_satellite_settings_individual_hub_and_satellite_management(self):
+        self._process(self.event_a)
+        with self.app.app_context():
+            db = get_db()
+            db.executemany(
+                """
+                INSERT INTO hub_groups (id, code, name, sort_order)
+                VALUES (?, ?, ?, ?)
+                """,
+                [
+                    (1, "within_metro_manila", "Within Metro Manila Hubs", 1),
+                    (2, "outside_metro_manila", "Outside Metro Manila Hubs", 2),
+                ],
+            )
+            db.commit()
+
+        client = self.app.test_client()
+        context = {"event_id": self.event_a}
+        created = client.post(
+            "/satellites/settings/hubs",
+            data={**context, "hub_group_id": 1, "name": " East Metro "},
+            follow_redirects=True,
+        )
+        self.assertIn(b"East Metro", created.data)
+        self.assertIn(b"created", created.data)
+        client.post(
+            "/satellites/settings/hubs",
+            data={**context, "hub_group_id": 2, "name": "CALABARZON"},
+        )
+        duplicate = client.post(
+            "/satellites/settings/hubs",
+            data={**context, "hub_group_id": 1, "name": "east metro"},
+            follow_redirects=True,
+        )
+        self.assertIn(b"already exists", duplicate.data)
+        blank = client.post(
+            "/satellites/settings/hubs",
+            data={**context, "hub_group_id": 1, "name": "   "},
+            follow_redirects=True,
+        )
+        self.assertIn(b"Hub Name is required", blank.data)
+
+        with self.app.app_context():
+            db = get_db()
+            east_hub = db.execute(
+                "SELECT id FROM satellite_hubs WHERE normalized_name = 'east metro'"
+            ).fetchone()[0]
+            calabarzon_hub = db.execute(
+                "SELECT id FROM satellite_hubs WHERE normalized_name = 'calabarzon'"
+            ).fetchone()[0]
+
+        added = client.post(
+            "/satellites/settings/satellites",
+            data={**context, "hub_id": east_hub, "name": "B1G Antipolo"},
+            follow_redirects=True,
+        )
+        self.assertIn(b"B1G Antipolo", added.data)
+        self.assertIn(b"created", added.data)
+        duplicate = client.post(
+            "/satellites/settings/satellites",
+            data={**context, "hub_id": east_hub, "name": " b1g antipolo "},
+            follow_redirects=True,
+        )
+        self.assertIn(b"already exists", duplicate.data)
+        invalid_hub = client.post(
+            "/satellites/settings/satellites",
+            data={**context, "hub_id": 999999, "name": "B1G Missing Hub"},
+            follow_redirects=True,
+        )
+        self.assertIn(b"Select a valid Hub", invalid_hub.data)
+
+        # The documented uniqueness boundary is one Hub, so the same display
+        # name can exist under a different Hub.
+        client.post(
+            "/satellites/settings/satellites",
+            data={**context, "hub_id": calabarzon_hub, "name": "B1G Antipolo"},
+        )
+        with self.app.app_context():
+            db = get_db()
+            entries = db.execute(
+                """
+                SELECT id, hub_id FROM satellite_directory
+                WHERE normalized_name = 'b1g antipolo' ORDER BY id
+                """
+            ).fetchall()
+            self.assertEqual(2, len(entries))
+            moved_satellite_id = entries[1]["id"]
+
+        moved = client.post(
+            "/satellites/settings/satellites/{}".format(moved_satellite_id),
+            data={**context, "hub_id": east_hub, "name": "B1G Cainta"},
+            follow_redirects=True,
+        )
+        self.assertIn(b"B1G Cainta", moved.data)
+        self.assertIn(b"updated", moved.data)
+
+        moved_hub = client.post(
+            "/satellites/settings/hubs/{}".format(east_hub),
+            data={
+                **context,
+                "hub_group_id": 2,
+                "name": "Metro East",
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(b"Metro East", moved_hub.data)
+        self.assertIn(b"updated", moved_hub.data)
+        self.assertIn(b"B1G Antipolo", moved_hub.data)
+        self.assertIn(b"B1G Cainta", moved_hub.data)
+        with self.app.app_context():
+            db = get_db()
+            hub = db.execute(
+                "SELECT hub_group_id, name FROM satellite_hubs WHERE id = ?",
+                (east_hub,),
+            ).fetchone()
+            self.assertEqual(2, hub["hub_group_id"])
+            self.assertEqual("Metro East", hub["name"])
+            self.assertEqual(
+                2,
+                db.execute(
+                    "SELECT COUNT(*) FROM satellite_directory WHERE hub_id = ?",
+                    (east_hub,),
+                ).fetchone()[0],
+            )
+
+    def test_satellite_settings_bulk_review_and_confirm_creates_individual_rows(self):
+        self._process(self.event_a)
+        with self.app.app_context():
+            db = get_db()
+            db.executemany(
+                """
+                INSERT INTO hub_groups (id, code, name, sort_order)
+                VALUES (?, ?, ?, ?)
+                """,
+                [
+                    (1, "within_metro_manila", "Within Metro Manila Hubs", 1),
+                    (2, "outside_metro_manila", "Outside Metro Manila Hubs", 2),
+                ],
+            )
+            db.execute(
+                """
+                INSERT INTO satellite_hubs (hub_group_id, name, normalized_name)
+                VALUES (2, 'CALABARZON', 'calabarzon')
+                """
+            )
+            db.commit()
+
+        client = self.app.test_client()
+        context = {"event_id": self.event_a}
+        hub_values = "CALABARZON\nBicol, Visayas\tMindanao\nbicol"
+        review = client.post(
+            "/satellites/settings/bulk/hubs/review",
+            data={**context, "hub_group_id": 2, "values": hub_values},
+        )
+        self.assertEqual(200, review.status_code)
+        self.assertIn(b"Bulk Hub Review", review.data)
+        self.assertIn(b">5</strong> Detected", review.data)
+        self.assertIn(b">3</strong> New", review.data)
+        self.assertIn(b">2</strong> Existing", review.data)
+        self.assertIn(b"Duplicate", review.data)
+        with self.app.app_context():
+            self.assertEqual(
+                1,
+                get_db().execute(
+                    "SELECT COUNT(*) FROM satellite_hubs WHERE hub_group_id = 2"
+                ).fetchone()[0],
+            )
+
+        confirmed = client.post(
+            "/satellites/settings/bulk/hubs/confirm",
+            data={
+                **context,
+                "hub_group_id": 2,
+                "values": [
+                    "CALABARZON", "Bicol", "Visayas", "Mindanao", "bicol"
+                ],
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(200, confirmed.status_code)
+        self.assertIn(b"Created 3 Hubs", confirmed.data)
+        self.assertIn(b"Skipped 2 duplicates", confirmed.data)
+        with self.app.app_context():
+            db = get_db()
+            hubs = db.execute(
+                """
+                SELECT id, name FROM satellite_hubs
+                WHERE hub_group_id = 2 ORDER BY normalized_name
+                """
+            ).fetchall()
+            self.assertEqual(
+                ["Bicol", "CALABARZON", "Mindanao", "Visayas"],
+                [row["name"] for row in hubs],
+            )
+            bicol_hub = next(row["id"] for row in hubs if row["name"] == "Bicol")
+            db.execute(
+                """
+                INSERT INTO satellite_directory (hub_id, name, normalized_name)
+                VALUES (?, 'B1G Naga', 'b1g naga')
+                """,
+                (bicol_hub,),
+            )
+            db.commit()
+
+        satellite_values = (
+            "B1G Naga\nB1G Legazpi, B1G Sorsogon\tB1G Masbate\nb1g legazpi"
+        )
+        satellite_review = client.post(
+            "/satellites/settings/bulk/satellites/review",
+            data={**context, "hub_id": bicol_hub, "values": satellite_values},
+        )
+        self.assertEqual(200, satellite_review.status_code)
+        self.assertIn(b"Bulk Satellite Review", satellite_review.data)
+        self.assertIn(b">5</strong> Detected", satellite_review.data)
+        self.assertIn(b">3</strong> New", satellite_review.data)
+        self.assertIn(b">2</strong> Existing", satellite_review.data)
+        with self.app.app_context():
+            self.assertEqual(
+                1,
+                get_db().execute(
+                    "SELECT COUNT(*) FROM satellite_directory WHERE hub_id = ?",
+                    (bicol_hub,),
+                ).fetchone()[0],
+            )
+
+        satellite_confirmed = client.post(
+            "/satellites/settings/bulk/satellites/confirm",
+            data={
+                **context,
+                "hub_id": bicol_hub,
+                "values": [
+                    "B1G Naga",
+                    "B1G Legazpi",
+                    "B1G Sorsogon",
+                    "B1G Masbate",
+                    "b1g legazpi",
+                ],
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(200, satellite_confirmed.status_code)
+        self.assertIn(b"Created 3 Satellites", satellite_confirmed.data)
+        self.assertIn(b"Skipped 2 duplicates", satellite_confirmed.data)
+        with self.app.app_context():
+            names = [
+                row["name"]
+                for row in get_db().execute(
+                    """
+                    SELECT name FROM satellite_directory
+                    WHERE hub_id = ? ORDER BY normalized_name
+                    """,
+                    (bicol_hub,),
+                )
+            ]
+            self.assertEqual(
+                ["B1G Legazpi", "B1G Masbate", "B1G Naga", "B1G Sorsogon"],
+                names,
+            )
+            self.assertFalse(any("," in name or "\t" in name or "\n" in name for name in names))
+
+        empty = client.post(
+            "/satellites/settings/bulk/hubs/review",
+            data={**context, "hub_group_id": 2, "values": " \n\t "},
+            follow_redirects=True,
+        )
+        self.assertIn(b"Paste at least one Hub Name", empty.data)
+
+    def test_satellite_settings_phase4_controls_and_canonical_names_integrate(self):
+        batch_id = self._process(self.event_a)
+        with self.app.app_context():
+            db = get_db()
+            db.executemany(
+                """
+                INSERT INTO hub_groups (id, code, name, sort_order)
+                VALUES (?, ?, ?, ?)
+                """,
+                [
+                    (1, "within_metro_manila", "Within Metro Manila Hubs", 1),
+                    (2, "outside_metro_manila", "Outside Metro Manila Hubs", 2),
+                ],
+            )
+            hub_id = db.execute(
+                """
+                INSERT INTO satellite_hubs (hub_group_id, name, normalized_name)
+                VALUES (1, 'East Metro', 'east metro')
+                """
+            ).lastrowid
+            directory_id = db.execute(
+                """
+                SELECT id FROM satellite_directory
+                WHERE normalized_name = 'ccf eastwood'
+                """
+            ).fetchone()[0]
+            db.commit()
+
+        client = self.app.test_client()
+        updated = client.post(
+            "/satellites/settings/satellites/{}".format(directory_id),
+            data={
+                "event_id": self.event_a,
+                "hub_id": hub_id,
+                "name": "B1G Eastwood Central",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(200, updated.status_code)
+        self.assertIn(b"B1G Eastwood Central", updated.data)
+        for marker in (
+            b"data-settings-search",
+            b"data-settings-group-filter",
+            b'data-hub-group="within_metro_manila"',
+            b"data-settings-expand",
+            b"data-settings-collapse",
+            b"data-hub-toggle",
+            b'data-confirm-update="Hub"',
+            b'data-confirm-update="Satellite"',
+            b"satellite_settings.js",
+        ):
+            self.assertIn(marker, updated.data)
+
+        with self.app.app_context():
+            db = get_db()
+            metrics = satellite_metrics(db, batch_id, query="Eastwood Central")
+            self.assertEqual(1, metrics["pagination"]["total"])
+            self.assertEqual("B1G Eastwood Central", metrics["ranking"][0]["name"])
+            self.assertNotIn(
+                "CCF Eastwood",
+                [row["name"] for row in satellite_metrics(db, batch_id)["ranking"]],
+            )
+            registrants = satellite_registrants(
+                db, batch_id, "B1G Eastwood Central", "local"
+            )
+            self.assertIsNotNone(registrants)
+            self.assertEqual("B1G Eastwood Central", registrants["satellite_name"])
+            options = satellite_dataset_options(db, self.event_a, batch_id)
+            self.assertIn("B1G Eastwood Central", [row["name"] for row in options])
+            curation = curation_quality(db, batch_id)
+            self.assertIn(
+                "B1G Eastwood Central",
+                [row["name"] for row in curation["satellites"]],
+            )
+
+        script = (ROOT / "app/static/satellite_settings.js").read_text()
+        self.assertIn("applyFilters", script)
+        self.assertIn("window.confirm", script)
+        self.assertIn('form.setAttribute("aria-busy", "true")', script)
 
     def test_satellite_search_scope_pagination_and_sorting(self):
         batch_id = self._process(self.event_a)

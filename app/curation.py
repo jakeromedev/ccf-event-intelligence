@@ -126,6 +126,40 @@ def normalize_satellite_name(value, affiliation):
     }
 
 
+def _satellite_directory_id(db, normalized_name, display_name, source_hubs):
+    """Resolve an imported name without guessing between same-name Hub entries."""
+    for source_hub, _count in source_hubs.most_common():
+        matched = db.execute(
+            """
+            SELECT directory.id
+            FROM satellite_directory directory
+            JOIN satellite_hubs hub ON hub.id = directory.hub_id
+            WHERE directory.normalized_name = ? AND hub.normalized_name = ?
+            """,
+            (normalized_name, clean_text(source_hub).casefold()),
+        ).fetchone()
+        if matched:
+            return matched["id"]
+
+    candidates = db.execute(
+        """
+        SELECT id, hub_id FROM satellite_directory
+        WHERE normalized_name = ?
+        ORDER BY CASE WHEN hub_id IS NULL THEN 0 ELSE 1 END, id
+        """,
+        (normalized_name,),
+    ).fetchall()
+    if len(candidates) == 1 or (candidates and candidates[0]["hub_id"] is None):
+        return candidates[0]["id"]
+    return db.execute(
+        """
+        INSERT INTO satellite_directory (name, normalized_name)
+        VALUES (?, ?)
+        """,
+        (display_name, normalized_name),
+    ).lastrowid
+
+
 def _resolved_life_stage(rows):
     counts = Counter(normalize_life_stage(row["life_stage_raw"]) for row in rows)
     return min(
@@ -162,7 +196,8 @@ def rebuild_batch_curation(db, batch_id):
         """
         SELECT id, registration_code, source_id, first_name, last_name,
                gender_raw, life_stage_raw, birth_date_raw, birth_month_raw, birth_year_raw,
-               registration_type, checked_in, affiliation, satellite_name
+               registration_type, checked_in, affiliation, satellite_name,
+               b1g_satellite_hub_raw
         FROM registrants
         WHERE batch_id = ? AND ticket_matched = 1
         ORDER BY id
@@ -194,11 +229,16 @@ def rebuild_batch_curation(db, batch_id):
                     "affiliations": Counter(),
                     "source_count": 0,
                     "variations": Counter(),
+                    "source_hubs": Counter(),
                 },
             )
             aggregate["affiliations"][row["affiliation"]] += 1
             aggregate["source_count"] += 1
             aggregate["variations"][(satellite["source"], row["affiliation"])] += 1
+            if clean_text(row["b1g_satellite_hub_raw"]):
+                aggregate["source_hubs"][
+                    clean_text(row["b1g_satellite_hub_raw"])
+                ] += 1
             satellite_by_registrant[row["id"]].add(key)
 
     curated_ids = {}
@@ -275,16 +315,20 @@ def rebuild_batch_curation(db, batch_id):
                 AFFILIATION_PRIORITY[value],
             ),
         )
+        directory_id = _satellite_directory_id(
+            db, key, aggregate["name"], aggregate["source_hubs"]
+        )
         cursor = db.execute(
             """
             INSERT INTO satellites (
-                event_id, batch_id, name, normalized_name, affiliation,
+                event_id, batch_id, directory_id, name, normalized_name, affiliation,
                 affiliation_conflict, source_record_count
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 event_id,
                 batch_id,
+                directory_id,
                 aggregate["name"],
                 key,
                 affiliation,

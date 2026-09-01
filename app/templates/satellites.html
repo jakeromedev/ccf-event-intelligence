@@ -21,6 +21,11 @@
 {% block page_header %}{% endblock %}
 
 {% block content %}
+{% if satellite_settings_management_allowed %}
+<nav class="satellite-settings-launch" aria-label="Satellite administration">
+    <a class="button secondary" href="{{ url_for('dashboard.satellite_settings', event_id=event['id']) }}">{{ icon('settings', 17) }} Settings</a>
+</nav>
+{% endif %}
 <section class="admin-table-panel page-module-panel">
     {{ render_panel_header('Event Insights', 'Satellite Analytics', 'Unique-person satellite insights with traceable registration sources.') }}
 </section>

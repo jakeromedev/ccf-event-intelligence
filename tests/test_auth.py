@@ -710,6 +710,15 @@ class AuthenticationTests(unittest.TestCase):
             200,
             self.client.get("/events/{}/satellites".format(event_id)).status_code,
         )
+        self.assertNotIn(b"Satellite administration", self.client.get(
+            "/events/{}/satellites".format(event_id)
+        ).data)
+        self.assertEqual(
+            403,
+            self.client.get(
+                "/satellites/settings", query_string={"event_id": event_id}
+            ).status_code,
+        )
         self.assertEqual(
             403,
             self.client.get(

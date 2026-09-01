@@ -86,6 +86,14 @@ privacy roadmap items. `REPORTING.md` records the deliberately disabled download
 surface and future approval requirements. No Phase 3 database migration is
 required for the current derived analytics.
 
+Satellite Settings uses `app/satellite_settings.py` for normalized individual
+and bulk operations and `app/static/satellite_settings.js` for Phase 4 client
+interactions. Directory search and Hub Group filtering are client-side over the
+administrator-only rendered hierarchy. Edit forms require confirmation when
+their name or parent relationship changes, and all settings submissions enter
+an `aria-busy` state to prevent duplicate submissions. Canonical directory
+names are resolved in Satellite analytics through `satellites.directory_id`.
+
 ## Database
 
 MySQL is mandatory during normal application runtime. SQLite compatibility is
@@ -103,7 +111,7 @@ Database characteristics:
   commit and rollback behavior.
 - Alembic exclusively owns schema creation and upgrades; application startup
   does not create or modify tables.
-- The current Alembic head is `c8f5d2b0e417`.
+- The current Alembic head is `f7c2a8d5e913`.
 - Operational timestamps are stored as naive UTC MySQL `DATETIME` values and
   converted to `Asia/Manila` (`PHT`) at the presentation boundary. Every MySQL
   connection explicitly sets its session timezone to UTC.

@@ -47,6 +47,7 @@ CAPABILITY_EDIT_ATTESTATION = "registrations.attestation.edit"
 CAPABILITY_EDIT_REMARKS = "registrations.remarks.edit"
 CAPABILITY_VIEW_ANALYTICS = "analytics.view"
 CAPABILITY_VIEW_SATELLITES = "satellites.view"
+CAPABILITY_MANAGE_SATELLITE_SETTINGS = "satellites.settings.manage"
 CAPABILITY_VIEW_DATA_QUALITY = "data_quality.view"
 CAPABILITY_VIEW_IMPORTS = "imports.view"
 CAPABILITY_CREATE_EVENTS = "events.create"
@@ -248,6 +249,10 @@ def can_view_satellites() -> bool:
     return has_capability(CAPABILITY_VIEW_SATELLITES)
 
 
+def can_manage_satellite_settings() -> bool:
+    return has_capability(CAPABILITY_MANAGE_SATELLITE_SETTINGS)
+
+
 def can_view_data_quality() -> bool:
     return has_capability(CAPABILITY_VIEW_DATA_QUALITY)
 
@@ -294,6 +299,18 @@ def event_mutation_required(view):
     @wraps(view)
     def protected(*args, **kwargs):
         if not event_mutations_allowed():
+            abort(403)
+        return view(*args, **kwargs)
+
+    return protected
+
+
+def satellite_settings_management_required(view):
+    """Restrict directory maintenance to administrators outside local bypass mode."""
+
+    @wraps(view)
+    def protected(*args, **kwargs):
+        if not can_manage_satellite_settings():
             abort(403)
         return view(*args, **kwargs)
 
@@ -565,6 +582,9 @@ def init_app(app) -> None:
             "dashboard_allowed": can_view_dashboard(),
             "analytics_allowed": can_view_analytics(),
             "satellites_allowed": can_view_satellites(),
+            "satellite_settings_management_allowed": (
+                can_manage_satellite_settings()
+            ),
             "data_quality_allowed": can_view_data_quality(),
             "imports_allowed": can_view_imports(),
             "event_creation_allowed": can_create_events(),
