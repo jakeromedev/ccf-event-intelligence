@@ -1270,9 +1270,10 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertIn(b"Outside Metro Manila Hubs", settings.data)
         self.assertIn(b"East Metro", settings.data)
         self.assertIn(b"CCF Eastwood", settings.data)
-        self.assertIn(b"CCF Main", settings.data)
-        self.assertIn(b"CCF Singapore", settings.data)
-        self.assertIn(b"Awaiting Hub Assignment", settings.data)
+        self.assertIn(b"<dt>Satellites</dt>", settings.data)
+        self.assertNotIn(b"<dt>Hub Groups</dt>", settings.data)
+        self.assertNotIn(b"Preserved Current Data", settings.data)
+        self.assertNotIn(b"Awaiting Hub Assignment", settings.data)
 
     def test_satellite_settings_individual_hub_and_satellite_management(self):
         self._process(self.event_a)
@@ -1429,11 +1430,13 @@ class EventIntegrationTests(unittest.TestCase):
             data={**context, "hub_group_id": 2, "values": hub_values},
         )
         self.assertEqual(200, review.status_code)
-        self.assertIn(b"Bulk Hub Review", review.data)
+        self.assertIn(b'data-bulk-review-kind="hub"', review.data)
+        self.assertIn(b"Edit Paste", review.data)
+        self.assertIn(b'data-bulk-hub-url="/satellites/settings/bulk/hubs/review"', review.data)
         self.assertIn(b">5</strong> Detected", review.data)
         self.assertIn(b">3</strong> New", review.data)
         self.assertIn(b">2</strong> Existing", review.data)
-        self.assertIn(b"Duplicate", review.data)
+        self.assertIn(b"Already exists", review.data)
         with self.app.app_context():
             self.assertEqual(
                 1,
@@ -1486,7 +1489,7 @@ class EventIntegrationTests(unittest.TestCase):
             data={**context, "hub_id": bicol_hub, "values": satellite_values},
         )
         self.assertEqual(200, satellite_review.status_code)
-        self.assertIn(b"Bulk Satellite Review", satellite_review.data)
+        self.assertIn(b'data-bulk-review-kind="satellite"', satellite_review.data)
         self.assertIn(b">5</strong> Detected", satellite_review.data)
         self.assertIn(b">3</strong> New", satellite_review.data)
         self.assertIn(b">2</strong> Existing", satellite_review.data)
@@ -1584,15 +1587,25 @@ class EventIntegrationTests(unittest.TestCase):
         for marker in (
             b"data-settings-search",
             b"data-settings-group-filter",
-            b'data-hub-group="within_metro_manila"',
-            b"data-settings-expand",
-            b"data-settings-collapse",
+            b'data-group-code="within_metro_manila"',
+            b"data-hub-group",
             b"data-hub-toggle",
-            b'data-confirm-update="Hub"',
-            b'data-confirm-update="Satellite"',
+            b"data-expand-all",
+            b"data-collapse-all",
+            b"Add Records",
+            b"data-settings-record-modal",
+            b"data-settings-record-form",
+            b"data-settings-edit-drawer",
+            b"data-settings-edit-open",
+            b'data-kind="hub"',
+            b'data-kind="satellite"',
             b"satellite_settings.js",
         ):
             self.assertIn(marker, updated.data)
+        self.assertNotIn(b"data-settings-group-modal", updated.data)
+        self.assertNotIn(b"View Details", updated.data)
+        self.assertNotIn(b"Fixed Hub Group", updated.data)
+        self.assertNotIn(b"satellite-add-editor", updated.data)
 
         with self.app.app_context():
             db = get_db()
@@ -1618,7 +1631,12 @@ class EventIntegrationTests(unittest.TestCase):
 
         script = (ROOT / "app/static/satellite_settings.js").read_text()
         self.assertIn("applyFilters", script)
+        self.assertIn("showModal", script)
+        self.assertIn("configureCreateForm", script)
+        self.assertIn("parseBulkValues", script)
         self.assertIn("window.confirm", script)
+        self.assertIn("Move ${kind", script)
+        self.assertNotIn('window.confirm("Are you sure?")', script)
         self.assertIn('form.setAttribute("aria-busy", "true")', script)
 
     def test_satellite_search_scope_pagination_and_sorting(self):

@@ -6,241 +6,91 @@
 {% if event %}<input type="hidden" name="event_id" value="{{ event['id'] }}">{% endif %}
 {%- endmacro %}
 
-{% macro hub_options(selected_id=none) -%}
+{% macro hub_options() -%}
 {% for option_group in hierarchy.groups %}
-<optgroup label="{{ option_group.name }}">
-    {% for option_hub in option_group.hubs %}<option value="{{ option_hub.id }}" {{ 'selected' if option_hub.id == selected_id else '' }}>{{ option_hub.name }}</option>{% endfor %}
-</optgroup>
+<optgroup label="{{ option_group.name }}">{% for option_hub in option_group.hubs %}<option value="{{ option_hub.id }}">{{ option_hub.name }}</option>{% endfor %}</optgroup>
 {% endfor %}
 {%- endmacro %}
 
-{% macro satellite_editor(satellite, selected_hub_id=none) -%}
-<details class="satellite-individual-editor">
-    <summary>Edit</summary>
-    <form method="post" action="{{ url_for('dashboard.update_satellite_directory_entry', satellite_id=satellite.id) }}" data-settings-form data-confirm-update="Satellite">
-        {{ request_context() }}
-        <label><span>Satellite Name</span><input name="name" value="{{ satellite.name }}" maxlength="512" required></label>
-        <label><span>Hub</span><select name="hub_id" required><option value="" disabled {{ 'selected' if selected_hub_id is none else '' }}>Select Hub</option>{{ hub_options(selected_hub_id) }}</select></label>
-        <div><button class="button primary compact" type="submit">Save Satellite</button></div>
-    </form>
-</details>
-{%- endmacro %}
-
 {% block title %}Satellite Settings · {{ app_name }}{% endblock %}
-
 {% block application_header_page %}
 <div class="application-header-page">
     <h1><span class="application-header-module">Satellites</span> <span class="application-header-separator" aria-hidden="true">/</span> Settings</h1>
-    <p>Manage the Hub Group, Hub, and Satellite directory used by the system.</p>
+    <p>Manage the Hub and Satellite directory used by the system.</p>
 </div>
 {% endblock %}
 {% block page_header %}{% endblock %}
 
 {% block content %}
 <nav class="satellite-settings-back" aria-label="Satellite Settings navigation">
-    {% if event %}
-        <a class="button secondary" href="{{ url_for('dashboard.event_satellites', event_id=event['id']) }}">{{ icon('back', 17) }} Back to Satellites</a>
-    {% else %}
-        <a class="button secondary" href="{{ url_for('dashboard.events') }}">{{ icon('back', 17) }} Back to Events</a>
-    {% endif %}
+    {% if event %}<a class="button secondary" href="{{ url_for('dashboard.event_satellites', event_id=event['id']) }}">{{ icon('back', 17) }} Back to Satellites</a>
+    {% else %}<a class="button secondary" href="{{ url_for('dashboard.events') }}">{{ icon('back', 17) }} Back to Events</a>{% endif %}
 </nav>
 
 <section class="satellite-settings-summary panel" aria-labelledby="satellite-settings-title">
-    <div>
-        <p class="admin-breadcrumb">Satellite Administration <span>/</span> Individual Management</p>
-        <h1 id="satellite-settings-title">Satellite Settings</h1>
-        <p>Create or edit one Hub or Satellite at a time. Changes are saved only when you submit the corresponding form.</p>
-    </div>
-    <dl>
-        <div><dt>Hub Groups</dt><dd>{{ hierarchy.groups|length|number }}</dd></div>
-        <div><dt>Hubs</dt><dd>{{ hierarchy.hub_count|number }}</dd></div>
-        <div><dt>Satellites</dt><dd>{{ hierarchy.satellite_count|number }}</dd></div>
-    </dl>
+    <div><p class="admin-breadcrumb">Satellite Administration <span>/</span> Directory Management</p><h1 id="satellite-settings-title">Satellite Settings</h1><p>Browse, search, add, and maintain the canonical Hub and Satellite directory.</p></div>
+    <dl><div><dt>Hubs</dt><dd>{{ hierarchy.hub_count|number }}</dd></div><div><dt>Satellites</dt><dd>{{ hierarchy.assigned_count|number }}</dd></div></dl>
 </section>
-
-{% if bulk_review %}
-<section class="satellite-bulk-review panel" id="bulk-review" aria-labelledby="bulk-review-title">
-    <header>
-        <div>
-            <p class="eyebrow">Review Before Saving</p>
-            <h2 id="bulk-review-title">Bulk {{ 'Hub' if bulk_review.kind == 'hubs' else 'Satellite' }} Review</h2>
-            <p>Target: <strong>{{ bulk_review.target_name }}</strong></p>
-        </div>
-        <div class="satellite-bulk-counts" aria-label="Parsed record counts">
-            <span><strong>{{ bulk_review.detected_count|number }}</strong> Detected</span>
-            <span class="is-new"><strong>{{ bulk_review.new_count|number }}</strong> New</span>
-            <span class="is-duplicate"><strong>{{ bulk_review.duplicate_count|number }}</strong> Existing</span>
-        </div>
-    </header>
-    <ul class="satellite-bulk-records">
-        {% for entry in bulk_review.entries %}
-        <li class="is-{{ entry.status }}"><strong>{{ entry.name }}</strong><span>{{ 'New record' if entry.status == 'new' else 'Duplicate — will be skipped' }}</span></li>
-        {% endfor %}
-    </ul>
-    <footer>
-        <a class="button secondary" href="{{ url_for('dashboard.satellite_settings', event_id=event['id'] if event else none) }}#hub-groups">Cancel</a>
-        {% if bulk_review.new_count %}
-        <form method="post" action="{{ url_for('dashboard.confirm_bulk_satellite_hubs') if bulk_review.kind == 'hubs' else url_for('dashboard.confirm_bulk_satellite_entries') }}" data-settings-form data-bulk-confirm>
-            {{ request_context() }}
-            {% if bulk_review.kind == 'hubs' %}<input type="hidden" name="hub_group_id" value="{{ bulk_review.target_id }}">{% else %}<input type="hidden" name="hub_id" value="{{ bulk_review.target_id }}">{% endif %}
-            {% for entry in bulk_review.entries %}<input type="hidden" name="values" value="{{ entry.name }}">{% endfor %}
-            {% set record_label = 'Hub' if bulk_review.kind == 'hubs' else 'Satellite' %}
-            <button class="button primary" type="submit">Confirm {{ bulk_review.new_count|number }} New {{ record_label if bulk_review.new_count == 1 else record_label + 's' }}</button>
-        </form>
-        {% endif %}
-    </footer>
-</section>
-{% endif %}
 
 <section class="satellite-settings-tools panel" aria-label="Satellite directory controls" data-satellite-settings-tools>
-    <label class="satellite-settings-search">
-        <span>Search Directory</span>
-        <span class="satellite-settings-search-input">{{ icon('search', 16) }}<input type="search" placeholder="Search Hubs or Satellites" autocomplete="off" data-settings-search></span>
-    </label>
-    <label class="satellite-settings-filter">
-        <span>Hub Group</span>
-        <select data-settings-group-filter>
-            <option value="all">All Hub Groups</option>
-            {% for group in hierarchy.groups %}<option value="{{ group.code }}">{{ group.name }}</option>{% endfor %}
-        </select>
-    </label>
-    <div class="satellite-settings-view-actions" aria-label="Hub visibility controls">
-        <span>Hub Sections</span>
-        <div><button class="button secondary compact" type="button" data-settings-expand>Expand All</button><button class="button secondary compact" type="button" data-settings-collapse>Collapse All</button></div>
-    </div>
-    <p class="satellite-settings-results" aria-live="polite" data-settings-results>Showing {{ hierarchy.hub_count|number }} Hubs and {{ hierarchy.satellite_count|number }} Satellites</p>
+    <label class="satellite-settings-search"><span>Search Directory</span><span class="satellite-settings-search-input">{{ icon('search', 16) }}<input type="search" placeholder="Search hubs or satellites..." autocomplete="off" data-settings-search></span></label>
+    <fieldset class="satellite-settings-segments" data-settings-group-filter>
+        <legend>Hub Group</legend><div><label><input type="radio" name="directory-group" value="all" checked><span>All</span></label>{% for group in hierarchy.groups %}<label><input type="radio" name="directory-group" value="{{ group.code }}"><span>{{ 'Within Metro Manila' if group.code == 'within_metro_manila' else 'Outside Metro Manila' }}</span></label>{% endfor %}</div>
+    </fieldset>
+    <div class="satellite-settings-create-action"><span>Add to Directory</span><details data-add-records-menu><summary class="button primary">{{ icon('plus', 16) }} Add Records {{ icon('chevron-down', 14) }}</summary><div role="menu" aria-label="Add records"><button type="button" role="menuitem" data-settings-record-open data-mode="individual" data-kind="hub">Add Hub</button><button type="button" role="menuitem" data-settings-record-open data-mode="individual" data-kind="satellite">Add Satellite</button><hr><button type="button" role="menuitem" data-settings-record-open data-mode="bulk" data-kind="hub">Bulk Add Hubs</button><button type="button" role="menuitem" data-settings-record-open data-mode="bulk" data-kind="satellite">Bulk Add Satellites</button></div></details></div>
+    <div class="satellite-settings-view-actions"><span>Directory View</span><div><button class="button secondary compact" type="button" data-expand-all>Expand All</button><button class="button secondary compact" type="button" data-collapse-all>Collapse All</button></div></div>
+    <p class="satellite-settings-results" aria-live="polite" data-settings-results>{{ hierarchy.hub_count|number }} Hubs · {{ hierarchy.assigned_count|number }} Satellites</p>
 </section>
 
-<div class="satellite-settings-no-results panel" data-settings-no-results hidden>
-    {{ icon('search', 22) }}
-    <div><strong>No matching directory records</strong><p>Try a different search term or Hub Group filter.</p></div>
-</div>
+<div class="satellite-settings-no-results panel" data-settings-no-results hidden>{{ icon('search', 22) }}<div><strong>No matching directory records</strong><p>Try another Hub or Satellite name, or clear the current filter.</p><button class="button secondary compact" type="button" data-clear-search>Clear Search</button></div></div>
 
-<div class="satellite-settings-groups" id="hub-groups">
-    {% for group in hierarchy.groups %}
-    <section class="satellite-hub-group panel" aria-labelledby="hub-group-{{ group.id }}" data-hub-group="{{ group.code }}">
-        <header>
-            <div>
-                <p class="eyebrow">Fixed Hub Group</p>
-                <h2 id="hub-group-{{ group.id }}">{{ group.name }}</h2>
-            </div>
-            <div class="satellite-group-actions">
-                <span>{{ group.hub_count|number }} {{ 'Hub' if group.hub_count == 1 else 'Hubs' }} · {{ group.satellite_count|number }} Satellites</span>
-                <details class="satellite-add-editor">
-                    <summary>{{ icon('plus', 15) }} Add Hub</summary>
-                    <form method="post" action="{{ url_for('dashboard.create_satellite_hub') }}" data-settings-form>
-                        {{ request_context() }}
-                        <input type="hidden" name="hub_group_id" value="{{ group.id }}">
-                        <label><span>Hub Name</span><input name="name" maxlength="160" placeholder="Enter Hub Name" required></label>
-                        <button class="button primary compact" type="submit">Save Hub</button>
-                    </form>
-                </details>
-                <details class="satellite-add-editor satellite-bulk-editor">
-                    <summary>{{ icon('table', 15) }} Bulk Add Hubs</summary>
-                    <form method="post" action="{{ url_for('dashboard.review_bulk_satellite_hubs') }}" data-settings-form>
-                        {{ request_context() }}
-                        <input type="hidden" name="hub_group_id" value="{{ group.id }}">
-                        <label><span>Paste Hub Names</span><textarea name="values" maxlength="100000" placeholder="One per line, or separate with commas or tabs" required></textarea></label>
-                        <small>Supports Google Sheets, Excel, comma-separated values, and one name per line.</small>
-                        <button class="button primary compact" type="submit">Review Hubs</button>
-                    </form>
-                </details>
-            </div>
-        </header>
-        <div class="satellite-hub-list">
-            {% for hub in group.hubs %}
-            <article class="satellite-hub-card" id="hub-{{ hub.id }}" data-hub-card data-hub-name="{{ hub.name|lower }}">
-                <div class="satellite-hub-card-heading">
-                    <span>{{ icon('location', 18) }}</span><h3>{{ hub.name }}</h3><small>{{ hub.satellites|length|number }} Satellites</small>
-                    <button class="satellite-hub-toggle" type="button" aria-expanded="true" aria-controls="hub-body-{{ hub.id }}" data-hub-toggle><span>Collapse</span>{{ icon('chevron-down', 14) }}</button>
-                    <details class="satellite-individual-editor hub-editor">
-                        <summary>Edit Hub</summary>
-                        <form method="post" action="{{ url_for('dashboard.update_satellite_hub', hub_id=hub.id) }}" data-settings-form data-confirm-update="Hub">
-                            {{ request_context() }}
-                            <label><span>Hub Name</span><input name="name" value="{{ hub.name }}" maxlength="160" required></label>
-                            <label><span>Hub Group</span><select name="hub_group_id" required>{% for target_group in hierarchy.groups %}<option value="{{ target_group.id }}" {{ 'selected' if target_group.id == hub.hub_group_id else '' }}>{{ target_group.name }}</option>{% endfor %}</select></label>
-                            <div><button class="button primary compact" type="submit">Save Hub</button></div>
-                        </form>
-                    </details>
-                </div>
-                <div class="satellite-hub-card-body" id="hub-body-{{ hub.id }}" data-hub-body>
-                <ul>
-                    {% for satellite in hub.satellites %}
-                    <li id="satellite-{{ satellite.id }}" data-satellite-row data-satellite-name="{{ satellite.name|lower }}">
-                        <div><strong>{{ satellite.name }}</strong><span>{{ satellite.source_records|number }} imported {{ 'record' if satellite.source_records == 1 else 'records' }}</span></div>
-                        {{ satellite_editor(satellite, hub.id) }}
-                    </li>
-                    {% else %}
-                    <li class="satellite-hub-empty" data-hub-empty>No satellites are assigned to this Hub.</li>
-                    {% endfor %}
-                </ul>
-                <details class="satellite-add-editor satellite-add-under-hub">
-                    <summary>{{ icon('plus', 15) }} Add Satellite</summary>
-                    <form method="post" action="{{ url_for('dashboard.create_satellite_directory_entry') }}" data-settings-form>
-                        {{ request_context() }}
-                        <input type="hidden" name="hub_id" value="{{ hub.id }}">
-                        <label><span>Satellite Name</span><input name="name" maxlength="512" placeholder="Enter Satellite Name" required></label>
-                        <button class="button primary compact" type="submit">Save Satellite</button>
-                    </form>
-                </details>
-                <details class="satellite-add-editor satellite-add-under-hub satellite-bulk-under-hub">
-                    <summary>{{ icon('table', 15) }} Bulk Add Satellites</summary>
-                    <form method="post" action="{{ url_for('dashboard.review_bulk_satellite_entries') }}" data-settings-form>
-                        {{ request_context() }}
-                        <input type="hidden" name="hub_id" value="{{ hub.id }}">
-                        <label><span>Paste Satellite Names</span><textarea name="values" maxlength="100000" placeholder="One per line, or separate with commas or tabs" required></textarea></label>
-                        <small>Each detected value will become an individual Satellite record after confirmation.</small>
-                        <button class="button primary compact" type="submit">Review Satellites</button>
-                    </form>
-                </details>
-                </div>
-            </article>
-            {% else %}
-            <div class="satellite-settings-empty">
-                {{ icon('location', 22) }}
-                <div><strong>No Hubs encoded yet</strong><p>Use Add Hub to create the first Hub in this group.</p></div>
-            </div>
-            {% endfor %}
-        </div>
-    </section>
-    {% endfor %}
-</div>
-
-<section class="satellite-unassigned panel" aria-labelledby="unassigned-satellites-title" data-unassigned-directory>
-    <header>
-        <div>
-            <p class="eyebrow">Preserved Current Data</p>
-            <h2 id="unassigned-satellites-title">Awaiting Hub Assignment</h2>
-            <p>These canonical satellites came from existing imports. They remain fully available to analytics while awaiting deliberate Hub assignment.</p>
-        </div>
-        <span>{{ hierarchy.unassigned|length|number }} Satellites</span>
-    </header>
-    {% if hierarchy.unassigned %}
-    <div class="table-wrap">
-        <table>
-            <thead><tr><th>Satellite</th><th class="numeric">Events</th><th class="numeric">Imported Records</th><th>Status</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
-            <tbody>
-                {% for satellite in hierarchy.unassigned %}
-                <tr id="satellite-{{ satellite.id }}" data-unassigned-row data-satellite-name="{{ satellite.name|lower }}">
-                    <td><strong>{{ satellite.name }}</strong></td>
-                    <td class="numeric">{{ satellite.event_count|number }}</td>
-                    <td class="numeric">{{ satellite.source_records|number }}</td>
-                    <td><span class="satellite-directory-status">Unassigned</span></td>
-                    <td>{% if hierarchy.hubs %}{{ satellite_editor(satellite) }}{% else %}<span class="satellite-assignment-note">Create a Hub first</span>{% endif %}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+<section class="satellite-directory" id="hub-groups" aria-label="Hub Group directory" data-settings-directory>
+{% for group in hierarchy.groups %}
+<article class="satellite-hub-group panel" data-hub-group data-group-code="{{ group.code }}" data-group-name="{{ group.name|lower }}">
+    <header><div><p class="eyebrow">Hub Group</p><h2>{{ group.name }}</h2><p>{{ group.hub_count|number }} {{ 'Hub' if group.hub_count == 1 else 'Hubs' }} · {{ group.satellite_count|number }} {{ 'Satellite' if group.satellite_count == 1 else 'Satellites' }}</p></div><button class="button secondary compact" type="button" data-settings-record-open data-mode="individual" data-kind="hub" data-parent-id="{{ group.id }}" data-parent-name="{{ group.name }}" aria-label="Add Hub to {{ group.name }}">{{ icon('plus', 14) }} Add Hub</button></header>
+    <div class="satellite-hub-list">
+    {% for hub in group.hubs %}
+    <article class="satellite-hub-card" id="hub-{{ hub.id }}" data-hub-card data-hub-name="{{ hub.name|lower }}">
+        <div class="satellite-hub-card-heading"><button class="satellite-hub-toggle" type="button" aria-expanded="false" aria-controls="hub-body-{{ hub.id }}" data-hub-toggle aria-label="Expand {{ hub.name }}">{{ icon('chevron-down', 16) }}</button><h3>{{ hub.name }}</h3><small>{{ hub.satellites|length|number }} {{ 'Satellite' if hub.satellites|length == 1 else 'Satellites' }}</small><button class="satellite-record-edit" type="button" data-settings-edit-open data-kind="hub" data-name="{{ hub.name }}" data-parent-id="{{ hub.hub_group_id }}" data-parent-name="{{ group.name }}" data-action="{{ url_for('dashboard.update_satellite_hub', hub_id=hub.id) }}">Edit</button></div>
+        <div class="satellite-hub-card-body" id="hub-body-{{ hub.id }}" data-hub-body hidden><ul>
+            {% for satellite in hub.satellites %}<li id="satellite-{{ satellite.id }}" data-satellite-row data-satellite-name="{{ satellite.name|lower }}"><div><strong>{{ satellite.name }}</strong><span>{{ satellite.source_records|number }} imported {{ 'record' if satellite.source_records == 1 else 'records' }}</span></div><button class="satellite-record-edit" type="button" data-settings-edit-open data-kind="satellite" data-name="{{ satellite.name }}" data-parent-id="{{ hub.id }}" data-parent-name="{{ hub.name }}" data-action="{{ url_for('dashboard.update_satellite_directory_entry', satellite_id=satellite.id) }}">Edit</button></li>
+            {% else %}<li class="satellite-hub-empty" data-hub-empty><div><strong>No Satellites are assigned to this Hub.</strong></div></li>{% endfor %}
+        </ul><div class="satellite-hub-add"><button type="button" data-settings-record-open data-mode="individual" data-kind="satellite" data-parent-id="{{ hub.id }}" data-parent-name="{{ hub.name }}" aria-label="Add Satellite to {{ hub.name }}">{{ icon('plus', 14) }} Add Satellite</button></div></div>
+    </article>
+    {% else %}<div class="satellite-settings-empty"><div><strong>No Hubs encoded yet.</strong><p>Add the first Hub under this Hub Group.</p><button class="button primary compact" type="button" data-settings-record-open data-mode="individual" data-kind="hub" data-parent-id="{{ group.id }}" data-parent-name="{{ group.name }}">{{ icon('plus', 14) }} Add Hub</button></div></div>{% endfor %}
     </div>
-    {% else %}
-    <div class="satellite-settings-empty">
-        {{ icon('satellites', 22) }}
-        <div><strong>No unassigned satellites</strong><p>Imported satellites will appear here until a Hub is selected.</p></div>
-    </div>
-    {% endif %}
+</article>
+{% endfor %}
 </section>
+
+<dialog class="satellite-record-dialog" aria-labelledby="satellite-record-dialog-title" data-settings-record-modal{% if bulk_review %} data-bulk-review-kind="{{ 'hub' if bulk_review.kind == 'hubs' else 'satellite' }}" data-bulk-review-parent="{{ bulk_review.target_id }}"{% endif %}>
+<div class="satellite-record-dialog-panel">
+    <header><div><p class="eyebrow" data-record-dialog-mode>New Directory Record</p><h2 id="satellite-record-dialog-title" data-record-dialog-title>Add Record</h2></div><button type="button" class="satellite-record-dialog-close" aria-label="Close record form" data-settings-record-close>{{ icon('close', 18) }}</button></header>
+    <form method="post" data-settings-record-form data-settings-form data-create-hub-url="{{ url_for('dashboard.create_satellite_hub') }}" data-create-satellite-url="{{ url_for('dashboard.create_satellite_directory_entry') }}" data-bulk-hub-url="{{ url_for('dashboard.review_bulk_satellite_hubs') }}" data-bulk-satellite-url="{{ url_for('dashboard.review_bulk_satellite_entries') }}"{% if bulk_review %} hidden{% endif %}>
+        {{ request_context() }}
+        <label data-record-hub-group-field><span>Hub Group</span><select name="hub_group_id" data-record-hub-group><option value="" disabled selected>Select Hub Group</option>{% for group in hierarchy.groups %}<option value="{{ group.id }}">{{ group.name }}</option>{% endfor %}</select><small data-record-parent-context hidden></small></label>
+        <label data-record-hub-field hidden><span>Hub</span><select name="hub_id" data-record-hub><option value="" disabled selected>Select Hub</option>{{ hub_options() }}</select><small data-record-parent-context hidden></small></label>
+        <label data-record-name-field><span data-record-name-label>Hub Name</span><input name="name" maxlength="160" data-record-name></label>
+        <label data-record-values-field hidden><span data-record-values-label>Paste Hub Names</span><textarea name="values" maxlength="100000" data-record-values></textarea><small>Paste rows or columns directly from Excel or Google Sheets. Commas, tabs, and new lines are supported.</small></label>
+        <p class="satellite-bulk-detected" data-bulk-detected hidden aria-live="polite">0 entries detected</p>
+        <footer><button class="button secondary" type="button" data-settings-record-close>Cancel</button><button class="button primary" type="submit" data-record-submit>Add Hub</button></footer>
+    </form>
+    {% if bulk_review %}<div class="satellite-bulk-review" data-bulk-review>
+        <div class="satellite-bulk-destination"><span>Destination</span><strong>{{ bulk_review.target_name }}</strong></div>
+        <div class="satellite-bulk-counts" aria-label="Parsed record counts"><span><strong>{{ bulk_review.detected_count|number }}</strong> Detected</span><span class="is-new"><strong>{{ bulk_review.new_count|number }}</strong> New</span><span class="is-duplicate"><strong>{{ bulk_review.duplicate_count|number }}</strong> Existing</span></div>
+        <ul class="satellite-bulk-records">{% for entry in bulk_review.entries %}<li class="is-{{ entry.status }}"><strong>{{ '✓' if entry.status == 'new' else '○' }} {{ entry.name }}</strong><span>{{ 'New' if entry.status == 'new' else 'Already exists' }}</span></li>{% endfor %}</ul>
+        {% if not bulk_review.new_count %}<p class="satellite-bulk-none"><strong>No new {{ 'Hubs' if bulk_review.kind == 'hubs' else 'Satellites' }} to add.</strong> All detected records already exist under this {{ 'Hub Group' if bulk_review.kind == 'hubs' else 'Hub' }}.</p>{% endif %}
+        <footer><button class="button secondary" type="button" data-edit-paste>{{ icon('back', 14) }} Edit Paste</button>{% if bulk_review.new_count %}<form method="post" action="{{ url_for('dashboard.confirm_bulk_satellite_hubs') if bulk_review.kind == 'hubs' else url_for('dashboard.confirm_bulk_satellite_entries') }}" data-settings-form data-bulk-confirm>{{ request_context() }}{% if bulk_review.kind == 'hubs' %}<input type="hidden" name="hub_group_id" value="{{ bulk_review.target_id }}">{% else %}<input type="hidden" name="hub_id" value="{{ bulk_review.target_id }}">{% endif %}{% for entry in bulk_review.entries %}<input type="hidden" name="values" value="{{ entry.name }}">{% endfor %}<button class="button primary" type="submit" data-loading-label="Adding {{ bulk_review.new_count|number }} {{ 'Hubs' if bulk_review.kind == 'hubs' else 'Satellites' }}…">Add {{ bulk_review.new_count|number }} {{ 'Hub' if bulk_review.kind == 'hubs' and bulk_review.new_count == 1 else 'Hubs' if bulk_review.kind == 'hubs' else 'Satellite' if bulk_review.new_count == 1 else 'Satellites' }}</button></form>{% endif %}</footer>
+    </div>{% endif %}
+</div>
+</dialog>
+
+<dialog class="satellite-edit-drawer" aria-labelledby="satellite-edit-title" data-settings-edit-drawer>
+<div class="satellite-edit-drawer-panel">
+    <header><div><p class="eyebrow" data-edit-eyebrow>Edit Record</p><h2 id="satellite-edit-title" data-edit-title>Edit Record</h2></div><button type="button" class="satellite-record-dialog-close" aria-label="Close edit drawer" data-settings-edit-close>{{ icon('close', 18) }}</button></header>
+    <form method="post" data-settings-edit-form data-settings-form>{{ request_context() }}<label><span data-edit-name-label>Name</span><input name="name" data-edit-name required></label><label data-edit-group-field><span>Hub Group</span><select name="hub_group_id" data-edit-group>{% for group in hierarchy.groups %}<option value="{{ group.id }}">{{ group.name }}</option>{% endfor %}</select></label><label data-edit-hub-field hidden><span>Hub</span><select name="hub_id" data-edit-hub>{{ hub_options() }}</select></label><div class="satellite-move-notice" data-move-notice hidden></div><footer><button class="button secondary" type="button" data-settings-edit-close>Cancel</button><button class="button primary" type="submit" data-loading-label="Saving Changes…">Save Changes</button></footer></form>
+</div>
+</dialog>
 {% endblock %}
 
-{% block scripts %}
-<script src="{{ url_for('static', filename='satellite_settings.js', v='20260901-phase4') }}" defer></script>
-{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='satellite_settings.js', v='20260902-directory-workspace') }}" defer></script>{% endblock %}
