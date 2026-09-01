@@ -54,6 +54,7 @@ from .satellite_datasets import (
     update_satellite_dataset,
     validate_satellite_dataset_form,
 )
+from .time_utils import format_operational_datetime
 
 
 bp = Blueprint("dashboard", __name__)
@@ -1247,10 +1248,4 @@ def percent_filter(value):
 
 @bp.app_template_filter("datetime_short")
 def datetime_short_filter(value):
-    if not value:
-        return "—"
-    try:
-        parsed = value if isinstance(value, datetime) else datetime.fromisoformat(value)
-    except (TypeError, ValueError):
-        return value
-    return parsed.strftime("%b %d, %Y · %I:%M %p").replace(" 0", " ")
+    return format_operational_datetime(value)

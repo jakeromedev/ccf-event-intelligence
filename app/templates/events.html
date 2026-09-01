@@ -35,10 +35,10 @@
                         <div><span>Checked In</span><strong>{{ summary.metrics.checked_in|number }}</strong></div>
                         <div><span>Attendance</span><strong>{{ summary.metrics.attendance_rate|percent }}</strong></div>
                     </div>
-                    <p class="event-updated">Last import {{ summary.last_import }}</p>
+                    <p class="event-updated">Last import {{ summary.last_import|datetime_short }}</p>
                 {% else %}
                     <div class="event-no-data"><strong>No active dataset</strong><span>Upload required</span></div>
-                    <p class="event-updated">Created {{ summary.event['created_at'] }}</p>
+                    <p class="event-updated">Created {{ summary.event['created_at']|datetime_short }}</p>
                 {% endif %}
                 <a class="event-open" href="{{ url_for('dashboard.event_overview', event_id=summary.event['id']) }}">Open Event {{ icon('arrow', 17) }}</a>
             </article>

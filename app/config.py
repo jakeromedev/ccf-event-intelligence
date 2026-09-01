@@ -6,6 +6,8 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+from .time_utils import DISPLAY_TIMEZONE_NAME
+
 
 ENVIRONMENTS = {"development", "testing", "staging", "production"}
 APPLICATION_NAME = "B1G Admin Internal System"
@@ -83,6 +85,7 @@ def configure_app(app, test_config=None):
     app.config.from_mapping(
         APP_NAME=APPLICATION_NAME,
         APP_ENV=environment,
+        DISPLAY_TIMEZONE=DISPLAY_TIMEZONE_NAME,
         SECRET_KEY=os.environ.get("CCF_DASHBOARD_SECRET", "dev-only-change-me"),
         DATABASE_URL=os.environ.get("DATABASE_URL"),
         STAGING_DIR=os.environ.get("CCF_STAGING_DIR", str(default_staging_dir)),

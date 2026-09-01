@@ -206,7 +206,12 @@ def init_app(app):
             pool_size=app.config.get("SQLALCHEMY_POOL_SIZE", 5),
             max_overflow=app.config.get("SQLALCHEMY_MAX_OVERFLOW", 10),
             isolation_level=app.config.get("SQLALCHEMY_ISOLATION_LEVEL", "READ COMMITTED"),
-            connect_args={"charset": "utf8mb4"},
+            connect_args={
+                "charset": "utf8mb4",
+                # CURRENT_TIMESTAMP must follow the same UTC-at-rest contract
+                # as application-generated timestamps.
+                "init_command": "SET time_zone = '+00:00'",
+            },
         )
     else:
         engine_options["connect_args"] = {"check_same_thread": False}

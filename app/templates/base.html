@@ -86,7 +86,7 @@
                 <div class="application-header-meta" aria-label="Current dataset metadata">
                     <span class="dataset-status {{ 'active' if active_batch else 'empty' }}"><i></i>{{ 'Dataset active' if active_batch else 'No active dataset' }}</span>
                     {% if active_batch %}
-                        <span class="import-metadata">Imported {{ active_batch['activated_at'] }}</span>
+                        <span class="import-metadata">Imported {{ active_batch['activated_at']|datetime_short }}</span>
                         <span class="batch-metadata">Batch #{{ active_batch['id'] }}</span>
                     {% endif %}
                     <span class="header-help" title="Metrics use the selected Event's active dataset.">{{ icon('info', 18) }}</span>

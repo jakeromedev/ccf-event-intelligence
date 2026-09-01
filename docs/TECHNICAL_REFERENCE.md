@@ -104,8 +104,9 @@ Database characteristics:
 - Alembic exclusively owns schema creation and upgrades; application startup
   does not create or modify tables.
 - The current Alembic head is `c8f5d2b0e417`.
-- Application timestamps are stored as naive MySQL `DATETIME` values. Database
-  and application hosts should use the same operational timezone convention.
+- Operational timestamps are stored as naive UTC MySQL `DATETIME` values and
+  converted to `Asia/Manila` (`PHT`) at the presentation boundary. Every MySQL
+  connection explicitly sets its session timezone to UTC.
 
 The local database helper controls the native MySQL installation stored in the
 Git-ignored `instance/` directory:

@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 
+from .time_utils import format_operational_datetime
 from .url_safety import safe_external_url
 
 
@@ -164,8 +165,14 @@ CURATED_COLUMNS = [
     _column("registration_type_conflict", "Type Conflict", "record.registration_type_conflict", "boolean", "Curation"),
     _column("checked_in", "Checked In", "record.checked_in", "boolean", "Registration", True),
     _column("source_registrant_count", "Registration Sources", "record.source_registrant_count", "number", "Curation", True),
-    _column("created_at", "Curated At", "record.created_at", "date", "Audit"),
-    _column("updated_at", "Updated At", "record.updated_at", "date", "Audit"),
+    _column(
+        "created_at", "Curated At", "record.created_at", "date", "Audit",
+        renderer="operational_datetime",
+    ),
+    _column(
+        "updated_at", "Updated At", "record.updated_at", "date", "Audit",
+        renderer="operational_datetime",
+    ),
 ]
 
 
@@ -503,6 +510,8 @@ def admin_table_data(db, dataset, event_id, active_batch_id, args):
         for key, renderer in renderer_columns.items():
             if renderer == "attestation_form_link":
                 values[key] = safe_external_url(values.get(key))
+            elif renderer == "operational_datetime" and values.get(key):
+                values[key] = format_operational_datetime(values[key])
         serialized_rows.append(values)
 
     return {
@@ -577,6 +586,9 @@ def registration_sources(db, event_id, curated_id, batch_scope):
     source_records = []
     for row in rows:
         values = dict(row)
+        for key in ("created_at", "updated_at"):
+            if values.get(key):
+                values[key] = format_operational_datetime(values[key])
         raw_json = values.pop("source_data_json", None)
         source_values = {}
         if raw_json:
@@ -594,9 +606,13 @@ def registration_sources(db, event_id, curated_id, batch_scope):
                 "event": row["event_name"],
                 "event_id": row["event_id"],
                 "batch_id": row["batch_id"],
-                "import_date": row["import_date"],
+                "import_date": format_operational_datetime(row["import_date"]),
                 "source_values": source_values,
                 "normalized_values": normalized_values,
             }
         )
-    return {"curated_registrant": dict(curated), "sources": source_records}
+    curated_values = dict(curated)
+    for key in ("created_at", "updated_at"):
+        if curated_values.get(key):
+            curated_values[key] = format_operational_datetime(curated_values[key])
+    return {"curated_registrant": curated_values, "sources": source_records}

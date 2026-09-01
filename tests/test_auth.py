@@ -12,6 +12,7 @@ from sqlalchemy.exc import DBAPIError
 from app import create_app
 from app.db import get_db, get_engine
 from app.models import Base, User
+from app.time_utils import utc_now
 
 
 CSRF_PATTERN = re.compile(rb'name="csrf_token"[^>]*value="([^"]+)"')
@@ -375,7 +376,7 @@ class AuthenticationTests(unittest.TestCase):
         with self.app.app_context():
             user = get_db().session.get(User, user_id)
             self.assertIsNotNone(user.locked_until)
-            user.locked_until = datetime.now() - timedelta(seconds=1)
+            user.locked_until = utc_now() - timedelta(seconds=1)
             get_db().commit()
 
         recovered = self.login("lockout-operator", "StrongPassword12!")

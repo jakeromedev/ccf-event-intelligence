@@ -544,7 +544,9 @@ class RegistrationsIntegrationTests(unittest.TestCase):
                 if row["registration_code"] == "R-001"
             )
             self.assertEqual("invalid", active_row["attestation_status"])
-            self.assertEqual("2026-08-30 10:00:00", active_row["last_reviewed_at"])
+            self.assertEqual(
+                "Aug 30, 2026 · 6:00 PM PHT", active_row["last_reviewed_at"]
+            )
 
             with self.assertRaises(IntegrityError):
                 db.execute(
@@ -912,7 +914,9 @@ class RegistrationsIntegrationTests(unittest.TestCase):
                 if row["registration_code"] == "R-001"
             )
             self.assertEqual("verified", active_row["attestation_status"])
-            self.assertEqual("2026-08-30 10:00:00", active_row["last_reviewed_at"])
+            self.assertEqual(
+                "Aug 30, 2026 · 6:00 PM PHT", active_row["last_reviewed_at"]
+            )
 
         with self.app.app_context():
             db = get_db()

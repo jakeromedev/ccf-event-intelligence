@@ -1,7 +1,6 @@
 """Focused registration records and attestation verification operations."""
 
 import json
-from datetime import datetime
 
 from .attestation_identity import resolve_attestation_participant
 
@@ -17,6 +16,7 @@ from .admin_tables import (
     _parse_filters,
     resolve_batch_scope,
 )
+from .time_utils import format_operational_datetime, utc_now
 from .url_safety import safe_external_url
 
 
@@ -452,6 +452,10 @@ def registrations_data(db, event_id, active_batch_id, args):
     for row in rows:
         values = dict(row)
         values["attestation_form"] = safe_external_url(values["attestation_form"])
+        if values.get("last_reviewed_at"):
+            values["last_reviewed_at"] = format_operational_datetime(
+                values["last_reviewed_at"]
+            )
         serialized_rows.append(values)
 
     filter_columns = [column for column in columns if column["filterable"]]
@@ -534,7 +538,7 @@ def update_attestation_verification(
     if participant_id is None:
         return None
 
-    reviewed_at = datetime.now()
+    reviewed_at = utc_now()
     updated = db.execute(
         """
         UPDATE attestation_verifications
@@ -577,7 +581,7 @@ def update_attestation_verification(
         "status": status,
         "label": ATTESTATION_STATUS_LABELS[status],
         "updated_by": reviewer["username"] if reviewer else None,
-        "updated_at": reviewed_at.isoformat(sep=" ", timespec="seconds"),
+        "updated_at": format_operational_datetime(reviewed_at),
     }
 
 
@@ -618,9 +622,13 @@ def _remark_payload(row):
         "status": row["status"],
         "created_by": row["created_by"],
         "resolved_by": row["resolved_by"],
-        "created_at": row["created_at"],
-        "updated_at": row["updated_at"],
-        "resolved_at": row["resolved_at"],
+        "created_at": format_operational_datetime(row["created_at"]),
+        "updated_at": format_operational_datetime(row["updated_at"]),
+        "resolved_at": (
+            format_operational_datetime(row["resolved_at"])
+            if row["resolved_at"]
+            else None
+        ),
     }
 
 
@@ -696,7 +704,7 @@ def create_registrant_remark(
         raise AdminTableQueryError(
             "Remark text cannot exceed {} characters.".format(MAX_REMARK_LENGTH)
         )
-    created_at = datetime.now()
+    created_at = utc_now()
     remark_id = db.execute(
         """
         INSERT INTO registrant_remarks (
@@ -744,7 +752,7 @@ def resolve_registrant_remark(
         return None
     if existing["status"] != "pending":
         raise AdminTableQueryError("Only Pending remarks can be resolved.")
-    resolved_at = datetime.now()
+    resolved_at = utc_now()
     db.execute(
         """
         UPDATE registrant_remarks

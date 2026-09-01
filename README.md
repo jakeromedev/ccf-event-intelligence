@@ -165,11 +165,10 @@ export MYSQL_TEST_DATABASE_URL='mysql+pymysql://ccf_test:password@127.0.0.1:3306
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-Never point this variable at production. Timestamps are stored as naive
-`DATETIME` values to preserve
-the existing wall-clock interpretation without timezone shifts. New application
-timestamps use the MySQL server's current time, so the database and application
-hosts should use the same operational timezone convention.
+Never point this variable at production. Operational timestamps are stored as
+naive UTC `DATETIME` values and converted to `Asia/Manila` (`PHT`) for display.
+MySQL connections explicitly use UTC so database- and application-generated
+timestamps follow the same storage convention.
 
 Staged uploads and the retained SQLite rollback artifact remain under
 `instance/`, which is excluded from version control. Dashboard analytics remain

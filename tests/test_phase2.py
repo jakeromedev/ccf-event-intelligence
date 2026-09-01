@@ -3,6 +3,7 @@ import json
 import logging
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -14,6 +15,7 @@ from app.db import _expected_schema_heads, get_db
 from app.models import Base
 from app.observability import JsonLogFormatter
 from app.db import get_engine
+from app.time_utils import as_manila_time, format_operational_datetime, utc_now
 
 
 class ProductionConfigurationTests(unittest.TestCase):
@@ -50,6 +52,7 @@ class ProductionConfigurationTests(unittest.TestCase):
         self.assertEqual("Lax", app.config["SESSION_COOKIE_SAMESITE"])
         self.assertTrue(app.config["REQUIRE_SCHEMA_CURRENT"])
         self.assertFalse(app.config["STANDARD_USER_MUTATIONS_ALLOWED"])
+        self.assertEqual("Asia/Manila", app.config["DISPLAY_TIMEZONE"])
 
     def test_production_refuses_disabled_csrf_or_schema_validation(self):
         for override in ({"WTF_CSRF_ENABLED": False}, {"REQUIRE_SCHEMA_CURRENT": False}):
@@ -78,6 +81,24 @@ class ProductionConfigurationTests(unittest.TestCase):
         ):
             with self.assertRaises(ApplicationConfigurationError):
                 configure_app(app)
+
+
+class OperationalTimezoneTests(unittest.TestCase):
+    def test_naive_utc_timestamp_is_displayed_in_manila(self):
+        self.assertEqual(
+            "Sep 1, 2026 · 5:37 PM PHT",
+            format_operational_datetime("2026-09-01 09:37:50"),
+        )
+
+    def test_aware_timestamp_is_converted_to_manila(self):
+        converted = as_manila_time(datetime(2026, 9, 1, 9, 37, tzinfo=timezone.utc))
+        self.assertEqual("2026-09-01T17:37:00+08:00", converted.isoformat())
+
+    def test_utc_now_matches_naive_database_contract(self):
+        current = utc_now()
+        self.assertIsNone(current.tzinfo)
+        elapsed = datetime.now(timezone.utc).replace(tzinfo=None) - current
+        self.assertLess(abs(elapsed.total_seconds()), 2)
 
 
 class OperationalEndpointTests(unittest.TestCase):

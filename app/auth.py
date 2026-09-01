@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import secrets
-from datetime import datetime, timedelta
+from datetime import timedelta
 from functools import wraps
 from urllib.parse import urlsplit
 
@@ -30,6 +30,7 @@ from wtforms.validators import DataRequired, EqualTo, Length, ValidationError
 from .db import get_db
 from .extensions import login_manager
 from .models import User, hash_password, verify_password_hash
+from .time_utils import utc_now
 
 
 bp = Blueprint("auth", __name__)
@@ -313,7 +314,7 @@ def login():
         user = db.session.scalar(
             select(User).where(func.lower(User.username) == username)
         )
-        now = datetime.now()
+        now = utc_now()
         if user is None:
             verify_password_hash(DUMMY_PASSWORD_HASH, form.password.data)
             current_app.logger.warning(
@@ -440,7 +441,7 @@ def approve_user(user_id):
         role = request.form.get("role", "user")
         if role not in ("user", "registration"):
             abort(400)
-        now = datetime.now()
+        now = utc_now()
         user.role = role
         user.status = "approved"
         user.approved_at = now
@@ -473,7 +474,7 @@ def update_user_role(user_id):
     if user.role != role:
         user.role = role
         user.auth_version += 1
-        user.updated_at = datetime.now()
+        user.updated_at = utc_now()
         db.commit()
         current_app.logger.info(
             "user_role_updated",
@@ -502,7 +503,7 @@ def update_user_status(user_id):
         user.auth_version += 1
         user.failed_login_count = 0
         user.locked_until = None
-        user.updated_at = datetime.now()
+        user.updated_at = utc_now()
         db.commit()
         current_app.logger.info(
             "user_status_updated",
@@ -538,7 +539,7 @@ def update_user_password(user_id):
     user.auth_version += 1
     user.failed_login_count = 0
     user.locked_until = None
-    user.updated_at = datetime.now()
+    user.updated_at = utc_now()
     db.commit()
     current_app.logger.info(
         "user_password_updated",
@@ -619,7 +620,7 @@ def init_app(app) -> None:
         password_hash = hash_password(plaintext_password)
         db = get_db()
         existing = False
-        now = datetime.now()
+        now = utc_now()
         try:
             with db.session.begin():
                 candidates = db.session.scalars(
