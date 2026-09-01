@@ -87,6 +87,34 @@
     const minimumZoom = 0.25;
     const maximumZoom = 3;
     const zoomStep = 0.25;
+    const zoomPreferenceStorageKey = "ccf.attestationReview.zoom.v1";
+
+    const loadZoomPreference = () => {
+        try {
+            const preference = JSON.parse(window.localStorage.getItem(zoomPreferenceStorageKey));
+            if (preference?.mode === "manual" && Number.isFinite(preference.scale)) {
+                return {
+                    mode: "manual",
+                    scale: Math.min(Math.max(preference.scale, minimumZoom), maximumZoom),
+                };
+            }
+            if (preference?.mode === "fit") return {mode: "fit", scale: 1};
+        } catch (_error) {
+            // Browser storage may be unavailable or contain an older invalid value.
+        }
+        return {mode: "fit", scale: 1};
+    };
+
+    const saveZoomPreference = (mode, scale) => {
+        try {
+            window.localStorage.setItem(
+                zoomPreferenceStorageKey,
+                JSON.stringify({mode, scale}),
+            );
+        } catch (_error) {
+            // Keep the viewer usable when browser storage is unavailable.
+        }
+    };
 
     let columns = [];
     let columnValues = {};
@@ -106,6 +134,7 @@
     let zoomMode = "fit";
     let zoomScale = 1;
     let fitScale = 1;
+    let zoomPreference = loadZoomPreference();
     let previewLoaded = false;
     let previewLoadTimer = null;
     let filterReturnFocus = null;
@@ -482,9 +511,27 @@
         renderDocumentScale(fitScale, "fit", resetScroll);
     };
 
-    const setManualZoom = (scale) => {
+    const setManualZoom = (scale, resetScroll = false, persist = true) => {
         const bounded = Math.min(Math.max(scale, minimumZoom), maximumZoom);
-        renderDocumentScale(bounded, "manual");
+        renderDocumentScale(bounded, "manual", resetScroll);
+        if (persist) {
+            zoomPreference = {mode: "manual", scale: bounded};
+            saveZoomPreference(zoomPreference.mode, zoomPreference.scale);
+        }
+    };
+
+    const selectFitZoom = () => {
+        zoomPreference = {mode: "fit", scale: 1};
+        saveZoomPreference(zoomPreference.mode, zoomPreference.scale);
+        fitDocumentToView(true);
+    };
+
+    const applyZoomPreference = () => {
+        if (zoomPreference.mode === "manual") {
+            setManualZoom(zoomPreference.scale, true, false);
+            return;
+        }
+        fitDocumentToView(true);
     };
 
     const changeZoom = (direction) => {
@@ -567,7 +614,7 @@
             previewImage.hidden = false;
             previewViewer.setAttribute("aria-busy", "false");
             window.requestAnimationFrame(() => {
-                if (session === previewSession) fitDocumentToView(true);
+                if (session === previewSession) applyZoomPreference();
             });
         };
         previewImage.onerror = () => showPreviewFailure(session);
@@ -1325,7 +1372,7 @@
     });
     zoomOutButton.addEventListener("click", () => changeZoom(-1));
     zoomInButton.addEventListener("click", () => changeZoom(1));
-    fitButton.addEventListener("click", () => fitDocumentToView(true));
+    fitButton.addEventListener("click", selectFitZoom);
     actualSizeButton.addEventListener("click", () => setManualZoom(1));
     modalSave?.addEventListener("click", saveAttestationStatus);
     modalStatus?.addEventListener("change", () => setModalFeedback(""));
