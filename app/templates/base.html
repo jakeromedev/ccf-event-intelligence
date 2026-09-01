@@ -42,7 +42,7 @@
                     </div>
                 {% endif %}
                 {% if user_management_allowed %}
-                    <a class="nav-link {% if request.endpoint in ('auth.users', 'auth.approve_user', 'auth.update_user_role') %}active{% endif %}" href="{{ url_for('auth.users') }}">{{ icon('users') }}<span>Users</span></a>
+                    <a class="nav-link {% if request.endpoint in ('auth.users', 'auth.approve_user', 'auth.update_user_role', 'auth.update_user_status', 'auth.update_user_password') %}active{% endif %}" href="{{ url_for('auth.users') }}">{{ icon('users') }}<span>Users</span></a>
                 {% endif %}
             </nav>
             <div class="sidebar-spacer"></div>
@@ -51,7 +51,7 @@
             <nav aria-label="Application navigation">
                 <a class="nav-link {% if request.endpoint == 'dashboard.events' %}active{% endif %}" href="{{ url_for('dashboard.events') }}">{{ icon('events') }}<span>Events</span></a>
                 {% if user_management_allowed %}
-                    <a class="nav-link {% if request.endpoint in ('auth.users', 'auth.approve_user', 'auth.update_user_role') %}active{% endif %}" href="{{ url_for('auth.users') }}">{{ icon('users') }}<span>Users</span></a>
+                    <a class="nav-link {% if request.endpoint in ('auth.users', 'auth.approve_user', 'auth.update_user_role', 'auth.update_user_status', 'auth.update_user_password') %}active{% endif %}" href="{{ url_for('auth.users') }}">{{ icon('users') }}<span>Users</span></a>
                 {% endif %}
             </nav>
             <div class="sidebar-spacer"></div>

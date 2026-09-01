@@ -1800,8 +1800,25 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
         )
 
         self._login("operator", "User-Registrations-Password-1!")
-        self.assertEqual(403, self.client.get(page_url).status_code)
-        self.assertEqual(403, self.client.get(data_url).status_code)
+        standard_page = self.client.get(page_url)
+        self.assertEqual(200, standard_page.status_code)
+        self.assertEqual(200, self.client.get(data_url).status_code)
+        self.assertIn(('href="{}"'.format(page_url)).encode(), standard_page.data)
+        self.assertNotIn(b'data-attestation-save', standard_page.data)
+        for label in (
+            b">Dashboard</span>",
+            b">Analytics</span>",
+            b">Registrations</span>",
+            b">Satellites</span>",
+        ):
+            self.assertIn(label, standard_page.data)
+        for label in (
+            b">Data Quality</span>",
+            b">Imports</span>",
+            b">Admin Tables</span>",
+            b">Users</span>",
+        ):
+            self.assertNotIn(label, standard_page.data)
         csrf_token = self._csrf_token()
         self.assertEqual(
             403,
@@ -1812,7 +1829,17 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
             ).status_code,
         )
         overview = self.client.get("/events/{}".format(self.event_id))
-        self.assertNotIn(page_url.encode(), overview.data)
+        self.assertIn(page_url.encode(), overview.data)
+        self.assertEqual(
+            403,
+            self.client.get(
+                "/events/{}/data-quality".format(self.event_id)
+            ).status_code,
+        )
+        self.assertEqual(
+            403,
+            self.client.get("/events/{}/imports".format(self.event_id)).status_code,
+        )
         self.client.post("/logout", data={"csrf_token": self._csrf_token()})
 
         self._login("admin", "Admin-Registrations-Password-1!")
@@ -2091,7 +2118,7 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
 
         self.client.post("/logout", data={"csrf_token": self._csrf_token()})
         self._login("operator", "User-Registrations-Password-1!")
-        self.assertEqual(403, self.client.get(collection_url).status_code)
+        self.assertEqual(200, self.client.get(collection_url).status_code)
         unauthorized_csrf = self._csrf_token()
         self.assertEqual(
             403,

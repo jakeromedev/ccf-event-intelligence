@@ -73,7 +73,9 @@ class User(UserMixin, Base):
         CheckConstraint(
             "role IN ('admin','user','registration')", name="ck_users_role"
         ),
-        CheckConstraint("status IN ('pending','approved')", name="ck_users_status"),
+        CheckConstraint(
+            "status IN ('pending','approved','blocked')", name="ck_users_status"
+        ),
         CheckConstraint(
             "(role = 'admin' AND username = 'admin' AND status = 'approved') OR "
             "(role IN ('user','registration') AND username <> 'admin')",
@@ -81,7 +83,7 @@ class User(UserMixin, Base):
         ),
         CheckConstraint(
             "(status = 'pending' AND approved_at IS NULL) OR "
-            "(status = 'approved' AND approved_at IS NOT NULL)",
+            "(status IN ('approved','blocked') AND approved_at IS NOT NULL)",
             name="ck_users_approval_timestamp",
         ),
         CheckConstraint("auth_version >= 1", name="ck_users_auth_version"),

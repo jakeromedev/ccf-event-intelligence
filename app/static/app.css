@@ -1723,9 +1723,18 @@ body.sidebar-collapsed .sidebar-account form { display: none; }
 .user-status.pending i { background: #d19a37; }
 .user-status.approved { color: var(--success); background: var(--success-soft); }
 .user-status.approved i { background: #32a87c; }
+.user-status.blocked { color: #9b2c2c; background: #fff0f0; }
+.user-status.blocked i { background: #c53030; }
 .users-action { text-align: right !important; }
 .users-action form { display: inline-flex; align-items: center; gap: 8px; }
 .users-action select { min-width: 118px; padding: 7px 9px; border: 1px solid #cbdcdf; border-radius: 7px; background: #fff; color: #294c59; font: inherit; }
+.user-admin-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.user-password-reset { position: relative; }
+.user-password-reset summary { list-style: none; cursor: pointer; white-space: nowrap; }
+.user-password-reset summary::-webkit-details-marker { display: none; }
+.user-password-reset[open] form { position: absolute; z-index: 5; top: calc(100% + 8px); right: 0; width: 260px; padding: 14px; display: grid; gap: 8px; border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: 0 14px 35px rgba(23, 56, 73, .18); text-align: left; }
+.user-password-reset label { color: #46616d; font-size: 9px; font-weight: 700; }
+.user-password-reset input { width: 100%; padding: 8px 9px; border: 1px solid #cbdcdf; border-radius: 7px; font: inherit; }
 .approved-label { color: #7d9099; font-size: 8px; }
 .users-empty { padding: 64px 24px; display: grid; justify-items: center; color: #7d919a; text-align: center; }
 .users-empty h3 { margin: 12px 0 3px; color: #2e4b5a; }

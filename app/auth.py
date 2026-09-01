@@ -64,14 +64,25 @@ REGISTRATION_CAPABILITIES = frozenset(
 STANDARD_USER_CAPABILITIES = frozenset(
     {
         CAPABILITY_VIEW_DASHBOARD,
+        CAPABILITY_VIEW_REGISTRATIONS,
         CAPABILITY_VIEW_ANALYTICS,
         CAPABILITY_VIEW_SATELLITES,
-        CAPABILITY_VIEW_DATA_QUALITY,
-        CAPABILITY_VIEW_IMPORTS,
         CAPABILITY_CREATE_EVENTS,
         CAPABILITY_VIEW_EVENT_SETTINGS,
     }
 )
+
+STANDARD_USER_RESTRICTED_ENDPOINT_CAPABILITIES = {
+    "dashboard.event_quality": CAPABILITY_VIEW_DATA_QUALITY,
+    "dashboard.event_quality_issues": CAPABILITY_VIEW_DATA_QUALITY,
+    "dashboard.event_curated_registrant_detail": CAPABILITY_VIEW_DATA_QUALITY,
+    "dashboard.event_satellite_curation_detail": CAPABILITY_VIEW_DATA_QUALITY,
+    "dashboard.event_imports": CAPABILITY_VIEW_IMPORTS,
+    "dashboard.validate_import": CAPABILITY_VIEW_IMPORTS,
+    "dashboard.process_import": CAPABILITY_VIEW_IMPORTS,
+    "dashboard.activate_import": CAPABILITY_VIEW_IMPORTS,
+    "dashboard.delete_import": CAPABILITY_VIEW_IMPORTS,
+}
 
 # A Registration operator is intentionally deny-by-default. Every endpoint in
 # this set still performs its own Event/batch ownership validation.
@@ -109,10 +120,10 @@ def validate_public_username(_form, field) -> None:
         )
 
 
-def validate_strong_password(_form, field) -> None:
-    password = field.data or ""
+def password_policy_error(password: str | None) -> str | None:
+    password = password or ""
     if len(password) < PASSWORD_MIN_LENGTH or len(password) > PASSWORD_MAX_LENGTH:
-        raise ValidationError("Password must be between 12 and 128 characters.")
+        return "Password must be between 12 and 128 characters."
     categories = (
         any(character.islower() for character in password),
         any(character.isupper() for character in password),
@@ -120,9 +131,14 @@ def validate_strong_password(_form, field) -> None:
         any(not character.isalnum() for character in password),
     )
     if sum(categories) < 3:
-        raise ValidationError(
-            "Password must use at least three of: lowercase, uppercase, numbers, symbols."
-        )
+        return "Password must use at least three of: lowercase, uppercase, numbers, symbols."
+    return None
+
+
+def validate_strong_password(_form, field) -> None:
+    error = password_policy_error(field.data)
+    if error:
+        raise ValidationError(error)
 
 
 class LoginForm(FlaskForm):
@@ -327,7 +343,13 @@ def login():
             user.locked_until = None
             user.updated_at = now
             db.commit()
-            if user.status != "approved":
+            if user.status == "blocked":
+                current_app.logger.warning(
+                    "authentication_failed",
+                    extra={"event": "authentication_failed", "reason": "account_blocked", "user_id": user.id},
+                )
+                flash("Your account has been blocked. Contact an administrator.", "error")
+            elif user.status != "approved":
                 current_app.logger.warning(
                     "authentication_failed",
                     extra={"event": "authentication_failed", "reason": "account_not_approved", "user_id": user.id},
@@ -465,6 +487,72 @@ def update_user_role(user_id):
     return redirect(url_for("auth.users"))
 
 
+@bp.post("/admin/users/<int:user_id>/status")
+@admin_required
+def update_user_status(user_id):
+    db = get_db()
+    user = db.session.get(User, user_id)
+    if user is None or user.is_admin:
+        abort(404)
+    status = request.form.get("status")
+    if status not in ("approved", "blocked") or user.status == "pending":
+        abort(400)
+    if user.status != status:
+        user.status = status
+        user.auth_version += 1
+        user.failed_login_count = 0
+        user.locked_until = None
+        user.updated_at = datetime.now()
+        db.commit()
+        current_app.logger.info(
+            "user_status_updated",
+            extra={
+                "event": "user_status_updated",
+                "user_id": user.id,
+                "status": status,
+            },
+        )
+        action = "blocked" if status == "blocked" else "unblocked"
+        flash("{} has been {}.".format(user.username, action), "success")
+    return redirect(url_for("auth.users"))
+
+
+@bp.post("/admin/users/<int:user_id>/password")
+@admin_required
+def update_user_password(user_id):
+    db = get_db()
+    user = db.session.get(User, user_id)
+    if user is None or user.is_admin:
+        abort(404)
+    password = request.form.get("new_password") or ""
+    confirmation = request.form.get("confirm_password") or ""
+    error = password_policy_error(password)
+    if error:
+        flash(error, "error")
+        return redirect(url_for("auth.users"))
+    if password != confirmation:
+        flash("Passwords must match.", "error")
+        return redirect(url_for("auth.users"))
+
+    user.set_password(password)
+    user.auth_version += 1
+    user.failed_login_count = 0
+    user.locked_until = None
+    user.updated_at = datetime.now()
+    db.commit()
+    current_app.logger.info(
+        "user_password_updated",
+        extra={"event": "user_password_updated", "user_id": user.id},
+    )
+    flash(
+        "Password for {} has been changed. Existing sessions were signed out.".format(
+            user.username
+        ),
+        "success",
+    )
+    return redirect(url_for("auth.users"))
+
+
 def init_app(app) -> None:
     login_manager.init_app(app)
     login_manager.login_view = "auth.login"
@@ -513,6 +601,12 @@ def init_app(app) -> None:
             if current_user.role == "registration":
                 capability = REGISTRATION_ENDPOINT_CAPABILITIES.get(request.endpoint)
                 if capability is None or not has_capability(capability):
+                    abort(403)
+            elif current_user.role == "user":
+                capability = STANDARD_USER_RESTRICTED_ENDPOINT_CAPABILITIES.get(
+                    request.endpoint
+                )
+                if capability is not None and not has_capability(capability):
                     abort(403)
             return None
         next_url = request.full_path.rstrip("?") if request.method == "GET" else None

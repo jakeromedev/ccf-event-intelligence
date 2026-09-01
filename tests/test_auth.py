@@ -467,6 +467,111 @@ class AuthenticationTests(unittest.TestCase):
             ).status_code,
         )
 
+    def test_admin_can_change_password_and_block_or_unblock_users(self):
+        _, admin_password = self.initialize_admin()
+        user_id = self.create_user("managed-operator")
+        self.login("admin", admin_password)
+
+        page = self.client.get("/admin/users")
+        self.assertIn(b"Change Password", page.data)
+        self.assertIn(b">Block</button>", page.data)
+        token = CSRF_PATTERN.search(page.data).group(1).decode("utf-8")
+
+        weak = self.client.post(
+            "/admin/users/{}/password".format(user_id),
+            data={
+                "csrf_token": token,
+                "new_password": "short",
+                "confirm_password": "short",
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(b"Password must be between 12 and 128 characters", weak.data)
+
+        token = CSRF_PATTERN.search(weak.data).group(1).decode("utf-8")
+        mismatch = self.client.post(
+            "/admin/users/{}/password".format(user_id),
+            data={
+                "csrf_token": token,
+                "new_password": "NewStrongPassword12!",
+                "confirm_password": "DifferentPassword12!",
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(b"Passwords must match", mismatch.data)
+
+        token = CSRF_PATTERN.search(mismatch.data).group(1).decode("utf-8")
+        changed = self.client.post(
+            "/admin/users/{}/password".format(user_id),
+            data={
+                "csrf_token": token,
+                "new_password": "NewStrongPassword12!",
+                "confirm_password": "NewStrongPassword12!",
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(b"Existing sessions were signed out", changed.data)
+        with self.app.app_context():
+            user = get_db().session.get(User, user_id)
+            self.assertTrue(user.check_password("NewStrongPassword12!"))
+            self.assertFalse(user.check_password("StrongPassword12!"))
+            password_auth_version = user.auth_version
+
+        token = CSRF_PATTERN.search(changed.data).group(1).decode("utf-8")
+        blocked = self.client.post(
+            "/admin/users/{}/status".format(user_id),
+            data={"csrf_token": token, "status": "blocked"},
+            follow_redirects=True,
+        )
+        self.assertIn(b"managed-operator has been blocked", blocked.data)
+        self.assertIn(b">Unblock</button>", blocked.data)
+        with self.app.app_context():
+            user = get_db().session.get(User, user_id)
+            self.assertEqual("blocked", user.status)
+            self.assertGreater(user.auth_version, password_auth_version)
+
+        self.logout()
+        denied = self.login("managed-operator", "NewStrongPassword12!")
+        self.assertIn(b"account has been blocked", denied.data)
+
+        self.login("admin", admin_password)
+        token = self.csrf("/admin/users")
+        unblocked = self.client.post(
+            "/admin/users/{}/status".format(user_id),
+            data={"csrf_token": token, "status": "approved"},
+            follow_redirects=True,
+        )
+        self.assertIn(b"managed-operator has been unblocked", unblocked.data)
+        self.logout()
+        self.assertEqual(
+            200,
+            self.login("managed-operator", "NewStrongPassword12!").status_code,
+        )
+
+    def test_non_admin_cannot_manage_user_password_or_block_status(self):
+        target_id = self.create_user("managed-target")
+        self.create_user("ordinary-operator")
+        self.login("ordinary-operator", "StrongPassword12!")
+        token = self.csrf("/events")
+        self.assertEqual(
+            403,
+            self.client.post(
+                "/admin/users/{}/password".format(target_id),
+                data={
+                    "csrf_token": token,
+                    "new_password": "NewStrongPassword12!",
+                    "confirm_password": "NewStrongPassword12!",
+                },
+            ).status_code,
+        )
+        self.assertEqual(
+            403,
+            self.client.post(
+                "/admin/users/{}/status".format(target_id),
+                data={"csrf_token": token, "status": "blocked"},
+            ).status_code,
+        )
+
     def test_database_and_web_paths_cannot_create_a_second_admin(self):
         self.initialize_admin()
         self.assertIn(b"username is reserved", self.register("ADMIN").data)
@@ -533,8 +638,9 @@ class AuthenticationTests(unittest.TestCase):
         imports_path = "/events/{}/imports".format(event_id)
         self.login("normal-operator", "StrongPassword12!")
         normal_page = self.client.get(imports_path)
+        self.assertEqual(403, normal_page.status_code)
         self.assertNotIn(b">Delete</button>", normal_page.data)
-        token = self.csrf(imports_path)
+        token = self.csrf("/events/{}".format(event_id))
         denied = self.client.post(
             "/events/{}/imports/{}/delete".format(event_id, inactive_batch),
             data={"csrf_token": token},
@@ -588,12 +694,16 @@ class AuthenticationTests(unittest.TestCase):
         self.assertEqual(200, overview.status_code)
         self.assertNotIn(b"Manage Satellite Targets", overview.data)
         self.assertEqual(
-            200,
+            403,
             self.client.get("/events/{}/imports".format(event_id)).status_code,
         )
         self.assertEqual(
-            200,
+            403,
             self.client.get("/events/{}/data-quality".format(event_id)).status_code,
+        )
+        self.assertEqual(
+            200,
+            self.client.get("/events/{}/registrations".format(event_id)).status_code,
         )
         self.assertEqual(
             200,
