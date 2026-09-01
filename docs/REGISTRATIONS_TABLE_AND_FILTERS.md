@@ -76,7 +76,7 @@ contract. `Search`, `Filter`, and `Sort` identify supported operations.
 | Group | Column | Source/expression | Search | Filter | Sort |
 |---|---|---|:---:|:---:|:---:|
 | Attestation & Payment | Attestation Form | `source_data_json["Upload Your Accomplished Attestation Form Here"]` | No | No | No |
-| Attestation & Payment | Attestation Status | Verification status, defaulting to `pending` when no verification row exists | No | Yes | Yes |
+| Attestation & Payment | AF Status | Verification status, defaulting to `pending` when no verification row exists | No | Yes | Yes |
 | Attestation & Payment | Remarks | Durable-participant Pending and Resolved counts | No | Yes | No |
 | Attestation & Payment | Payment Status | Matched ticket's `payment_status` | No | Yes | Yes |
 | Registrant Details | First Name | `registrants.first_name` | Yes | No | Yes |
@@ -111,7 +111,7 @@ The available values are queried from the selected Event and batch scope.
 | Shirt Size | `shirt_size` | Distinct supported Shirt Size source values |
 | Transportation To MMRC | `transportation_to_mmrc` | Distinct supported transportation-to source values |
 | Transportation From MMRC | `transportation_from_mmrc` | Distinct supported transportation-from source values |
-| Attestation Status | `attestation_status` | Fixed `Pending`, `Verified`, and `Invalid` choices |
+| AF Status | `attestation_status` | Fixed `Pending`, `Verified`, and `Invalid` choices |
 | Remarks | `remarks` | Fixed `Has Pending Remarks` choice |
 | Payment Status | `payment_status` | Distinct matched-ticket payment statuses |
 

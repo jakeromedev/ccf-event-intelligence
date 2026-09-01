@@ -295,7 +295,7 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         labels = [column["label"] for column in payload["columns"]]
         self.assertEqual(
             [
-                "Attestation Form", "Attestation Status", "Remarks", "Payment Status",
+                "Actions", "AF Status", "Remarks", "Payment Status",
                 "First Name", "Last Name", "Email Address", "Mobile Number",
                 "Gender", "Birth Month", "Birth Year", "Life Stage", "Satellite", "Shirt Size",
                 "Transportation To MMRC", "Transportation From MMRC",
@@ -1055,8 +1055,8 @@ class RegistrationsIntegrationTests(unittest.TestCase):
 
         script = (Path(__file__).parents[1] / "app/static/registrations.js").read_text()
         self.assertIn('["http:", "https:"]', script)
-        self.assertIn('label.textContent = "Attestation Form"', script)
-        self.assertIn('button.setAttribute("aria-haspopup", "dialog")', script)
+        self.assertIn('attestationLabel.textContent = "Attestation Form"', script)
+        self.assertIn('button.setAttribute("aria-haspopup", "menu")', script)
         self.assertIn('openOriginal.href = url', script)
         self.assertIn('previewImage.src = url', script)
         self.assertIn('previewImage.onerror', script)
@@ -1164,16 +1164,30 @@ class RegistrationsIntegrationTests(unittest.TestCase):
             'data-remarks-feedback',
         ):
             self.assertIn(marker, page)
-        self.assertIn('column.renderer === "remarks"', script)
-        self.assertIn('button.textContent = "No Remarks"', script)
-        self.assertIn('button.textContent = `${pending} Pending`', script)
+        self.assertIn('column.renderer === "actions"', script)
+        self.assertIn('label.textContent = "Actions"', script)
+        self.assertIn('actionsRemarksLabel.textContent = pending ? `Remarks (${pending})` : "Remarks"', script)
+        self.assertIn('actionsMenu.setAttribute("role", "menu")', script)
+        self.assertIn('actionsAttestationItem.setAttribute("role", "menuitem")', script)
+        self.assertIn('actionsRemarksItem.setAttribute("role", "menuitem")', script)
+        self.assertIn('position: fixed', styles)
+        self.assertIn('z-index: 1400', styles)
+        self.assertIn('closeActionsMenu(true)', script)
+        self.assertIn('column.renderer !== "remarks"', script)
         self.assertIn('body: JSON.stringify({remark})', script)
         self.assertIn('body: JSON.stringify({status: "resolved"})', script)
         self.assertIn('"X-CSRFToken": root.dataset.csrfToken', script)
         self.assertIn("text.textContent = remark.remark", script)
-        self.assertIn('if (!remarksModal.hidden)', script)
+        self.assertIn('remarksModal?.querySelector("[role=\'dialog\']")', script)
+        self.assertIn("if (hasRemarksUi && !remarksModal.hidden)", script)
         self.assertIn('closeRemarksModal();', script)
-        self.assertIn(".registration-remarks-button.has-pending", styles)
+        self.assertIn(".registration-actions-trigger", styles)
+        self.assertIn(".registration-actions-menu", styles)
+        self.assertIn("if (index < 3)", script)
+        self.assertIn(".registration-sticky-3", styles)
+        self.assertIn("text-overflow: clip", styles)
+        self.assertIn('tr.classList.add("has-pending-remarks")', script)
+        self.assertIn("tr.has-pending-remarks td", styles)
         self.assertIn(".remark-card.is-pending", styles)
         self.assertIn(".remark-card.is-resolved", styles)
 

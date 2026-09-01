@@ -104,14 +104,14 @@ def registration_columns(db):
         ),
         _registration_column(
             "attestation_form",
-            "Attestation Form",
+            "Actions",
             _source_expression(db, "attestation_form"),
             group="Attestation & Payment",
-            renderer="attestation_review",
+            renderer="actions",
         ),
         _registration_column(
             "attestation_status",
-            "Attestation Status",
+            "AF Status",
             "COALESCE(verification.status, 'pending')",
             data_type="select",
             group="Attestation & Payment",

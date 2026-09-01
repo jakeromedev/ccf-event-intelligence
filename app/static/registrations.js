@@ -56,22 +56,27 @@
     const openOriginal = modal.querySelector("[data-attestation-original]");
     const canEditAttestation = root.dataset.canEditAttestation === "true";
     const remarksModal = document.querySelector("[data-remarks-modal]");
-    const remarksDialog = remarksModal.querySelector("[role='dialog']");
-    const remarksCloseButton = remarksModal.querySelector(".registrant-modal-close");
-    const remarksName = remarksModal.querySelector("[data-remarks-name]");
-    const remarksForm = remarksModal.querySelector("[data-remarks-form]");
-    const remarksText = remarksModal.querySelector("[data-remarks-text]");
-    const remarksSave = remarksModal.querySelector("[data-remarks-save]");
-    const remarksCharacterCount = remarksModal.querySelector("[data-remarks-character-count]");
-    const remarksFeedback = remarksModal.querySelector("[data-remarks-feedback]");
-    const remarksLoading = remarksModal.querySelector("[data-remarks-loading]");
-    const remarksContent = remarksModal.querySelector("[data-remarks-content]");
-    const pendingRemarksList = remarksModal.querySelector("[data-pending-remarks-list]");
-    const resolvedRemarksList = remarksModal.querySelector("[data-resolved-remarks-list]");
-    const pendingRemarksEmpty = remarksModal.querySelector("[data-pending-remarks-empty]");
-    const resolvedRemarksEmpty = remarksModal.querySelector("[data-resolved-remarks-empty]");
-    const pendingRemarksCount = remarksModal.querySelector("[data-pending-remarks-count]");
-    const resolvedRemarksCount = remarksModal.querySelector("[data-resolved-remarks-count]");
+    const remarksDialog = remarksModal?.querySelector("[role='dialog']");
+    const remarksCloseButton = remarksModal?.querySelector(".registrant-modal-close");
+    const remarksName = remarksModal?.querySelector("[data-remarks-name]");
+    const remarksForm = remarksModal?.querySelector("[data-remarks-form]");
+    const remarksText = remarksModal?.querySelector("[data-remarks-text]");
+    const remarksSave = remarksModal?.querySelector("[data-remarks-save]");
+    const remarksCharacterCount = remarksModal?.querySelector("[data-remarks-character-count]");
+    const remarksFeedback = remarksModal?.querySelector("[data-remarks-feedback]");
+    const remarksLoading = remarksModal?.querySelector("[data-remarks-loading]");
+    const remarksContent = remarksModal?.querySelector("[data-remarks-content]");
+    const pendingRemarksList = remarksModal?.querySelector("[data-pending-remarks-list]");
+    const resolvedRemarksList = remarksModal?.querySelector("[data-resolved-remarks-list]");
+    const pendingRemarksEmpty = remarksModal?.querySelector("[data-pending-remarks-empty]");
+    const resolvedRemarksEmpty = remarksModal?.querySelector("[data-resolved-remarks-empty]");
+    const pendingRemarksCount = remarksModal?.querySelector("[data-pending-remarks-count]");
+    const resolvedRemarksCount = remarksModal?.querySelector("[data-resolved-remarks-count]");
+    const hasRemarksUi = Boolean(
+        remarksModal && remarksDialog && remarksCloseButton && remarksName && remarksFeedback
+        && remarksLoading && remarksContent && pendingRemarksList && resolvedRemarksList
+        && pendingRemarksEmpty && resolvedRemarksEmpty && pendingRemarksCount && resolvedRemarksCount,
+    );
     const canEditRemarks = root.dataset.canEditRemarks === "true";
 
     const columnGroupOrder = ["Attestation & Payment", "Registrant Details", "Logistics"];
@@ -108,6 +113,12 @@
     let remarksReturnFocus = null;
     let remarksMutationPending = false;
     let remarksRequestSession = 0;
+    let actionsMenu = null;
+    let actionsMenuTrigger = null;
+    let actionsMenuRow = null;
+    let actionsAttestationItem = null;
+    let actionsRemarksItem = null;
+    let actionsRemarksLabel = null;
 
     const operatorLabels = {
         equals: "Equals", in: "Is Any Of", is_empty: "Is Empty",
@@ -204,7 +215,9 @@
         });
     };
 
-    const visibleTableColumns = () => columns.filter((column) => groupVisibility[column.group] !== false);
+    const visibleTableColumns = () => columns.filter((column) => (
+        column.renderer !== "remarks" && groupVisibility[column.group] !== false
+    ));
 
     const setColumnsMenuOpen = (open) => {
         columnsMenu.hidden = !open;
@@ -852,18 +865,152 @@
         return svg;
     };
 
+    const commentIcon = () => {
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.setAttribute("fill", "none");
+        svg.setAttribute("stroke", "currentColor");
+        svg.setAttribute("stroke-width", "1.8");
+        svg.setAttribute("stroke-linecap", "round");
+        svg.setAttribute("stroke-linejoin", "round");
+        svg.setAttribute("aria-hidden", "true");
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", "M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z");
+        svg.append(path);
+        return svg;
+    };
+
+    const closeActionsMenu = (restoreFocus = false) => {
+        if (!actionsMenu || actionsMenu.hidden) return;
+        const trigger = actionsMenuTrigger;
+        actionsMenu.hidden = true;
+        actionsMenu.classList.remove("opens-upward");
+        if (trigger) trigger.setAttribute("aria-expanded", "false");
+        actionsMenuTrigger = null;
+        actionsMenuRow = null;
+        if (restoreFocus) trigger?.focus();
+    };
+
+    const positionActionsMenu = () => {
+        if (!actionsMenu || actionsMenu.hidden || !actionsMenuTrigger) return;
+        const triggerRect = actionsMenuTrigger.getBoundingClientRect();
+        const menuRect = actionsMenu.getBoundingClientRect();
+        const viewportGap = 8;
+        const menuGap = 5;
+        const spaceBelow = window.innerHeight - triggerRect.bottom;
+        const opensUpward = spaceBelow < menuRect.height + menuGap + viewportGap
+            && triggerRect.top > spaceBelow;
+        const top = opensUpward
+            ? triggerRect.top - menuRect.height - menuGap
+            : triggerRect.bottom + menuGap;
+        const left = Math.min(
+            Math.max(viewportGap, triggerRect.right - menuRect.width),
+            window.innerWidth - menuRect.width - viewportGap,
+        );
+        actionsMenu.style.top = `${Math.max(viewportGap, top)}px`;
+        actionsMenu.style.left = `${left}px`;
+        actionsMenu.classList.toggle("opens-upward", opensUpward);
+    };
+
+    const ensureActionsMenu = () => {
+        if (actionsMenu) return;
+        actionsMenu = document.createElement("div");
+        actionsMenu.className = "registration-actions-menu";
+        actionsMenu.setAttribute("role", "menu");
+        actionsMenu.setAttribute("aria-label", "Registrant actions");
+        actionsMenu.hidden = true;
+
+        actionsAttestationItem = document.createElement("button");
+        actionsAttestationItem.type = "button";
+        actionsAttestationItem.setAttribute("role", "menuitem");
+        const attestationLabel = document.createElement("span");
+        attestationLabel.textContent = "Attestation Form";
+        actionsAttestationItem.append(editIcon(), attestationLabel);
+
+        actionsRemarksItem = document.createElement("button");
+        actionsRemarksItem.type = "button";
+        actionsRemarksItem.setAttribute("role", "menuitem");
+        actionsRemarksLabel = document.createElement("span");
+        actionsRemarksLabel.textContent = "Remarks";
+        actionsRemarksItem.append(commentIcon(), actionsRemarksLabel);
+
+        actionsAttestationItem.addEventListener("click", () => {
+            const row = actionsMenuRow;
+            const trigger = actionsMenuTrigger;
+            closeActionsMenu();
+            if (row && trigger) openAttestationModal(row, trigger);
+        });
+        actionsRemarksItem.addEventListener("click", () => {
+            const row = actionsMenuRow;
+            const trigger = actionsMenuTrigger;
+            closeActionsMenu();
+            if (row && trigger && hasRemarksUi) openRemarksModal(row, trigger);
+        });
+        actionsMenu.addEventListener("keydown", (event) => {
+            const items = [actionsAttestationItem, actionsRemarksItem].filter((item) => !item.disabled);
+            const index = items.indexOf(document.activeElement);
+            if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+                event.preventDefault();
+                const nextIndex = event.key === "Home" ? 0
+                    : event.key === "End" ? items.length - 1
+                        : (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+                items[nextIndex]?.focus();
+            } else if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                closeActionsMenu(true);
+            } else if (event.key === "Tab") {
+                closeActionsMenu();
+            }
+        });
+        actionsMenu.append(actionsAttestationItem, actionsRemarksItem);
+        document.body.append(actionsMenu);
+    };
+
+    const openActionsMenu = (row, trigger, focusLast = false) => {
+        ensureActionsMenu();
+        if (actionsMenuTrigger === trigger && !actionsMenu.hidden) {
+            closeActionsMenu(true);
+            return;
+        }
+        closeActionsMenu();
+        actionsMenuRow = row;
+        actionsMenuTrigger = trigger;
+        const pending = Number(row.pending_remark_count || 0);
+        actionsRemarksLabel.textContent = pending ? `Remarks (${pending})` : "Remarks";
+        actionsRemarksItem.disabled = !hasRemarksUi;
+        actionsRemarksItem.title = hasRemarksUi ? "" : "Remarks are temporarily unavailable. Refresh the page.";
+        trigger.setAttribute("aria-expanded", "true");
+        actionsMenu.hidden = false;
+        positionActionsMenu();
+        const items = [actionsAttestationItem, actionsRemarksItem].filter((item) => !item.disabled);
+        (focusLast ? items[items.length - 1] : items[0])?.focus();
+    };
+
     const renderCellValue = (cell, value, column, row) => {
-        if (column.renderer === "attestation_review") {
+        if (column.renderer === "actions") {
             const button = document.createElement("button");
             const name = [row.first_name, row.last_name].filter(Boolean).join(" ") || "registrant";
             button.type = "button";
-            button.className = "registration-form-button";
-            button.setAttribute("aria-haspopup", "dialog");
-            button.setAttribute("aria-label", `Review Attestation Form for ${name}`);
+            button.className = "registration-actions-trigger";
+            button.setAttribute("aria-haspopup", "menu");
+            button.setAttribute("aria-expanded", "false");
+            button.setAttribute("aria-label", `Actions for ${name}`);
             const label = document.createElement("span");
-            label.textContent = "Attestation Form";
-            button.append(label, editIcon());
-            button.addEventListener("click", () => openAttestationModal(row, button));
+            label.textContent = "Actions";
+            const chevron = document.createElement("span");
+            chevron.className = "registration-actions-chevron";
+            chevron.setAttribute("aria-hidden", "true");
+            chevron.textContent = "▾";
+            button.append(label, chevron);
+            button.addEventListener("click", () => openActionsMenu(row, button));
+            button.addEventListener("keydown", (event) => {
+                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                    event.preventDefault();
+                    openActionsMenu(row, button, event.key === "ArrowUp");
+                }
+            });
+            cell.classList.add("registration-actions-cell");
             cell.append(button);
             return;
         }
@@ -871,23 +1018,6 @@
             const badge = document.createElement("span");
             setStatusBadge(badge, value);
             cell.append(badge);
-            return;
-        }
-        if (column.renderer === "remarks") {
-            const pending = Number(row.pending_remark_count || 0);
-            const resolved = Number(row.resolved_remark_count || 0);
-            const button = document.createElement("button");
-            const name = [row.first_name, row.last_name].filter(Boolean).join(" ") || "registrant";
-            button.type = "button";
-            button.className = `registration-remarks-button${pending ? " has-pending" : ""}`;
-            button.setAttribute("aria-haspopup", "dialog");
-            button.setAttribute("aria-label", `Open Remarks for ${name}`);
-            if (pending && resolved) button.textContent = `${pending} Pending · ${resolved} Resolved`;
-            else if (pending) button.textContent = `${pending} Pending`;
-            else if (resolved) button.textContent = `${resolved} Resolved`;
-            else button.textContent = "No Remarks";
-            button.addEventListener("click", () => openRemarksModal(row, button));
-            cell.append(button);
             return;
         }
         if (column.renderer === "payment_status") {
@@ -906,7 +1036,8 @@
         visibleColumns.forEach((column, index) => {
             const th = document.createElement("th");
             th.scope = "col";
-            if (index === 0) th.classList.add("sticky-key");
+            if (column.renderer === "actions") th.classList.add("registration-actions-column");
+            if (index < 3) th.classList.add("registration-sticky-column", `registration-sticky-${index + 1}`);
             if (previousGroup !== null && previousGroup !== column.group) th.classList.add("registration-group-start");
             if (column.sortable) {
                 const activeSort = sort === column.key;
@@ -944,16 +1075,21 @@
     };
 
     const renderTable = (payload) => {
+        closeActionsMenu();
         latestPayload = payload;
         const visibleColumns = visibleTableColumns();
         renderHeaders(visibleColumns);
         tableBody.replaceChildren();
         payload.rows.forEach((row) => {
             const tr = document.createElement("tr");
+            if (Number(row.pending_remark_count || 0) > 0) {
+                tr.classList.add("has-pending-remarks");
+            }
             let previousGroup = null;
             visibleColumns.forEach((column, index) => {
                 const td = document.createElement("td");
-                if (index === 0) td.classList.add("sticky-key");
+                if (column.renderer === "actions") td.classList.add("registration-actions-column");
+                if (index < 3) td.classList.add("registration-sticky-column", `registration-sticky-${index + 1}`);
                 if (previousGroup !== null && previousGroup !== column.group) td.classList.add("registration-group-start");
                 renderCellValue(td, row[column.key], column, row);
                 tr.append(td);
@@ -1193,7 +1329,7 @@
     actualSizeButton.addEventListener("click", () => setManualZoom(1));
     modalSave?.addEventListener("click", saveAttestationStatus);
     modalStatus?.addEventListener("change", () => setModalFeedback(""));
-    remarksModal.querySelectorAll("[data-remarks-close]").forEach((control) => {
+    remarksModal?.querySelectorAll("[data-remarks-close]").forEach((control) => {
         control.addEventListener("click", closeRemarksModal);
     });
     remarksForm?.addEventListener("submit", saveRemark);
@@ -1216,10 +1352,20 @@
     }
 
     document.addEventListener("click", (event) => {
+        if (actionsMenu && !actionsMenu.hidden
+            && !actionsMenu.contains(event.target)
+            && !event.target.closest(".registration-actions-trigger")) {
+            closeActionsMenu();
+        }
         if (!columnsMenu.hidden && !event.target.closest(".admin-column-control")) setColumnsMenuOpen(false);
     });
     document.addEventListener("keydown", (event) => {
-        if (!remarksModal.hidden) {
+        if (actionsMenu && !actionsMenu.hidden && event.key === "Escape") {
+            event.preventDefault();
+            closeActionsMenu(true);
+            return;
+        }
+        if (hasRemarksUi && !remarksModal.hidden) {
             if (event.key === "Escape") {
                 event.preventDefault();
                 closeRemarksModal();
@@ -1290,5 +1436,7 @@
             columnsToggle.focus();
         }
     });
+    window.addEventListener("resize", () => closeActionsMenu());
+    window.addEventListener("scroll", () => closeActionsMenu(), true);
     window.addEventListener("popstate", () => { readUrl(); loadData(false); });
 })();

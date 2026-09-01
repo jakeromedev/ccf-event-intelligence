@@ -114,7 +114,7 @@ foreign key.
 | Group | Display column | Source |
 |---|---|---|
 | Attestation & Payment | Attestation Form | `source_data_json["Upload Your Accomplished Attestation Form Here"]` |
-| Attestation & Payment | Attestation Status | `COALESCE(attestation_verifications.status, 'pending')` |
+| Attestation & Payment | AF Status | `COALESCE(attestation_verifications.status, 'pending')` |
 | Attestation & Payment | Remarks | Pre-aggregated Pending and Resolved counts for the durable participant |
 | Attestation & Payment | Payment Status | `tickets.payment_status` through the batch/ticket-code relationship |
 | Registrant Details | First Name | `registrants.first_name` |

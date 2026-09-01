@@ -2847,26 +2847,114 @@ body.registrations-filter-open { overflow: hidden; }
     font-size: 9.5px;
 }
 .registrations-data-table tbody tr:hover td { background: var(--b1g-off-white); }
-.registrations-data-table .registration-group-start { border-left-color: var(--b1g-cream); }
-.registration-form-button {
-    min-height: 30px;
-    border-radius: 7px;
-    font-size: 8.5px;
+.registrations-data-table tbody tr.has-pending-remarks td {
+    background: #fff8e6;
 }
-.registration-remarks-button {
-    min-height: 30px;
-    padding: 6px 10px;
-    color: var(--b1g-text-muted);
-    border: 1px solid var(--b1g-border);
-    border-radius: 999px;
+.registrations-data-table tbody tr.has-pending-remarks:hover td {
+    background: #fff2cf;
+}
+.registrations-data-table tbody tr.has-pending-remarks td:first-child {
+    box-shadow: inset 3px 0 0 #d5a63d;
+}
+.registrations-data-table .registration-group-start { border-left-color: var(--b1g-cream); }
+.registrations-data-table .registration-actions-column {
+    width: 108px;
+    min-width: 108px;
+    max-width: 108px;
+    text-align: center;
+}
+.registrations-data-table .registration-actions-cell {
+    overflow: visible;
+    text-overflow: clip;
+    vertical-align: middle;
+}
+.registrations-data-table .registration-sticky-column {
+    position: sticky;
+    z-index: 2;
     background: var(--b1g-white);
+}
+.registrations-data-table th.registration-sticky-column {
+    z-index: 5;
+    background: #f5f9fa;
+}
+.registrations-data-table .registration-sticky-1 { left: 0; }
+.registrations-data-table .registration-sticky-2 {
+    left: 108px;
+    width: 145px;
+    min-width: 145px;
+    max-width: 145px;
+}
+.registrations-data-table .registration-sticky-3 {
+    left: 253px;
+    width: 145px;
+    min-width: 145px;
+    max-width: 145px;
+    border-right: 1px solid var(--b1g-border);
+    box-shadow: 7px 0 10px rgba(48, 22, 20, .06);
+}
+.registration-actions-trigger {
+    width: 84px;
+    min-height: 28px;
+    padding: 5px 9px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    color: var(--b1g-text);
+    border: 1px solid var(--b1g-border);
+    border-radius: 6px;
+    background: var(--b1g-white);
+    font: inherit;
     font-size: 8.5px;
     font-weight: 750;
-    white-space: nowrap;
+    line-height: 1;
     cursor: pointer;
 }
-.registration-remarks-button:hover { color: var(--b1g-red); border-color: var(--b1g-rose); background: var(--b1g-off-white); }
-.registration-remarks-button.has-pending { color: #7a4d00; border-color: #e5ca82; background: #fff8df; }
+.registration-actions-trigger:hover,
+.registration-actions-trigger[aria-expanded="true"] {
+    color: var(--b1g-red);
+    border-color: var(--b1g-rose);
+    background: var(--b1g-off-white);
+}
+.registration-actions-trigger:focus-visible { outline: 3px solid var(--b1g-focus-ring); outline-offset: 2px; }
+.registration-actions-chevron { font-size: 9px; transition: transform .14s ease; }
+.registration-actions-trigger[aria-expanded="true"] .registration-actions-chevron { transform: rotate(180deg); }
+.registration-actions-menu {
+    position: fixed;
+    z-index: 1400;
+    width: 178px;
+    padding: 5px;
+    border: 1px solid var(--b1g-border);
+    border-radius: 8px;
+    background: var(--b1g-white);
+    box-shadow: 0 10px 26px rgba(48, 22, 20, .16);
+}
+.registration-actions-menu[hidden] { display: none; }
+.registration-actions-menu button {
+    width: 100%;
+    min-height: 34px;
+    padding: 7px 9px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    color: var(--b1g-text);
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    font: inherit;
+    font-size: 9px;
+    font-weight: 700;
+    text-align: left;
+    cursor: pointer;
+}
+.registration-actions-menu button:hover,
+.registration-actions-menu button:focus-visible {
+    color: var(--b1g-red);
+    outline: none;
+    background: var(--b1g-off-white);
+}
+.registration-actions-menu button:disabled { color: var(--b1g-text-muted); cursor: not-allowed; opacity: .55; }
+.registration-actions-menu svg { width: 15px; height: 15px; flex: 0 0 auto; }
 .registration-attestation-badge,
 .registration-payment-badge {
     min-height: 25px;
