@@ -84,6 +84,14 @@ REGISTRANT_B1G_FIELDS = [
     "First Name", "Last Name", "Email Address", "Mobile Number", "Gender", "Birth Month",
     "Birth Year", "B1g Satellite Hub", "B1g Satellite", "Specify B1g Satellite",
 ]
+REGISTRANT_REGIONAL_B1G_FIELDS = [
+    "ID", "Event Name", "Event Slug", "Registration Code", "Ticket Code", "Ticket Status",
+    "First Name", "Last Name", "Email Address", "Mobile Number", "Gender", "Birth Month",
+    "Birth Year", "Bg Satellite Hub", "B1g Fridays Attendee",
+    "Luzon North Central Hub", "Luzon Central Hub", "Luzon North East Hub",
+    "Luzon North West Hub", "Luzon South Hub", "Mindanao South Hub",
+    "Mindanao North Hub", "Visayas Hub", "Specify Icp Hub",
+]
 
 
 def write_csv(path, fields, rows):
@@ -1686,6 +1694,50 @@ class EventIntegrationTests(unittest.TestCase):
         result = validate_file("registrants", self.paths["registrants"].name, str(self.paths["registrants"]))
         self.assertEqual("valid", result.status)
         self.assertEqual("registrants", result.detected_type)
+
+    def test_regional_b1g_registrants_variant_is_normalized_and_recognized(self):
+        write_csv(
+            self.paths["registrants"],
+            REGISTRANT_REGIONAL_B1G_FIELDS,
+            [{
+                "ID": "1", "Event Name": "B1G Event", "Event Slug": "b1g-event",
+                "Registration Code": "R-1", "Ticket Code": "T-1", "Ticket Status": "Assigned",
+                "Bg Satellite Hub": "Mindanao South", "Mindanao South Hub": "B1G Tagum",
+            }],
+        )
+        result = validate_file("registrants", self.paths["registrants"].name, str(self.paths["registrants"]))
+        self.assertEqual("valid", result.status)
+        self.assertEqual("registrants", result.detected_type)
+        self.assertEqual("Mindanao South", result.rows[0]["B1g Satellite Hub"])
+        self.assertEqual("B1G Tagum", result.rows[0]["B1g Satellite"])
+        self.assertNotIn("Bg Satellite Hub", result.rows[0])
+
+    def test_regional_b1g_registrants_process_regional_satellites(self):
+        base = {
+            "Event Name": "Event One", "Event Slug": "event-1", "Ticket Status": "Assigned",
+            "First Name": "Test", "Last Name": "Registrant", "Email Address": "test@example.com",
+            "Mobile Number": "0900", "Gender": "Female", "Birth Month": "January", "Birth Year": "1990",
+        }
+        rows = [
+            dict(base, ID="1", **{"Registration Code": "R-1", "Ticket Code": "T-MAIN", "Bg Satellite Hub": "Mindanao South", "Mindanao South Hub": "B1G Tagum"}),
+            dict(base, ID="2", **{"Registration Code": "R-2", "Ticket Code": "T-LOCAL", "Bg Satellite Hub": "Mindanao North", "Mindanao North Hub": "B1G Malaybalay"}),
+            dict(base, ID="3", **{"Registration Code": "R-3", "Ticket Code": "T-INTL", "Bg Satellite Hub": "ICP", "Specify Icp Hub": "B1G Hong Kong"}),
+        ]
+        write_csv(self.paths["registrants"], REGISTRANT_REGIONAL_B1G_FIELDS, rows)
+        batch_id = self._process(self.event_a)
+        with self.app.app_context():
+            ranking = satellite_metrics(get_db(), batch_id)["ranking"]
+            self.assertEqual(
+                {"B1G Tagum", "B1G Malaybalay", "B1G Hong Kong"},
+                {item["name"] for item in ranking},
+            )
+            stored = get_db().execute(
+                "SELECT b1g_satellite_hub_raw, b1g_satellite_raw FROM registrants "
+                "WHERE batch_id = ? AND ticket_code = 'T-MAIN'",
+                (batch_id,),
+            ).fetchone()
+            self.assertEqual("Mindanao South", stored["b1g_satellite_hub_raw"])
+            self.assertEqual("B1G Tagum", stored["b1g_satellite_raw"])
 
     def test_b1g_registrants_process_into_existing_dashboard_categories(self):
         base = {

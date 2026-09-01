@@ -37,6 +37,22 @@ REGISTRANT_AFFILIATION_HEADERS = (
     },
 )
 
+REGISTRANT_REGIONAL_SATELLITE_HEADERS = (
+    "Luzon North Central Hub",
+    "Luzon Central Hub",
+    "Luzon North East Hub",
+    "Luzon North West Hub",
+    "Luzon South Hub",
+    "Mindanao South Hub",
+    "Mindanao North Hub",
+    "Visayas Hub",
+    "Specify Icp Hub",
+)
+
+REGISTRANT_HEADER_ALIASES = {
+    "Bg Satellite Hub": "B1g Satellite Hub",
+}
+
 
 EXPORT_DEFINITIONS = {
     "tickets": {
@@ -130,7 +146,56 @@ def read_csv(path):
                 raise ValueError("CSV row {} has more values than headers.".format(row_number))
             normalized = {clean(key): value for key, value in row.items()}
             rows.append((row_number, normalized))
-        return headers, rows
+        return normalize_export_rows(headers, rows)
+
+
+def normalize_export_rows(headers, numbered_rows):
+    """Canonicalize supported provider header variants before validation/import."""
+    normalized_headers = list(headers)
+
+    for source, canonical in REGISTRANT_HEADER_ALIASES.items():
+        if source not in normalized_headers:
+            continue
+        if canonical in normalized_headers:
+            raise ValueError(
+                "CSV contains both {} and {}; keep only one column.".format(source, canonical)
+            )
+        normalized_headers[normalized_headers.index(source)] = canonical
+        for _row_number, row in numbered_rows:
+            row[canonical] = row.pop(source)
+
+    header_set = set(normalized_headers)
+    has_regional_satellite_schema = (
+        "B1g Satellite Hub" in header_set
+        and set(REGISTRANT_REGIONAL_SATELLITE_HEADERS).issubset(header_set)
+    )
+    if has_regional_satellite_schema:
+        for canonical in ("B1g Satellite", "Specify B1g Satellite"):
+            if canonical not in header_set:
+                normalized_headers.append(canonical)
+                header_set.add(canonical)
+
+        hub_columns = {
+            header.removesuffix(" Hub").casefold(): header
+            for header in REGISTRANT_REGIONAL_SATELLITE_HEADERS
+            if header != "Specify Icp Hub"
+        }
+        hub_columns["icp"] = "Specify Icp Hub"
+
+        for _row_number, row in numbered_rows:
+            hub = clean(row.get("B1g Satellite Hub"))
+            regional_values = [
+                clean(row.get(header))
+                for header in REGISTRANT_REGIONAL_SATELLITE_HEADERS
+                if clean(row.get(header))
+            ]
+            satellite = clean(row.get(hub_columns.get(hub.casefold(), "")))
+            if not satellite and len(regional_values) == 1:
+                satellite = regional_values[0]
+            row["B1g Satellite"] = satellite
+            row.setdefault("Specify B1g Satellite", "")
+
+    return normalized_headers, numbered_rows
 
 
 def detect_export_type(headers):
