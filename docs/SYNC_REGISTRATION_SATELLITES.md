@@ -38,10 +38,12 @@ Results use these statuses:
 - `Hub Not Found`
 - `Missing Satellite`
 - `Ambiguous`
-- `Conflict`
 
-A `Conflict` is never overwritten. Aggregated evidence that resolves to more
-than one Hub/Satellite interpretation is `Ambiguous` and remains unchanged.
+Any imported Satellite record with an existing canonical `directory_id` is
+reported as `Already Synced`, even when its established link differs from the
+source-derived match. The existing link is never overwritten. Aggregated
+evidence that resolves to more than one Hub/Satellite interpretation is
+`Ambiguous` and remains unchanged.
 
 ## Administrator workflow
 

@@ -149,14 +149,14 @@ Possible results are:
 | Status | Meaning | Mutation |
 | --- | --- | --- |
 | Ready to Sync | Existing canonical Hub + Satellite match found | Update link |
-| Already Synced | Imported Satellite already points to that canonical record | Skip |
+| Already Synced | Imported Satellite already has a canonical directory link, including a different established assignment | Skip |
 | Satellite Not Configured | Expected Hub exists but Satellite does not | Skip |
 | Hub Not Found | Source Hub has no matching configured Hub | Skip |
 | Missing Satellite | Registration has no usable Satellite value | Skip |
 | Ambiguous | More than one valid interpretation exists | Skip |
-| Conflict | Existing link points to a different configured canonical Satellite | Skip and flag |
 
-The sync must never silently overwrite a conflicting canonical assignment.
+The sync must never overwrite an established canonical assignment. Any
+existing canonical link is reported as already synchronized.
 
 ---
 
@@ -299,7 +299,6 @@ Satellite Not Configured
 Hub Not Found
 Missing Satellite
 Ambiguous Satellite
-Existing Assignment Conflict
 ```
 
 Example:
@@ -397,7 +396,7 @@ At confirmation:
 4. verify the canonical directory record still exists;
 5. verify the current `directory_id`;
 6. skip already-correct records;
-7. skip conflicts or unmatched records;
+7. skip existing links or unmatched records;
 8. update only valid matches;
 9. commit the transaction;
 10. produce the final sync report.
@@ -491,7 +490,6 @@ configured Hub + normalized Satellite name
    - Hub Not Found;
    - Missing Satellite;
    - Ambiguous;
-   - Conflict.
 
 7. Add automated tests covering:
    - exact match;
@@ -500,7 +498,7 @@ configured Hub + normalized Satellite name
    - missing Satellite;
    - Satellite under the wrong Hub;
    - already-synced link;
-   - conflicting existing link.
+   - different existing link reported as already synced.
 
 ## Deliverable
 
@@ -588,7 +586,7 @@ SKIP
 SKIP
 ```
 
-6. For conflicts:
+6. For existing canonical links:
 
 ```text
 SKIP
@@ -613,7 +611,7 @@ and include them in the final report.
     - no duplicate creation;
     - already-synced skipping;
     - unmatched skipping;
-    - conflict protection;
+    - existing-link protection and already-synced reporting;
     - rollback on database failure.
 
 ## Deliverable
@@ -702,7 +700,7 @@ Revalidate
        ↓
 Update valid directory_id links only
        ↓
-Skip existing / unmatched / conflicts
+Skip existing / unmatched records
        ↓
 Final Sync Report
 ```
@@ -721,7 +719,7 @@ The feature is complete when:
 6. Re-running sync does not create duplicates.
 7. Imported source evidence remains unchanged.
 8. Only valid `satellites.directory_id` relationships are updated.
-9. Unmatched and conflicting records remain unchanged.
+9. Unmatched and already-linked records remain unchanged.
 10. Administrators can see the individual registrations that were not synchronized.
 11. Every unsynchronized registration shows a clear reason.
 12. Review occurs before mutation.

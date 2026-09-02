@@ -21,7 +21,6 @@ SATELLITE_NOT_CONFIGURED = "Satellite Not Configured"
 HUB_NOT_FOUND = "Hub Not Found"
 MISSING_SATELLITE = "Missing Satellite"
 AMBIGUOUS = "Ambiguous"
-CONFLICT = "Conflict"
 
 SYNC_STATUSES = (
     READY_TO_SYNC,
@@ -30,7 +29,6 @@ SYNC_STATUSES = (
     HUB_NOT_FOUND,
     MISSING_SATELLITE,
     AMBIGUOUS,
-    CONFLICT,
 )
 
 # These are source-data field names, not aliases. A source Hub outside this
@@ -184,10 +182,10 @@ def resolve_registration_satellite(
         status = MISSING_SATELLITE
     elif imported_satellite["directory_id"] is None:
         status = READY_TO_SYNC
-    elif imported_satellite["directory_id"] == canonical["id"]:
-        status = ALREADY_SYNCED
     else:
-        status = CONFLICT
+        # Any existing canonical assignment is considered synchronized. The
+        # sync remains non-destructive and never replaces an established link.
+        status = ALREADY_SYNCED
     return _result(
         registration, source_hub, source_satellite, expected_hub, canonical,
         imported_satellite, status,

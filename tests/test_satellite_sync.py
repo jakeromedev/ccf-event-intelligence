@@ -13,7 +13,6 @@ from app.satellite_settings import satellite_settings_hierarchy, update_satellit
 from app.satellite_sync import (
     ALREADY_SYNCED,
     AMBIGUOUS,
-    CONFLICT,
     HUB_NOT_FOUND,
     MISSING_SATELLITE,
     READY_TO_SYNC,
@@ -232,13 +231,13 @@ class SatelliteSyncAnalysisTests(unittest.TestCase):
         self._evidence(directory_id=canonical_id)
         self.assertEqual(ALREADY_SYNCED, self._analyze()["entries"][0]["status"])
 
-    def test_conflicting_existing_link_is_protected(self):
+    def test_different_existing_link_is_reported_as_already_synced(self):
         expected_hub = self._hub("Mindanao South")
         self._directory(expected_hub, "B1G Tagum")
         other_hub = self._hub("Visayas")
-        conflicting_id = self._directory(other_hub, "B1G Cebu")
-        self._evidence(directory_id=conflicting_id)
-        self.assertEqual(CONFLICT, self._analyze()["entries"][0]["status"])
+        existing_id = self._directory(other_hub, "B1G Cebu")
+        self._evidence(directory_id=existing_id)
+        self.assertEqual(ALREADY_SYNCED, self._analyze()["entries"][0]["status"])
 
     def test_aggregate_with_two_hub_interpretations_is_ambiguous(self):
         south = self._hub("Mindanao South")
@@ -432,21 +431,21 @@ class SatelliteSyncAnalysisTests(unittest.TestCase):
                 ).fetchone()["directory_id"],
             )
 
-    def test_confirmation_skips_unmatched_and_conflicting_records(self):
+    def test_confirmation_skips_unmatched_and_existing_linked_records(self):
         south = self._hub("Mindanao South")
         self._directory(south, "B1G Tagum")
         visayas = self._hub("Visayas")
-        conflicting_id = self._directory(visayas, "B1G Existing Assignment")
+        existing_id = self._directory(visayas, "B1G Existing Assignment")
         unmatched_id = self._evidence(
             source_hub="Luzon South",
             source_satellite="B1G Cebu",
             sequence=1,
             imported_name="B1G Cebu",
         )
-        conflict_target = self._directory(south, "B1G Davao")
-        conflict_id = self._evidence(
+        source_target = self._directory(south, "B1G Davao")
+        existing_link_id = self._evidence(
             source_satellite="B1G Davao",
-            directory_id=conflicting_id,
+            directory_id=existing_id,
             sequence=2,
             imported_name="B1G Davao",
         )
@@ -465,10 +464,11 @@ class SatelliteSyncAnalysisTests(unittest.TestCase):
 
         self.assertIn(b"Registration Satellite Sync Complete", result.data)
         self.assertIn(b"Newly Synchronized</dt><dd>1", result.data)
-        self.assertIn(b"Not Synchronized</dt><dd>2", result.data)
+        self.assertIn(b"Already Synced</dt><dd>1", result.data)
+        self.assertIn(b"Not Synchronized</dt><dd>1", result.data)
         self.assertIn(b"View Not Synced Registrations", result.data)
         self.assertIn(b"Hub Not Found", result.data)
-        self.assertIn(b"Conflict", result.data)
+        self.assertNotIn(b"Conflict", result.data)
         with self.app.app_context():
             db = get_db()
             rows = {
@@ -478,8 +478,8 @@ class SatelliteSyncAnalysisTests(unittest.TestCase):
                 ).fetchall()
             }
         self.assertIsNone(rows[unmatched_id])
-        self.assertEqual(conflicting_id, rows[conflict_id])
-        self.assertNotEqual(conflict_target, rows[conflict_id])
+        self.assertEqual(existing_id, rows[existing_link_id])
+        self.assertNotEqual(source_target, rows[existing_link_id])
         self.assertIsNotNone(rows[ready_id])
 
     def test_confirmation_revalidates_changes_made_after_review(self):
