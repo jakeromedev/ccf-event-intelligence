@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_icons.html" import icon %}
-{% from "_page_header.html" import render_application_header, render_panel_header %}
+{% from "_page_header.html" import render_application_header %}
 
 {% macro scope_url(target_scope) -%}
 {{ url_for('dashboard.event_satellites', event_id=event['id'], scope=target_scope, q=query, page=1, per_page=metrics.pagination.per_page, sort=sort, direction=direction) }}
@@ -21,13 +21,17 @@
 {% block page_header %}{% endblock %}
 
 {% block content %}
-{% if satellite_settings_management_allowed %}
-<nav class="satellite-settings-launch" aria-label="Satellite administration">
-    <a class="button secondary" href="{{ url_for('dashboard.satellite_settings', event_id=event['id']) }}">{{ icon('settings', 17) }} Settings</a>
-</nav>
-{% endif %}
 <section class="admin-table-panel page-module-panel">
-    {{ render_panel_header('Event Insights', 'Satellite Analytics', 'Unique-person satellite insights with traceable registration sources.') }}
+    <header class="admin-table-heading">
+        <div>
+            <p class="admin-breadcrumb">Event Insights <span>/</span> Satellite Analytics</p>
+            <h1>Satellite Analytics</h1>
+            <p>Unique-person satellite insights with traceable registration sources.</p>
+        </div>
+        {% if satellite_settings_management_allowed %}
+        <a class="button secondary" href="{{ url_for('dashboard.satellite_settings', event_id=event['id']) }}">{{ icon('settings', 17) }} Settings</a>
+        {% endif %}
+    </header>
 </section>
 {% if not active_batch %}
     {% include "_empty.html" %}

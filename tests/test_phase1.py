@@ -70,7 +70,8 @@ TICKET_FIELDS = [
 ]
 BUYER_FIELDS = [
     "Id", "Slug", "Event Name", "Buyer Reference Number", "Payment Status",
-    "Payment Method", "Quantity", "Gross Amount", "Amount Paid",
+    "Buyer Name", "Payment Method", "Quantity", "Gross Amount", "Amount Paid",
+    "Created At", "Validated At", "Validated By", "Failed At", "Failed By",
 ]
 REGISTRANT_FIELDS = [
     "ID", "Event Name", "Event Slug", "Registration Code", "Ticket Code", "Ticket Status",
@@ -2234,7 +2235,13 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertIn(b"Curated Registrants", page.data)
         self.assertIn(b"admin_tables.js", page.data)
         self.assertIn(b"data-nav-group-toggle", page.data)
-        self.assertIn(b'aria-controls="admin-tables-submenu"', page.data)
+        self.assertIn(b">Settings</span>", page.data)
+        self.assertIn(b'aria-controls="settings-submenu"', page.data)
+        self.assertIn(b'id="settings-submenu"', page.data)
+        self.assertIn(b">Data Quality</a>", page.data)
+        self.assertIn(b">Imports</a>", page.data)
+        self.assertIn(b'<span>Admin Tables</span>', page.data)
+        self.assertIn(b">Users</a>", page.data)
         self.assertIn(b'aria-expanded="true"', page.data)
         self.assertIn(b'class="nav-module active expanded"', page.data)
         self.assertIn(b'class="application-header-page"', page.data)
@@ -2247,6 +2254,20 @@ class EventIntegrationTests(unittest.TestCase):
         overview_page = client.get("/events/{}".format(self.event_a))
         self.assertIn(b'class="nav-module "', overview_page.data)
         self.assertIn(b'aria-expanded="false"', overview_page.data)
+
+        quality_page = client.get("/events/{}/data-quality".format(self.event_a))
+        self.assertIn(b'class="nav-module active expanded"', quality_page.data)
+        self.assertIn(
+            ('class="active" href="/events/{}/data-quality"'.format(self.event_a)).encode(),
+            quality_page.data,
+        )
+
+        imports_page = client.get("/events/{}/imports".format(self.event_a))
+        self.assertIn(b'class="nav-module active expanded"', imports_page.data)
+        self.assertIn(
+            ('class="active" href="/events/{}/imports"'.format(self.event_a)).encode(),
+            imports_page.data,
+        )
 
         for dataset, label in (
             ("registrants", "Registrants"),
@@ -2312,6 +2333,24 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertIn("Mobile Number", registrant_labels)
         self.assertIn("Gross Amount", buyer_labels)
         self.assertIn("Amount Paid", buyer_labels)
+        self.assertEqual(
+            [
+                "Buyer Name",
+                "Payment Status",
+                "Payment Method",
+                "Amount Paid",
+                "Created At",
+                "Validated At",
+                "Validated By",
+                "Failed At",
+                "Failed By",
+            ],
+            [column["label"] for column in buyers["columns"] if column["default"]],
+        )
+        buyer_payment_status = next(
+            column for column in buyers["columns"] if column["label"] == "Payment Status"
+        )
+        self.assertEqual("payment_status_badge", buyer_payment_status["renderer"])
         attestation_column = next(
             column
             for column in registrants["columns"]
@@ -2331,6 +2370,14 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertIn('link.target = "_blank"', admin_script)
         self.assertIn('link.rel = "noopener noreferrer"', admin_script)
         self.assertIn('["http:", "https:"]', admin_script)
+        self.assertIn('column.renderer === "payment_status_badge"', admin_script)
+        self.assertIn("paymentStatusBadge(value, column)", admin_script)
+        self.assertIn("displayValue(value, column)", admin_script)
+        self.assertIn('badge.classList.add("is-success")', admin_script)
+        self.assertIn('badge.classList.add("is-failed")', admin_script)
+        admin_styles = (Path(__file__).parents[1] / "app/static/app.css").read_text()
+        self.assertIn(".admin-payment-status-badge.is-success", admin_styles)
+        self.assertIn(".admin-payment-status-badge.is-failed", admin_styles)
 
         with self.app.app_context():
             preserved = get_db().execute(

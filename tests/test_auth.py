@@ -404,6 +404,11 @@ class AuthenticationTests(unittest.TestCase):
         page = self.client.get("/admin/users")
         self.assertEqual(200, page.status_code)
         self.assertIn(b"awaiting-user", page.data)
+        self.assertIn(b">Settings</span>", page.data)
+        self.assertIn(b'aria-controls="application-settings-submenu"', page.data)
+        self.assertIn(b'id="application-settings-submenu"', page.data)
+        self.assertIn(b'class="nav-module active expanded"', page.data)
+        self.assertIn(b'class="active" href="/admin/users"', page.data)
         token_match = CSRF_PATTERN.search(page.data)
         self.assertIsNotNone(token_match)
         approved = self.client.post(

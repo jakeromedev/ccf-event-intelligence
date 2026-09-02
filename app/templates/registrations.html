@@ -29,6 +29,20 @@
             <h1>Registrations</h1>
             <p>Event-scoped operational view of imported registration submissions.</p>
         </div>
+        {% set last_import_at = active_batch['processed_at'] or active_batch['activated_at'] or active_batch['created_at'] if active_batch else none %}
+        <div class="registrations-import-indicator {{ 'has-import' if last_import_at else 'no-import' }}" role="status" aria-label="Registration data freshness">
+            <span class="registrations-import-indicator-icon">{{ icon('imports', 17) }}</span>
+            <div>
+                <span>Last import</span>
+                {% if last_import_at %}
+                    <strong><time datetime="{{ last_import_at|string|replace(' ', 'T') }}">{{ last_import_at|datetime_short }}</time></strong>
+                    <small><i></i>Active dataset · Batch #{{ active_batch['id'] }}</small>
+                {% else %}
+                    <strong>No imported data</strong>
+                    <small>Import required</small>
+                {% endif %}
+            </div>
+        </div>
     </header>
 
     <div class="registrations-summary-grid" aria-label="Registration requirement summary">
@@ -173,18 +187,26 @@
             <div>
                 <p class="eyebrow">REGISTRATION REVIEW</p>
                 <h2 id="attestation-review-title">Attestation Review</h2>
-                <p id="attestation-review-description">Preview the submitted form and review its verification status.</p>
+                <p id="attestation-review-description">Review the submitted form and update its verification status.</p>
             </div>
-            <button class="registrant-modal-close" type="button" data-attestation-close aria-label="Close Attestation Review">&times;</button>
+            <div class="attestation-review-header-actions">
+                <div class="attestation-queue-navigation" aria-label="Attestation review queue navigation">
+                    <button type="button" data-attestation-previous aria-label="Review previous registration" disabled><span aria-hidden="true">&larr;</span> Previous</button>
+                    <output data-attestation-position tabindex="-1" aria-live="polite" aria-label="Current position in filtered registrations">— of —</output>
+                    <button type="button" data-attestation-next aria-label="Review next registration" disabled>Next <span aria-hidden="true">&rarr;</span></button>
+                </div>
+                <button class="registrant-modal-close" type="button" data-attestation-close aria-label="Close Attestation Review">&times;</button>
+            </div>
         </header>
 
-        <div class="attestation-review-context" aria-label="Registrant details">
-            <div><span>Registrant</span><strong data-attestation-name>—</strong></div>
-            <div><span>Satellite</span><strong data-attestation-satellite>—</strong></div>
-            <div><span>Payment Status</span><strong data-attestation-payment>—</strong></div>
-        </div>
-
         <div class="attestation-review-body">
+            <div class="attestation-review-context" aria-label="Registrant details">
+                <p class="eyebrow">REGISTRANT</p>
+                <strong class="attestation-registrant-name" data-attestation-name>—</strong>
+                <span class="attestation-registrant-satellite" data-attestation-satellite>—</span>
+                <div class="attestation-payment-context"><span>Payment</span><strong data-attestation-payment>—</strong></div>
+            </div>
+
             <section class="attestation-preview-panel" aria-labelledby="attestation-preview-heading">
                 <div class="attestation-section-heading">
                     <div><p class="eyebrow">SUBMITTED DOCUMENT</p><h3 id="attestation-preview-heading">Attestation Form Preview</h3></div>
@@ -192,10 +214,11 @@
                 <div class="attestation-document-toolbar" data-attestation-toolbar aria-label="Attestation document controls">
                     <div class="attestation-zoom-controls" role="group" aria-label="Document zoom">
                         <button type="button" data-attestation-zoom-out aria-label="Zoom out" title="Zoom out" disabled>&minus;</button>
-                        <output data-attestation-zoom-level aria-live="polite" aria-label="Current zoom level">Fit</output>
+                        <output data-attestation-zoom-level aria-live="polite" aria-label="Current zoom level">—</output>
                         <button type="button" data-attestation-zoom-in aria-label="Zoom in" title="Zoom in" disabled>+</button>
                     </div>
-                    <button type="button" data-attestation-fit aria-label="Fit document to view" aria-pressed="false" disabled>Fit</button>
+                    <button type="button" data-attestation-fit-width aria-label="Fit document to viewer width" aria-pressed="false" disabled>Fit Width</button>
+                    <button type="button" data-attestation-fit-page data-attestation-fit aria-label="Fit complete document to viewer" aria-pressed="false" disabled>Fit Page</button>
                     <button type="button" data-attestation-actual-size aria-label="Show document at 100 percent" aria-pressed="false" disabled>100%</button>
                     <a class="attestation-open-original" data-attestation-original href="#" target="_blank" rel="noopener noreferrer" aria-label="Open original Attestation Form in a new tab" hidden>Open Original <span aria-hidden="true">↗</span></a>
                 </div>
@@ -210,36 +233,38 @@
                     <div class="attestation-preview-unavailable" data-attestation-preview-unavailable role="status" hidden>
                         {{ icon('document', 30) }}
                         <strong>Attestation preview unavailable</strong>
-                        <span>The submitted file cannot be displayed as an image. Use Open Original when available.</span>
+                        <span>The submitted file could not be displayed.</span>
+                        <div class="attestation-preview-recovery">
+                            <button type="button" data-attestation-retry hidden>Retry Preview</button>
+                            <a data-attestation-unavailable-original href="#" target="_blank" rel="noopener noreferrer" hidden>Open Original <span aria-hidden="true">↗</span></a>
+                        </div>
                     </div>
                 </div>
             </section>
 
             <aside class="attestation-status-panel" aria-labelledby="attestation-status-heading">
-                <p class="eyebrow">VERIFICATION</p>
-                <h3 id="attestation-status-heading">Attestation Status</h3>
-                <span class="registration-attestation-badge is-pending" data-attestation-current-status>Pending</span>
+                <p class="eyebrow">ATTESTATION STATUS</p>
+                <h3 class="sr-only" id="attestation-status-heading">Attestation Status</h3>
                 {% if attestation_edit_allowed %}
                 <label class="attestation-status-control">
-                    <span>Update status</span>
+                    <span class="sr-only">Attestation Status</span>
+                    <span class="attestation-status-dot" aria-hidden="true"></span>
                     <select data-attestation-status>
                         <option value="pending">Pending</option>
                         <option value="verified">Verified</option>
                         <option value="invalid">Invalid</option>
                     </select>
                 </label>
-                <p>Choose Pending, Verified, or Invalid after reviewing the submitted form.</p>
+                <p class="attestation-status-changed" data-attestation-status-changed aria-live="polite" hidden></p>
+                <p>Review the submitted document before changing its verification status.</p>
+                <button type="button" class="button primary attestation-save-status" data-attestation-save disabled>Save Status</button>
                 {% else %}
+                <span class="registration-attestation-badge is-pending" data-attestation-current-status>Pending</span>
                 <p>You have read-only access to this review.</p>
                 {% endif %}
                 <p class="attestation-modal-feedback" data-attestation-feedback role="alert" hidden></p>
             </aside>
         </div>
-
-        <footer class="attestation-review-footer">
-            <button type="button" class="button secondary" data-attestation-close>Cancel</button>
-            {% if attestation_edit_allowed %}<button type="button" class="button primary" data-attestation-save>Save Status</button>{% endif %}
-        </footer>
     </section>
 </div>
 

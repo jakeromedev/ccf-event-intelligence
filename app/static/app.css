@@ -1458,6 +1458,8 @@ button.quality-summary-card:focus-visible { outline: 3px solid rgba(0, 166, 178,
 .application-header-page p { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .application-header-page h1 { color: #173748; font-size: 14px; font-weight: 750; line-height: 1.15; }
 .application-header-module { color: #007f8d; }
+.application-header-page a.application-header-module { text-decoration: none; }
+.application-header-page a.application-header-module:hover { text-decoration: underline; }
 .application-header-separator { margin: 0 5px; color: #9babb2; font-weight: 500; }
 .application-header-page p { max-width: 440px; color: #718791; font-size: 9px; line-height: 1.2; }
 .shell-menu-toggle {
@@ -1814,7 +1816,7 @@ body.sidebar-collapsed .sidebar-account form { display: none; }
     transition: max-height .22s ease, opacity .18s ease, margin .22s ease;
 }
 .nav-module.expanded .nav-submenu {
-    max-height: 144px;
+    max-height: 390px;
     margin-block: 4px 2px;
     opacity: 1;
     pointer-events: auto;
@@ -1843,6 +1845,22 @@ body.sidebar-collapsed .sidebar-account form { display: none; }
 .nav-submenu a.active { color: #5ce1df; background: linear-gradient(90deg, rgba(30,184,188,.14), rgba(30,184,188,.035)); }
 .nav-submenu a.active::before { content: ""; position: absolute; inset: 8px auto 8px 0; width: 2px; border-radius: 2px; background: #43d7d4; box-shadow: 0 0 8px rgba(67,215,212,.55); }
 .nav-submenu a.active > span { background: #4ce0dd; box-shadow: 0 0 0 4px rgba(76,224,221,.1), 0 0 8px rgba(76,224,221,.45); }
+.nav-submenu-section { margin-top: 3px; padding-top: 5px; border-top: 1px solid rgba(86, 169, 179, .14); }
+.nav-submenu-section-label {
+    min-height: 32px;
+    padding: 6px 9px 5px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #a7c0c8;
+    font-size: 8px;
+    font-weight: 750;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+}
+.nav-submenu-section-label > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-submenu-nested { margin-left: 10px; padding-left: 7px; border-left: 1px solid rgba(86, 169, 179, .16); }
+.nav-submenu-nested a { min-height: 34px; padding-block: 7px; font-size: 9px; }
 body.sidebar-collapsed .nav-module-link > .nav-module-chevron,
 body.sidebar-collapsed .nav-submenu { display: none; }
 body.sidebar-collapsed .nav-module-link { justify-content: center; padding-inline: 7px; }
@@ -1962,6 +1980,29 @@ body.sidebar-collapsed .nav-module-link > .nav-module-icon { width: 32px; height
 .admin-data-table th button span { color: #94a8b0; }
 .admin-data-table td { min-width: 135px; max-width: 220px; height: 41px; padding: 9px 12px; overflow: hidden; color: #29434f; border-bottom: 1px solid #edf2f3; background: #fff; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .admin-data-table tbody tr:hover td { background: #f8fcfc; }
+.admin-payment-status-badge {
+    min-height: 24px;
+    padding: 5px 9px;
+    display: inline-flex;
+    align-items: center;
+    color: #506973;
+    border: 1px solid #d4e1e3;
+    border-radius: 999px;
+    background: #f8fafb;
+    font-size: 8px;
+    font-weight: 750;
+    line-height: 1;
+}
+.admin-payment-status-badge.is-success {
+    color: #13705e;
+    border-color: #b9ded3;
+    background: #effaf6;
+}
+.admin-payment-status-badge.is-failed {
+    color: #934a43;
+    border-color: #ebc9c5;
+    background: #fff5f4;
+}
 .admin-cell-link { color: #057f8c; font-weight: 750; text-decoration: underline; text-decoration-color: #9ed3d8; text-underline-offset: 3px; }
 .admin-cell-link:hover { color: #005f6a; text-decoration-color: currentColor; }
 .admin-cell-link:focus-visible { border-radius: 3px; outline: 2px solid rgba(5,127,140,.3); outline-offset: 2px; }
@@ -2048,14 +2089,21 @@ body.admin-drawer-open { overflow: hidden; }
 .registrations-column-groups small { color: #7b9098; font-size: 8px; font-weight: 500; }
 
 .attestation-review-modal .registrant-modal-backdrop { padding: 0; border: 0; }
-.attestation-review-dialog { width: min(1180px, 100%); height: min(820px, 92vh); max-height: 92vh; grid-template-rows: auto auto minmax(0, 1fr) auto; }
-.attestation-review-context { padding: 12px 22px; display: grid; grid-template-columns: 1.35fr 1fr 1fr; gap: 1px; border-bottom: 1px solid #dfe9eb; background: #dfe9eb; }
-.attestation-review-context > div { min-width: 0; padding: 10px 12px; background: #f8fbfb; }
-.attestation-review-context span { display: block; margin-bottom: 4px; color: #728891; font-size: 7px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
-.attestation-review-context strong { display: block; overflow: hidden; color: #1a3e4b; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.attestation-review-dialog { width: min(1180px, 100%); height: min(820px, 92vh); max-height: 92vh; grid-template-rows: auto minmax(0, 1fr); }
+.attestation-review-header-actions { display: flex; align-items: center; gap: 12px; }
+.attestation-queue-navigation { display: flex; align-items: center; gap: 5px; }
+.attestation-queue-navigation button { min-height: 32px; padding: 6px 9px; color: #42616c; border: 1px solid #c8dadd; border-radius: 7px; background: #fff; font-size: 8px; font-weight: 800; cursor: pointer; }
+.attestation-queue-navigation button:disabled { color: #a1afb4; background: #f3f6f7; cursor: default; }
+.attestation-queue-navigation output { min-width: 62px; color: #506b75; text-align: center; font-size: 8px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.attestation-review-context { min-width: 0; padding: 20px 22px; display: block; grid-column: 2; grid-row: 1; border-bottom: 1px solid #dfe9eb; background: #f8fbfb; }
+.attestation-review-context > .eyebrow { margin: 0 0 7px; }
+.attestation-registrant-name { display: block; overflow: hidden; color: #1a3e4b; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.attestation-registrant-satellite { display: block; margin-top: 4px; overflow: hidden; color: #728891; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.attestation-payment-context { margin-top: 15px; display: grid; gap: 5px; }
+.attestation-payment-context > span { color: #728891; font-size: 8px; font-weight: 800; }
 .attestation-review-context .registration-payment-badge { width: fit-content; }
-.attestation-review-body { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 285px; }
-.attestation-preview-panel { min-width: 0; min-height: 0; padding: 18px 20px 20px; display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 10px; overflow: hidden; border-right: 1px solid #dfe9eb; background: #f4f8f9; }
+.attestation-review-body { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 330px); grid-template-rows: auto minmax(0, 1fr); }
+.attestation-preview-panel { min-width: 0; min-height: 0; padding: 18px 20px 20px; display: grid; grid-column: 1; grid-row: 1 / 3; grid-template-rows: auto auto minmax(0, 1fr); gap: 10px; overflow: hidden; border-right: 1px solid #dfe9eb; background: #f4f8f9; }
 .attestation-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .attestation-section-heading p,
 .attestation-status-panel > p:first-child { margin: 0 0 3px; }
@@ -2095,13 +2143,24 @@ body.admin-drawer-open { overflow: hidden; }
 .attestation-preview-unavailable svg { color: #8099a2; }
 .attestation-preview-unavailable strong { color: #34515c; font-size: 12px; }
 .attestation-preview-unavailable span { font-size: 9px; line-height: 1.5; }
-.attestation-status-panel { min-width: 0; padding: 22px; overflow-y: auto; background: #fff; }
-.attestation-status-panel > .registration-attestation-badge { margin: 14px 0 20px; }
-.attestation-status-control { display: grid; gap: 6px; }
+.attestation-preview-recovery { margin-top: 7px; display: flex; align-items: center; justify-content: center; gap: 7px; }
+.attestation-preview-recovery button,
+.attestation-preview-recovery a { min-height: 32px; padding: 7px 10px; display: inline-flex; align-items: center; color: #42616c; border: 1px solid #c8dadd; border-radius: 7px; background: #fff; font-size: 8px; font-weight: 800; cursor: pointer; }
+.attestation-preview-recovery [hidden] { display: none; }
+.attestation-status-panel { min-width: 0; padding: 22px; grid-column: 2; grid-row: 2; overflow-y: auto; background: #fff; }
+.attestation-status-panel > .registration-attestation-badge { margin: 14px 0 10px; }
+.attestation-status-control { position: relative; margin-top: 14px; display: block; }
 .attestation-status-control > span { color: #617983; font-size: 8px; font-weight: 800; }
-.attestation-status-control select { width: 100%; min-height: 40px; padding: 8px 10px; color: #284650; border: 1px solid #c9dcdf; border-radius: 8px; background: #fff; font-size: 10px; font-weight: 750; }
+.attestation-status-control .attestation-status-dot { position: absolute; z-index: 1; top: 50%; left: 12px; width: 8px; height: 8px; border-radius: 50%; background: #d69a24; transform: translateY(-50%); pointer-events: none; }
+.attestation-status-control[data-status="verified"] .attestation-status-dot { background: #3d8e78; }
+.attestation-status-control[data-status="invalid"] .attestation-status-dot { background: #b45b52; }
+.attestation-status-control select { width: 100%; min-height: 40px; padding: 8px 32px; color: #8a6419; border: 1px solid #e5c77e; border-radius: 8px; background: #fffaf0; font-size: 10px; font-weight: 750; }
+.attestation-status-control[data-status="verified"] select { color: #13705e; border-color: #b9ded3; background: #effaf6; }
+.attestation-status-control[data-status="invalid"] select { color: #934a43; border-color: #ebc9c5; background: #fff5f4; }
 .attestation-status-control select:focus { border-color: #078b97; outline: 3px solid rgba(5,127,140,.12); }
 .attestation-status-panel > p:not(.eyebrow):not(.attestation-modal-feedback) { margin: 11px 0 0; color: #728891; font-size: 9px; line-height: 1.55; }
+.attestation-status-panel .attestation-status-changed { color: #8a6419; font-weight: 800; }
+.attestation-save-status { width: 100%; margin-top: 18px; }
 .attestation-modal-feedback { margin: 15px 0 0; padding: 9px 10px; color: #176b5c; border: 1px solid #cce4dc; border-radius: 7px; background: #f1faf7; font-size: 9px; font-weight: 700; line-height: 1.45; }
 .attestation-modal-feedback.is-error { color: #914a43; border-color: #edcfcb; background: #fff5f4; }
 .attestation-review-footer { min-height: 64px; padding: 11px 22px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; border-top: 1px solid #dfe9eb; background: #fff; }
@@ -2126,9 +2185,11 @@ body.admin-drawer-open { overflow: hidden; }
     .admin-drawer-backdrop { display: none; }
     .admin-source-record dl { grid-template-columns: 1fr; }
     .attestation-review-body { display: block; overflow-y: auto; }
+    .attestation-review-context { grid-column: auto; grid-row: auto; }
     .attestation-preview-panel { min-height: 520px; border-right: 0; border-bottom: 1px solid #dfe9eb; }
     .attestation-document-toolbar { justify-content: flex-start; flex-wrap: wrap; }
     .attestation-status-panel { overflow: visible; }
+    .attestation-save-status { position: sticky; z-index: 3; bottom: 12px; box-shadow: 0 7px 18px rgba(33, 48, 53, .18); }
 }
 
 @media (max-width: 520px) {
@@ -2153,6 +2214,10 @@ body.admin-drawer-open { overflow: hidden; }
     .attestation-open-original { margin-left: 0; }
     .attestation-review-footer { padding-inline: 12px; }
     .attestation-review-footer .button { min-width: 0; flex: 1; }
+    .attestation-review-dialog .registrant-modal-header { align-items: stretch; flex-direction: column; gap: 10px; }
+    .attestation-review-header-actions { width: 100%; align-items: center; justify-content: space-between; }
+    .attestation-queue-navigation button { padding-inline: 7px; }
+    .attestation-queue-navigation output { min-width: 52px; }
 }
 
 /* Event Dashboard satellite target groups */
@@ -2355,6 +2420,9 @@ textarea:focus,
 .nav-submenu a.active { color: var(--b1g-white); background: linear-gradient(90deg, rgba(229, 182, 178, .18), rgba(229, 182, 178, .04)); }
 .nav-submenu a.active::before { background: var(--b1g-soft-rose); box-shadow: 0 0 8px rgba(229, 182, 178, .45); }
 .nav-submenu a.active > span { background: var(--b1g-cream); box-shadow: 0 0 0 4px rgba(229, 182, 178, .12); }
+.nav-submenu-section { border-top-color: rgba(247, 241, 240, .14); }
+.nav-submenu-section-label { color: var(--b1g-rose); }
+.nav-submenu-nested { border-left-color: rgba(247, 241, 240, .16); }
 
 .application-header {
     border-bottom-color: var(--b1g-border);
@@ -2565,8 +2633,8 @@ textarea:focus,
 .attestation-status-panel h3 { color: var(--b1g-text); }
 .registrant-modal-close:hover,
 .satellite-dataset-modal-close:hover { color: var(--b1g-white); border-color: var(--b1g-red); background: var(--b1g-red); }
-.attestation-review-context { background: var(--b1g-border); }
-.attestation-review-context > div { background: #fcf8f7; }
+.attestation-review-context { background: #fcf8f7; }
+.attestation-review-context > div { background: transparent; }
 .attestation-preview-panel { background: var(--b1g-off-white); }
 .attestation-preview { border-color: var(--b1g-border); background-color: #eee9e8; }
 .attestation-preview:focus-visible { border-color: var(--b1g-red); box-shadow: inset 0 0 0 2px var(--b1g-focus-ring); }
@@ -2804,6 +2872,39 @@ body.registrations-filter-open { overflow: hidden; }
 .registrations-panel .admin-table-heading { padding: 19px 20px 16px; }
 .registrations-panel .admin-table-heading h1 { font-size: 21px; letter-spacing: -.02em; }
 .registrations-panel .admin-table-heading > div > p:last-child { line-height: 1.5; }
+.registrations-import-indicator {
+    min-width: 225px;
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--b1g-text-muted);
+    border: 1px solid var(--b1g-border);
+    border-radius: var(--registrations-radius);
+    background: var(--b1g-off-white);
+}
+.registrations-import-indicator-icon {
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    color: var(--b1g-red);
+    border-radius: 50%;
+    background: var(--b1g-white);
+}
+.registrations-import-indicator > div { min-width: 0; display: grid; gap: 2px; }
+.registrations-import-indicator > div > span {
+    font-size: 7px;
+    font-weight: 800;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+}
+.registrations-import-indicator strong { color: var(--b1g-text); font-size: 9px; white-space: nowrap; }
+.registrations-import-indicator small { display: flex; align-items: center; gap: 5px; font-size: 7.5px; }
+.registrations-import-indicator small i { width: 6px; height: 6px; border-radius: 50%; background: #3d8e78; }
+.registrations-import-indicator.no-import { border-color: #e5c77e; background: #fffaf0; }
+.registrations-import-indicator.no-import .registrations-import-indicator-icon { color: #8a6419; }
 
 .registrations-summary-grid > div {
     min-height: 74px;
@@ -3023,7 +3124,7 @@ body.registrations-filter-open { overflow: hidden; }
     border-radius: 13px;
     box-shadow: 0 24px 70px rgba(74, 9, 9, .24);
 }
-.attestation-review-context > div { padding: 12px 16px; }
+.attestation-review-context { padding: 20px 23px; }
 .attestation-preview-panel { padding: 19px 20px 20px; }
 .attestation-document-toolbar button,
 .attestation-open-original { min-height: 32px; border-radius: 7px; }
@@ -3112,16 +3213,19 @@ body.registrations-filter-open { overflow: hidden; }
         background: #f5f9fa;
     }
     .attestation-status-panel { padding: 20px; }
+    .attestation-review-context { padding: 15px 20px; }
     .remarks-dialog { width: 100%; height: 100%; max-height: none; border: 0; border-radius: 0; }
 }
 
 @media (max-width: 520px) {
     .registrations-panel .admin-table-heading { padding-inline: 14px; }
+    .registrations-import-indicator { width: 100%; min-width: 0; }
     .registrations-quick-filters { padding-inline: 14px; overflow-x: auto; }
     .registrations-quick-filters > span,
     .registrations-quick-filters button { flex: 0 0 auto; }
     .registrations-table-state-actions .button { flex: 1 1 150px; }
     .attestation-preview-panel { padding-inline: 13px; }
+    .attestation-review-context { padding-inline: 13px; }
     .remarks-compose,
     .remarks-content,
     .remarks-participant-context,
@@ -3133,7 +3237,7 @@ body.registrations-filter-open { overflow: hidden; }
 .satellite-settings-back { margin: 0 0 10px; display: flex; justify-content: flex-start; }
 .satellite-settings-launch .button,
 .satellite-settings-back .button { min-height: 36px; gap: 7px; }
-.satellite-settings-summary { padding: 24px 26px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.satellite-settings-summary { margin-top: 20px; padding: 24px 26px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
 .satellite-settings-summary h1 { margin: 5px 0 4px; color: var(--b1g-text); font-size: 23px; }
 .satellite-settings-summary > div > p:last-child { max-width: 680px; margin: 0; color: var(--b1g-text-muted); font-size: 10px; line-height: 1.55; }
 .satellite-settings-summary dl { margin: 0; display: grid; grid-template-columns: repeat(3, minmax(86px, 1fr)); border: 1px solid var(--b1g-border); border-radius: 10px; background: var(--b1g-off-white); }

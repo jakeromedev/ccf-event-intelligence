@@ -262,7 +262,25 @@
         }
     };
 
+    const paymentStatusBadge = (value, column) => {
+        const displayed = displayValue(value, column);
+        const normalized = String(value || "").trim().toLocaleLowerCase();
+        const badge = document.createElement("span");
+        badge.className = "admin-payment-status-badge";
+        if (["validated", "successful", "success", "paid", "completed", "approved"].some((status) => normalized.includes(status))) {
+            badge.classList.add("is-success");
+        } else if (["failed", "declined", "rejected", "cancelled", "canceled"].some((status) => normalized.includes(status))) {
+            badge.classList.add("is-failed");
+        }
+        badge.textContent = displayed;
+        return badge;
+    };
+
     const renderCellValue = (cell, value, column) => {
+        if (column.renderer === "payment_status_badge") {
+            cell.append(paymentStatusBadge(value, column));
+            return;
+        }
         if (column.renderer === "attestation_form_link") {
             const url = safeExternalUrl(value);
             if (!url) {

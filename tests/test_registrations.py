@@ -295,6 +295,10 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         self.assertEqual(200, page.status_code)
         self.assertIn(b">Registrations</span>", page.data)
         self.assertIn(b"Event-scoped operational view of imported registration submissions.", page.data)
+        self.assertIn(b"Last import", page.data)
+        self.assertIn(("Active dataset · Batch #{}".format(batch_id)).encode(), page.data)
+        self.assertIn(b"PHT", page.data)
+        self.assertIn(b'aria-label="Registration data freshness"', page.data)
         self.assertIn(b'class="application-header-page"', page.data)
         self.assertNotIn(b"overview-header admin-tables-header", page.data)
         self.assertIn(b"registrations.js", page.data)
@@ -304,10 +308,21 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         self.assertIn(b'data-attestation-quick="invalid"', page.data)
         self.assertIn(b'data-attestation-modal', page.data)
         self.assertIn(b'aria-labelledby="attestation-review-title"', page.data)
+        modal_markup = page.get_data(as_text=True)
+        review_body = modal_markup.index('class="attestation-review-body"')
+        review_context = modal_markup.index('class="attestation-review-context"')
+        review_preview = modal_markup.index('class="attestation-preview-panel"')
+        self.assertLess(review_body, review_context)
+        self.assertLess(review_context, review_preview)
         self.assertIn(b'data-attestation-zoom-out', page.data)
         self.assertIn(b'data-attestation-zoom-in', page.data)
-        self.assertIn(b'data-attestation-fit', page.data)
+        self.assertIn(b'data-attestation-fit-width', page.data)
+        self.assertIn(b'data-attestation-fit-page', page.data)
         self.assertIn(b'data-attestation-actual-size', page.data)
+        self.assertIn(b'data-attestation-previous', page.data)
+        self.assertIn(b'data-attestation-next', page.data)
+        self.assertIn(b'data-attestation-position', page.data)
+        self.assertIn(b'data-attestation-retry', page.data)
         self.assertIn(b'data-attestation-canvas', page.data)
         self.assertIn(b'data-remarks-modal', page.data)
         self.assertIn(b'aria-labelledby="remarks-title"', page.data)
@@ -1140,27 +1155,29 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         styles = (root / "app/static/app.css").read_text()
 
         open_flow = script[
-            script.index("const openAttestationModal"):
-            script.index("const saveAttestationStatus")
+            script.index("const showAttestationRow"):
+            script.index("const updateVisibleAttestationRow")
         ]
         self.assertLess(
             open_flow.index("modal.hidden = false"),
-            open_flow.index("loadPreview(row.attestation_form, session)"),
+            open_flow.index("showAttestationRow(row)"),
         )
         self.assertIn("const session = preparePreview(name)", open_flow)
+        self.assertIn("loadPreview(row.attestation_form, session)", open_flow)
         self.assertIn("window.requestAnimationFrame", open_flow)
 
         self.assertIn('aria-busy="true"', page)
         self.assertIn('role="status" aria-live="polite"', page)
         self.assertIn('aria-label="Zoom out"', page)
         self.assertIn('aria-label="Zoom in"', page)
-        self.assertIn('aria-label="Fit document to view"', page)
+        self.assertIn('aria-label="Fit document to viewer width"', page)
+        self.assertIn('aria-label="Fit complete document to viewer"', page)
         self.assertIn('aria-label="Show document at 100 percent"', page)
         self.assertIn('target="_blank" rel="noopener noreferrer"', page)
         self.assertNotIn("<iframe", page)
 
         self.assertIn("previewImage.onload", script)
-        self.assertIn("fitDocumentToView(true)", script)
+        self.assertIn('fitDocumentToView(zoomPreference.mode, true)', script)
         self.assertIn("const minimumZoom = 0.25", script)
         self.assertIn("const maximumZoom = 3", script)
         self.assertIn("const zoomStep = 0.25", script)
@@ -1170,14 +1187,16 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         self.assertIn("window.localStorage.setItem(", script)
         self.assertIn("if (session === previewSession) applyZoomPreference()", script)
         self.assertIn('zoomPreference = {mode: "manual", scale: bounded}', script)
-        self.assertIn('zoomPreference = {mode: "fit", scale: 1}', script)
+        self.assertIn('zoomPreference = {mode, scale: 1}', script)
         self.assertIn('previewImage.style.width = `${renderedWidth}px`', script)
         self.assertIn('previewImage.style.height = "auto"', script)
         self.assertNotIn("transform: scale", script)
         self.assertIn('actualSizeButton.addEventListener("click", () => setManualZoom(1))', script)
         self.assertIn('zoomOutButton.addEventListener("click", () => changeZoom(-1))', script)
         self.assertIn('zoomInButton.addEventListener("click", () => changeZoom(1))', script)
-        self.assertIn('fitButton.addEventListener("click", selectFitZoom)', script)
+        self.assertIn('fitWidthButton.addEventListener("click", () => selectFitZoom("fit-width"))', script)
+        self.assertIn('fitPageButton.addEventListener("click", () => selectFitZoom("fit-page"))', script)
+        self.assertIn('retryPreviewButton.addEventListener("click", retryPreview)', script)
 
         self.assertIn("previewImage.onerror = () => showPreviewFailure(session)", script)
         self.assertIn("window.setTimeout(() => showPreviewFailure(session), 15000)", script)
@@ -1194,8 +1213,16 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         self.assertIn("max-width: 100%", styles)
         self.assertIn(".attestation-document-canvas { position: relative", styles)
         self.assertIn(".attestation-status-panel", styles)
-        self.assertIn("grid-template-columns: minmax(0, 1fr) 285px", styles)
+        self.assertIn("grid-template-columns: minmax(0, 1fr) minmax(300px, 330px)", styles)
         self.assertIn("height: min(820px, 92vh)", styles)
+
+        self.assertIn("const navigateAttestationQueue", script)
+        self.assertIn("registrationsQueryParams(targetPage)", script)
+        self.assertIn('window.confirm("Discard the unsaved Attestation Status change?")', script)
+        self.assertIn("previousButton.disabled = savePending", script)
+        self.assertIn("nextButton.disabled = savePending", script)
+        self.assertIn("updateVisibleAttestationRow(activeRow)", script)
+        self.assertNotIn("closeAttestationModal(true);\n                loadData();", script)
 
     def test_remarks_modal_interaction_and_accessibility_contract(self):
         self._process(self.event_a)
@@ -1402,6 +1429,8 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(200, page.status_code)
         self.assertIn(b'data-has-active-batch="false"', page.data)
+        self.assertIn(b"No imported data", page.data)
+        self.assertIn(b"Import required", page.data)
 
         payload = self._data()
         self.assertIsNone(payload["batch"])
@@ -1822,7 +1851,7 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
             b">Data Quality</span>",
             b">Imports</span>",
             b">Admin Tables</span>",
-            b">Users</span>",
+            b">Users</a>",
         ):
             self.assertNotIn(label, standard_page.data)
         csrf_token = self._csrf_token()
@@ -1873,7 +1902,7 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
             b">Data Quality</span>",
             b">Imports</span>",
             b">Admin Tables</span>",
-            b">Users</span>",
+            b">Users</a>",
         ):
             self.assertNotIn(label, page.data)
 

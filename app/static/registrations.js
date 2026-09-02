@@ -43,6 +43,10 @@
     const modalStatus = modal.querySelector("[data-attestation-status]");
     const modalSave = modal.querySelector("[data-attestation-save]");
     const modalFeedback = modal.querySelector("[data-attestation-feedback]");
+    const modalStatusChanged = modal.querySelector("[data-attestation-status-changed]");
+    const previousButton = modal.querySelector("[data-attestation-previous]");
+    const nextButton = modal.querySelector("[data-attestation-next]");
+    const queuePosition = modal.querySelector("[data-attestation-position]");
     const previewViewer = modal.querySelector("[data-attestation-preview]");
     const previewState = modal.querySelector("[data-attestation-preview-state]");
     const previewUnavailable = modal.querySelector("[data-attestation-preview-unavailable]");
@@ -50,10 +54,13 @@
     const previewImage = modal.querySelector("[data-attestation-image]");
     const zoomOutButton = modal.querySelector("[data-attestation-zoom-out]");
     const zoomInButton = modal.querySelector("[data-attestation-zoom-in]");
-    const fitButton = modal.querySelector("[data-attestation-fit]");
+    const fitWidthButton = modal.querySelector("[data-attestation-fit-width]");
+    const fitPageButton = modal.querySelector("[data-attestation-fit-page]");
     const actualSizeButton = modal.querySelector("[data-attestation-actual-size]");
     const zoomLevel = modal.querySelector("[data-attestation-zoom-level]");
     const openOriginal = modal.querySelector("[data-attestation-original]");
+    const unavailableOriginal = modal.querySelector("[data-attestation-unavailable-original]");
+    const retryPreviewButton = modal.querySelector("[data-attestation-retry]");
     const canEditAttestation = root.dataset.canEditAttestation === "true";
     const remarksModal = document.querySelector("[data-remarks-modal]");
     const remarksDialog = remarksModal?.querySelector("[role='dialog']");
@@ -98,11 +105,14 @@
                     scale: Math.min(Math.max(preference.scale, minimumZoom), maximumZoom),
                 };
             }
-            if (preference?.mode === "fit") return {mode: "fit", scale: 1};
+            if (["fit-width", "fit-page"].includes(preference?.mode)) {
+                return {mode: preference.mode, scale: 1};
+            }
+            if (preference?.mode === "fit") return {mode: "fit-width", scale: 1};
         } catch (_error) {
             // Browser storage may be unavailable or contain an older invalid value.
         }
-        return {mode: "fit", scale: 1};
+        return {mode: "fit-width", scale: 1};
     };
 
     const saveZoomPreference = (mode, scale) => {
@@ -131,12 +141,17 @@
     let returnFocus = null;
     let savePending = false;
     let previewSession = 0;
-    let zoomMode = "fit";
+    let zoomMode = "fit-width";
     let zoomScale = 1;
     let fitScale = 1;
     let zoomPreference = loadZoomPreference();
     let previewLoaded = false;
     let previewLoadTimer = null;
+    let previewSourceUrl = null;
+    let activeQueuePosition = -1;
+    let queuePageNumber = 1;
+    let queuePageRows = [];
+    let queueRequestSession = 0;
     let filterReturnFocus = null;
     let activeRemarksRow = null;
     let remarksReturnFocus = null;
@@ -433,6 +448,7 @@
     };
 
     const setStatusBadge = (badge, value) => {
+        if (!badge) return;
         const status = normalizeStatus(value);
         badge.className = `registration-attestation-badge is-${status}`;
         badge.textContent = statusLabels[status];
@@ -447,21 +463,26 @@
     };
 
     const setZoomControls = (enabled) => {
-        const scale = zoomMode === "fit" ? fitScale : zoomScale;
+        const scale = ["fit-width", "fit-page"].includes(zoomMode) ? fitScale : zoomScale;
         zoomOutButton.disabled = !enabled || scale <= minimumZoom;
         zoomInButton.disabled = !enabled || scale >= maximumZoom;
-        fitButton.disabled = !enabled;
+        fitWidthButton.disabled = !enabled;
+        fitPageButton.disabled = !enabled;
         actualSizeButton.disabled = !enabled;
-        fitButton.setAttribute("aria-pressed", String(enabled && zoomMode === "fit"));
+        fitWidthButton.setAttribute("aria-pressed", String(enabled && zoomMode === "fit-width"));
+        fitPageButton.setAttribute("aria-pressed", String(enabled && zoomMode === "fit-page"));
         actualSizeButton.setAttribute(
             "aria-pressed",
             String(enabled && zoomMode === "manual" && Math.abs(zoomScale - 1) < 0.001),
         );
     };
 
-    const calculateFitScale = () => {
+    const calculateFitScale = (mode) => {
         if (!previewImage.naturalWidth || !previewImage.naturalHeight) return 1;
         const availableWidth = Math.max(previewViewer.clientWidth - 32, 1);
+        if (mode === "fit-width") {
+            return Math.min(availableWidth / previewImage.naturalWidth, maximumZoom);
+        }
         const availableHeight = Math.max(previewViewer.clientHeight - 32, 1);
         return Math.min(
             availableWidth / previewImage.naturalWidth,
@@ -491,9 +512,7 @@
         previewCanvas.style.height = `${canvasHeight}px`;
         previewImage.style.left = `${Math.max((canvasWidth - renderedWidth) / 2, 16)}px`;
         previewImage.style.top = `${Math.max((canvasHeight - renderedHeight) / 2, 16)}px`;
-        zoomLevel.value = mode === "fit"
-            ? `Fit · ${Math.round(scale * 100)}%`
-            : `${Math.round(scale * 100)}%`;
+        zoomLevel.value = `${Math.round(scale * 100)}%`;
         zoomLevel.textContent = zoomLevel.value;
         setZoomControls(true);
 
@@ -506,9 +525,9 @@
         }
     };
 
-    const fitDocumentToView = (resetScroll = true) => {
-        fitScale = calculateFitScale();
-        renderDocumentScale(fitScale, "fit", resetScroll);
+    const fitDocumentToView = (mode = "fit-width", resetScroll = true) => {
+        fitScale = calculateFitScale(mode);
+        renderDocumentScale(fitScale, mode, resetScroll);
     };
 
     const setManualZoom = (scale, resetScroll = false, persist = true) => {
@@ -520,10 +539,10 @@
         }
     };
 
-    const selectFitZoom = () => {
-        zoomPreference = {mode: "fit", scale: 1};
+    const selectFitZoom = (mode) => {
+        zoomPreference = {mode, scale: 1};
         saveZoomPreference(zoomPreference.mode, zoomPreference.scale);
-        fitDocumentToView(true);
+        fitDocumentToView(mode, true);
     };
 
     const applyZoomPreference = () => {
@@ -531,11 +550,11 @@
             setManualZoom(zoomPreference.scale, true, false);
             return;
         }
-        fitDocumentToView(true);
+        fitDocumentToView(zoomPreference.mode, true);
     };
 
     const changeZoom = (direction) => {
-        const current = zoomMode === "fit" ? fitScale : zoomScale;
+        const current = ["fit-width", "fit-page"].includes(zoomMode) ? fitScale : zoomScale;
         const stepIndex = direction > 0
             ? Math.floor((current + 0.0001) / zoomStep) + 1
             : Math.ceil((current - 0.0001) / zoomStep) - 1;
@@ -560,7 +579,11 @@
         previewViewer.scrollTop = 0;
         openOriginal.hidden = true;
         openOriginal.removeAttribute("href");
-        zoomMode = "fit";
+        unavailableOriginal.hidden = true;
+        unavailableOriginal.removeAttribute("href");
+        retryPreviewButton.hidden = true;
+        previewSourceUrl = null;
+        zoomMode = "fit-width";
         zoomScale = 1;
         fitScale = 1;
         previewLoaded = false;
@@ -601,8 +624,12 @@
             showPreviewFailure(session);
             return;
         }
+        previewSourceUrl = url;
         openOriginal.href = url;
         openOriginal.hidden = false;
+        unavailableOriginal.href = url;
+        unavailableOriginal.hidden = false;
+        retryPreviewButton.hidden = false;
         previewImage.onload = () => {
             if (session !== previewSession) return;
             window.clearTimeout(previewLoadTimer);
@@ -622,27 +649,55 @@
         previewImage.src = url;
     };
 
+    const retryPreview = () => {
+        if (!activeRow || !previewSourceUrl) return;
+        const name = [activeRow.first_name, activeRow.last_name].filter(Boolean).join(" ");
+        const source = previewSourceUrl;
+        const session = preparePreview(name);
+        window.requestAnimationFrame(() => loadPreview(source, session));
+    };
+
     const hasUnsavedModalChange = () => Boolean(
         canEditAttestation && activeRow && modalStatus
         && modalStatus.value !== normalizeStatus(activeRow.attestation_status)
     );
 
-    const closeAttestationModal = (force = false) => {
-        if (modal.hidden || savePending) return false;
-        if (!force && hasUnsavedModalChange() && !window.confirm("Discard the unsaved Attestation Status change?")) return false;
-        modal.hidden = true;
-        document.body.classList.remove("registrant-modal-open");
-        resetPreview();
-        activeRow = null;
-        const focusTarget = returnFocus;
-        returnFocus = null;
-        if (focusTarget && typeof focusTarget.focus === "function") focusTarget.focus();
-        return true;
+    const updateStatusEditor = () => {
+        if (!modalStatus) return;
+        const selected = normalizeStatus(modalStatus.value);
+        const persisted = normalizeStatus(activeRow?.attestation_status);
+        const changed = Boolean(activeRow && selected !== persisted);
+        modalStatus.parentElement.dataset.status = selected;
+        modalSave.disabled = savePending || !changed;
+        modalStatusChanged.hidden = !changed;
+        modalStatusChanged.textContent = changed ? `Changed from ${statusLabels[persisted]}` : "";
+        updateQueueNavigation();
     };
 
-    const openAttestationModal = (row, trigger) => {
+    const updateQueueNavigation = () => {
+        const total = Number(latestPayload?.pagination?.total || 0);
+        const hasPosition = activeQueuePosition >= 0 && activeQueuePosition < total;
+        queuePosition.value = hasPosition ? `${activeQueuePosition + 1} of ${total}` : "— of —";
+        queuePosition.textContent = queuePosition.value;
+        previousButton.disabled = savePending || !hasPosition || activeQueuePosition === 0;
+        nextButton.disabled = savePending || !hasPosition || activeQueuePosition >= total - 1;
+    };
+
+    const registrationsQueryParams = (requestedPage = page) => {
+        const params = new URLSearchParams({
+            batch: batchSelect.value,
+            search: search.value.trim(),
+            page: String(requestedPage),
+            per_page: pageSize.value,
+            direction,
+        });
+        if (sort) params.set("sort", sort);
+        if (filters.length) params.set("filters", JSON.stringify(filters));
+        return params;
+    };
+
+    const showAttestationRow = (row, {focusNavigation = false} = {}) => {
         activeRow = row;
-        returnFocus = trigger;
         const name = [row.first_name, row.last_name].filter(Boolean).join(" ");
         modalName.textContent = name || "Unnamed registrant";
         modalSatellite.textContent = displayValue(row.satellite);
@@ -651,19 +706,124 @@
         if (modalStatus) modalStatus.value = normalizeStatus(row.attestation_status);
         setModalFeedback("");
         const session = preparePreview(name);
-        modal.hidden = false;
-        document.body.classList.add("registrant-modal-open");
+        updateStatusEditor();
+        updateQueueNavigation();
         window.requestAnimationFrame(() => {
-            modalCloseButton.focus();
+            if (focusNavigation) queuePosition.focus?.();
             window.requestAnimationFrame(() => loadPreview(row.attestation_form, session));
         });
     };
+
+    const navigateAttestationQueue = (directionToMove) => {
+        if (savePending || activeQueuePosition < 0) return;
+        if (hasUnsavedModalChange()
+            && !window.confirm("Discard the unsaved Attestation Status change?")) return;
+        const targetPosition = activeQueuePosition + directionToMove;
+        const total = Number(latestPayload?.pagination?.total || 0);
+        if (targetPosition < 0 || targetPosition >= total) return;
+        const perPage = Number.parseInt(pageSize.value, 10);
+        const targetPage = Math.floor(targetPosition / perPage) + 1;
+        const targetIndex = targetPosition % perPage;
+        const applyTarget = (rows) => {
+            const row = rows[targetIndex];
+            if (!row) return;
+            activeQueuePosition = targetPosition;
+            showAttestationRow(row, {focusNavigation: true});
+        };
+        if (targetPage === queuePageNumber) {
+            applyTarget(queuePageRows);
+            return;
+        }
+        const currentRow = activeRow;
+        const currentName = [currentRow.first_name, currentRow.last_name].filter(Boolean).join(" ");
+        preparePreview(currentName);
+        const requestSession = ++queueRequestSession;
+        previousButton.disabled = true;
+        nextButton.disabled = true;
+        queuePosition.value = "Loading…";
+        queuePosition.textContent = queuePosition.value;
+        fetch(`${root.dataset.dataUrl}?${registrationsQueryParams(targetPage)}`, {
+            credentials: "same-origin",
+            headers: {Accept: "application/json"},
+        })
+            .then((response) => responsePayload(response, "The next registration could not be loaded."))
+            .then((payload) => {
+                if (requestSession !== queueRequestSession || modal.hidden) return;
+                queuePageNumber = payload.pagination.page;
+                queuePageRows = payload.rows;
+                applyTarget(queuePageRows);
+            })
+            .catch((error) => {
+                if (requestSession !== queueRequestSession || modal.hidden) return;
+                showAttestationRow(currentRow);
+                setModalFeedback(error.message || "The registration could not be loaded.", true);
+                updateQueueNavigation();
+            });
+    };
+
+    const closeAttestationModal = (force = false) => {
+        if (modal.hidden || savePending) return false;
+        if (!force && hasUnsavedModalChange() && !window.confirm("Discard the unsaved Attestation Status change?")) return false;
+        modal.hidden = true;
+        document.body.classList.remove("registrant-modal-open");
+        resetPreview();
+        queueRequestSession += 1;
+        activeRow = null;
+        activeQueuePosition = -1;
+        queuePageRows = [];
+        updateQueueNavigation();
+        const focusTarget = returnFocus;
+        returnFocus = null;
+        if (focusTarget && typeof focusTarget.focus === "function") focusTarget.focus();
+        return true;
+    };
+
+    const openAttestationModal = (row, trigger) => {
+        returnFocus = trigger;
+        queuePageNumber = Number(latestPayload?.pagination?.page || page);
+        queuePageRows = latestPayload?.rows || [row];
+        const rowIndex = queuePageRows.findIndex((item) => item.id === row.id);
+        activeQueuePosition = Number(latestPayload?.pagination?.start || 1) - 1 + Math.max(rowIndex, 0);
+        modal.hidden = false;
+        document.body.classList.add("registrant-modal-open");
+        showAttestationRow(row);
+        window.requestAnimationFrame(() => {
+            modalCloseButton.focus();
+        });
+    };
+
+    const updateVisibleAttestationRow = (row) => {
+        const visibleRow = latestPayload?.rows?.find((item) => item.id === row.id);
+        if (visibleRow && visibleRow !== row) Object.assign(visibleRow, row);
+        const tableRow = tableBody.querySelector(`tr[data-registration-id="${row.id}"]`);
+        const statusCell = tableRow?.querySelector('[data-column-key="attestation_status"]');
+        if (statusCell) {
+            const badge = document.createElement("span");
+            setStatusBadge(badge, row.attestation_status);
+            statusCell.replaceChildren(badge);
+        }
+        ["last_reviewed_by", "last_reviewed_at"].forEach((key) => {
+            const cell = tableRow?.querySelector(`[data-column-key="${key}"]`);
+            if (cell) {
+                cell.textContent = displayValue(row[key]);
+                cell.title = displayValue(row[key]);
+            }
+        });
+    };
+
+    const refreshAttestationCounts = () => fetch(
+        `${root.dataset.dataUrl}?${registrationsQueryParams(page)}`,
+        {credentials: "same-origin", headers: {Accept: "application/json"}},
+    )
+        .then((response) => response.ok ? response.json() : Promise.reject())
+        .then((payload) => renderSummary(payload.summary, payload.quick_filter_counts))
+        .catch(() => {});
 
     const saveAttestationStatus = () => {
         if (!canEditAttestation || !activeRow || !modalStatus || !modalSave) return;
         const status = modalStatus.value;
         if (status === normalizeStatus(activeRow.attestation_status)) {
-            closeAttestationModal(true);
+            updateStatusEditor();
             return;
         }
         const updateUrl = root.dataset.updateUrl.replace("/0/attestation", `/${activeRow.id}/attestation`);
@@ -673,6 +833,7 @@
         modalSave.disabled = true;
         modalSave.textContent = "Saving…";
         setModalFeedback("Saving Attestation Status…");
+        updateQueueNavigation();
         fetch(`${updateUrl}?${params}`, {
             method: "PATCH",
             credentials: "same-origin",
@@ -692,10 +853,11 @@
                 activeRow.attestation_status = payload.status;
                 activeRow.last_reviewed_by = payload.updated_by;
                 activeRow.last_reviewed_at = payload.updated_at;
+                setStatusBadge(modalCurrentStatus, payload.status);
+                updateVisibleAttestationRow(activeRow);
                 showUpdateFeedback(`Attestation Status changed to ${payload.label}.`);
-                savePending = false;
-                closeAttestationModal(true);
-                loadData();
+                setModalFeedback(`Attestation Status saved as ${payload.label}.`);
+                refreshAttestationCounts();
             })
             .catch((error) => {
                 setModalFeedback(error.message || "Attestation Status could not be updated.", true);
@@ -703,8 +865,9 @@
             .finally(() => {
                 savePending = false;
                 modalStatus.disabled = false;
-                modalSave.disabled = false;
                 modalSave.textContent = "Save Status";
+                updateStatusEditor();
+                updateQueueNavigation();
             });
     };
 
@@ -1129,12 +1292,14 @@
         tableBody.replaceChildren();
         payload.rows.forEach((row) => {
             const tr = document.createElement("tr");
+            tr.dataset.registrationId = String(row.id);
             if (Number(row.pending_remark_count || 0) > 0) {
                 tr.classList.add("has-pending-remarks");
             }
             let previousGroup = null;
             visibleColumns.forEach((column, index) => {
                 const td = document.createElement("td");
+                td.dataset.columnKey = column.key;
                 if (column.renderer === "actions") td.classList.add("registration-actions-column");
                 if (index < 3) td.classList.add("registration-sticky-column", `registration-sticky-${index + 1}`);
                 if (previousGroup !== null && previousGroup !== column.group) td.classList.add("registration-group-start");
@@ -1232,15 +1397,7 @@
                 loading: true,
             });
         }
-        const params = new URLSearchParams({
-            batch: batchSelect.value,
-            search: search.value.trim(),
-            page: String(page),
-            per_page: pageSize.value,
-            direction,
-        });
-        if (sort) params.set("sort", sort);
-        if (filters.length) params.set("filters", JSON.stringify(filters));
+        const params = registrationsQueryParams(page);
         return fetch(`${root.dataset.dataUrl}?${params}`, {
             headers: {Accept: "application/json"}, signal: controller.signal,
         })
@@ -1372,10 +1529,17 @@
     });
     zoomOutButton.addEventListener("click", () => changeZoom(-1));
     zoomInButton.addEventListener("click", () => changeZoom(1));
-    fitButton.addEventListener("click", selectFitZoom);
+    fitWidthButton.addEventListener("click", () => selectFitZoom("fit-width"));
+    fitPageButton.addEventListener("click", () => selectFitZoom("fit-page"));
     actualSizeButton.addEventListener("click", () => setManualZoom(1));
+    retryPreviewButton.addEventListener("click", retryPreview);
+    previousButton.addEventListener("click", () => navigateAttestationQueue(-1));
+    nextButton.addEventListener("click", () => navigateAttestationQueue(1));
     modalSave?.addEventListener("click", saveAttestationStatus);
-    modalStatus?.addEventListener("change", () => setModalFeedback(""));
+    modalStatus?.addEventListener("change", () => {
+        setModalFeedback("");
+        updateStatusEditor();
+    });
     remarksModal?.querySelectorAll("[data-remarks-close]").forEach((control) => {
         control.addEventListener("click", closeRemarksModal);
     });
@@ -1387,14 +1551,16 @@
 
     if (typeof window.ResizeObserver === "function") {
         const viewerResizeObserver = new window.ResizeObserver(() => {
-            if (!modal.hidden && previewLoaded && zoomMode === "fit") {
-                window.requestAnimationFrame(() => fitDocumentToView(false));
+            if (!modal.hidden && previewLoaded && ["fit-width", "fit-page"].includes(zoomMode)) {
+                window.requestAnimationFrame(() => fitDocumentToView(zoomMode, false));
             }
         });
         viewerResizeObserver.observe(previewViewer);
     } else {
         window.addEventListener("resize", () => {
-            if (!modal.hidden && previewLoaded && zoomMode === "fit") fitDocumentToView(false);
+            if (!modal.hidden && previewLoaded && ["fit-width", "fit-page"].includes(zoomMode)) {
+                fitDocumentToView(zoomMode, false);
+            }
         });
     }
 

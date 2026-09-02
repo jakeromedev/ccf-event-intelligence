@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}{{ app_name }}{% endblock %}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v='20260902-satellite-directory-workspace') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v='20260902-registration-import-indicator') }}">
 </head>
 <body>
     <aside class="sidebar" id="application-sidebar">
@@ -22,27 +22,36 @@
                     <a class="nav-link {% if request.endpoint in ('dashboard.event_registrations', 'dashboard.event_registrations_data') %}active{% endif %}" href="{{ url_for('dashboard.event_registrations', event_id=event['id']) }}">{{ icon('registrations') }}<span>Registrations</span></a>
                 {% endif %}
                 {% if satellites_allowed %}<a class="nav-link {% if request.endpoint in ('dashboard.event_satellites', 'dashboard.event_satellite_registrants', 'dashboard.satellite_settings') %}active{% endif %}" href="{{ url_for('dashboard.event_satellites', event_id=event['id']) }}">{{ icon('satellites') }}<span>Satellites</span></a>{% endif %}
-                {% if data_quality_allowed %}<a class="nav-link {% if request.endpoint == 'dashboard.event_quality' %}active{% endif %}" href="{{ url_for('dashboard.event_quality', event_id=event['id']) }}">{{ icon('quality') }}<span>Data Quality</span></a>{% endif %}
-                {% if imports_allowed %}<a class="nav-link {% if request.endpoint == 'dashboard.event_imports' %}active{% endif %}" href="{{ url_for('dashboard.event_imports', event_id=event['id']) }}">{{ icon('imports') }}<span>Imports</span></a>{% endif %}
-                {% if admin_tables_allowed %}
+                {% if data_quality_allowed or imports_allowed or admin_tables_allowed or user_management_allowed %}
+                    {% set data_quality_active = request.endpoint in ('dashboard.event_quality', 'dashboard.event_quality_issues', 'dashboard.event_curated_registrant_detail', 'dashboard.event_satellite_curation_detail') %}
+                    {% set imports_active = request.endpoint in ('dashboard.event_imports', 'dashboard.validate_import', 'dashboard.process_import', 'dashboard.activate_import', 'dashboard.delete_import') %}
                     {% set admin_tables_active = request.endpoint in ('dashboard.event_admin_table', 'dashboard.event_admin_table_data', 'dashboard.event_admin_registration_sources') %}
-                    <div class="nav-module {{ 'active expanded' if admin_tables_active else '' }}" data-nav-group>
-                        <button class="nav-link nav-module-link {{ 'active' if admin_tables_active else '' }}" type="button" aria-expanded="{{ 'true' if admin_tables_active else 'false' }}" aria-controls="admin-tables-submenu" data-nav-group-toggle>
-                            <span class="nav-module-icon">{{ icon('table', 18) }}</span>
-                            <span>Admin Tables</span>
+                    {% set users_active = request.endpoint in ('auth.users', 'auth.approve_user', 'auth.update_user_role', 'auth.update_user_status', 'auth.update_user_password') %}
+                    {% set settings_active = data_quality_active or imports_active or admin_tables_active or users_active %}
+                    <div class="nav-module {{ 'active expanded' if settings_active else '' }}" data-nav-group>
+                        <button class="nav-link nav-module-link {{ 'active' if settings_active else '' }}" type="button" aria-expanded="{{ 'true' if settings_active else 'false' }}" aria-controls="settings-submenu" data-nav-group-toggle>
+                            <span class="nav-module-icon">{{ icon('settings', 18) }}</span>
+                            <span>Settings</span>
                             <span class="nav-module-chevron">{{ icon('chevron-down', 14) }}</span>
                         </button>
-                        <div class="nav-submenu" id="admin-tables-submenu" aria-label="Admin Tables" aria-hidden="{{ 'false' if admin_tables_active else 'true' }}">
+                        <div class="nav-submenu settings-submenu" id="settings-submenu" aria-label="Settings" aria-hidden="{{ 'false' if settings_active else 'true' }}">
                             <div class="nav-submenu-inner">
-                                <a class="{{ 'active' if request.view_args and request.view_args.get('dataset') == 'registrants' else '' }}" href="{{ url_for('dashboard.event_admin_table', event_id=event['id'], dataset='registrants') }}"><span></span>Registrants</a>
-                                <a class="{{ 'active' if request.view_args and request.view_args.get('dataset') == 'tickets' else '' }}" href="{{ url_for('dashboard.event_admin_table', event_id=event['id'], dataset='tickets') }}"><span></span>Generated Tickets</a>
-                                <a class="{{ 'active' if request.view_args and request.view_args.get('dataset') == 'buyers' else '' }}" href="{{ url_for('dashboard.event_admin_table', event_id=event['id'], dataset='buyers') }}"><span></span>Buyers</a>
+                                {% if data_quality_allowed %}<a class="{{ 'active' if data_quality_active else '' }}" href="{{ url_for('dashboard.event_quality', event_id=event['id']) }}"><span></span>Data Quality</a>{% endif %}
+                                {% if imports_allowed %}<a class="{{ 'active' if imports_active else '' }}" href="{{ url_for('dashboard.event_imports', event_id=event['id']) }}"><span></span>Imports</a>{% endif %}
+                                {% if admin_tables_allowed %}
+                                    <div class="nav-submenu-section">
+                                        <div class="nav-submenu-section-label">{{ icon('table', 14) }}<span>Admin Tables</span></div>
+                                        <div class="nav-submenu-nested" aria-label="Admin Tables">
+                                            <a class="{{ 'active' if request.view_args and request.view_args.get('dataset') == 'registrants' else '' }}" href="{{ url_for('dashboard.event_admin_table', event_id=event['id'], dataset='registrants') }}"><span></span>Registrants</a>
+                                            <a class="{{ 'active' if request.view_args and request.view_args.get('dataset') == 'tickets' else '' }}" href="{{ url_for('dashboard.event_admin_table', event_id=event['id'], dataset='tickets') }}"><span></span>Generated Tickets</a>
+                                            <a class="{{ 'active' if request.view_args and request.view_args.get('dataset') == 'buyers' else '' }}" href="{{ url_for('dashboard.event_admin_table', event_id=event['id'], dataset='buyers') }}"><span></span>Buyers</a>
+                                        </div>
+                                    </div>
+                                {% endif %}
+                                {% if user_management_allowed %}<a class="{{ 'active' if users_active else '' }}" href="{{ url_for('auth.users') }}"><span></span>Users</a>{% endif %}
                             </div>
                         </div>
                     </div>
-                {% endif %}
-                {% if user_management_allowed %}
-                    <a class="nav-link {% if request.endpoint in ('auth.users', 'auth.approve_user', 'auth.update_user_role', 'auth.update_user_status', 'auth.update_user_password') %}active{% endif %}" href="{{ url_for('auth.users') }}">{{ icon('users') }}<span>Users</span></a>
                 {% endif %}
             </nav>
             <div class="sidebar-spacer"></div>
@@ -51,7 +60,19 @@
             <nav aria-label="Application navigation">
                 <a class="nav-link {% if request.endpoint == 'dashboard.events' %}active{% endif %}" href="{{ url_for('dashboard.events') }}">{{ icon('events') }}<span>Events</span></a>
                 {% if user_management_allowed %}
-                    <a class="nav-link {% if request.endpoint in ('auth.users', 'auth.approve_user', 'auth.update_user_role', 'auth.update_user_status', 'auth.update_user_password') %}active{% endif %}" href="{{ url_for('auth.users') }}">{{ icon('users') }}<span>Users</span></a>
+                    {% set users_active = request.endpoint in ('auth.users', 'auth.approve_user', 'auth.update_user_role', 'auth.update_user_status', 'auth.update_user_password') %}
+                    <div class="nav-module {{ 'active expanded' if users_active else '' }}" data-nav-group>
+                        <button class="nav-link nav-module-link {{ 'active' if users_active else '' }}" type="button" aria-expanded="{{ 'true' if users_active else 'false' }}" aria-controls="application-settings-submenu" data-nav-group-toggle>
+                            <span class="nav-module-icon">{{ icon('settings', 18) }}</span>
+                            <span>Settings</span>
+                            <span class="nav-module-chevron">{{ icon('chevron-down', 14) }}</span>
+                        </button>
+                        <div class="nav-submenu" id="application-settings-submenu" aria-label="Settings" aria-hidden="{{ 'false' if users_active else 'true' }}">
+                            <div class="nav-submenu-inner">
+                                <a class="{{ 'active' if users_active else '' }}" href="{{ url_for('auth.users') }}"><span></span>Users</a>
+                            </div>
+                        </div>
+                    </div>
                 {% endif %}
             </nav>
             <div class="sidebar-spacer"></div>

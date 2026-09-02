@@ -24,6 +24,17 @@ DATASET_LABELS = {
 }
 
 ATTESTATION_FORM_HEADER = "Upload Your Accomplished Attestation Form Here"
+BUYER_DEFAULT_COLUMN_LABELS = (
+    "Buyer Name",
+    "Payment Status",
+    "Payment Method",
+    "Amount Paid",
+    "Created At",
+    "Validated At",
+    "Validated By",
+    "Failed At",
+    "Failed By",
+)
 
 
 def _column(
@@ -114,7 +125,15 @@ DATASET_COLUMNS = {
         _column("id", "Record ID", "record.id", "number", "Identity"),
         _column("source_id", "Source Buyer ID", "record.source_id", group="Identity"),
         _column("buyer_reference", "Buyer Reference", "record.buyer_reference", group="Buyer", default=True),
-        _column("payment_status", "Payment Status", "record.payment_status", "select", "Payment", True),
+        _column(
+            "payment_status",
+            "Payment Status",
+            "record.payment_status",
+            "select",
+            "Payment",
+            True,
+            renderer="payment_status_badge",
+        ),
         _column("quantity", "Quantity", "record.quantity", "number", "Buyer", True),
         _column("event_slug", "Source Event Slug", "record.event_slug", group="Import"),
     ],
@@ -287,6 +306,18 @@ def columns_for(db, dataset, event_id, batch_scope):
                 "Additional Export Fields",
                 default=is_attestation_form,
                 renderer="attestation_form_link" if is_attestation_form else None,
+            )
+        )
+    if dataset == "buyers":
+        default_order = {
+            label: index for index, label in enumerate(BUYER_DEFAULT_COLUMN_LABELS)
+        }
+        for column in columns:
+            column["default"] = column["label"] in default_order
+        columns.sort(
+            key=lambda column: (
+                0 if column["label"] in default_order else 1,
+                default_order.get(column["label"], 0),
             )
         )
     return columns

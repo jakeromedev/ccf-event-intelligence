@@ -15,18 +15,15 @@
 {% block title %}Satellite Settings · {{ app_name }}{% endblock %}
 {% block application_header_page %}
 <div class="application-header-page">
-    <h1><span class="application-header-module">Satellites</span> <span class="application-header-separator" aria-hidden="true">/</span> Settings</h1>
+    <nav aria-label="Breadcrumb">
+        <h1><a class="application-header-module" href="{{ url_for('dashboard.event_satellites', event_id=event['id']) if event else url_for('dashboard.events') }}">Satellites</a> <span class="application-header-separator" aria-hidden="true">/</span> <span aria-current="page">Settings</span></h1>
+    </nav>
     <p>Manage the Hub and Satellite directory used by the system.</p>
 </div>
 {% endblock %}
 {% block page_header %}{% endblock %}
 
 {% block content %}
-<nav class="satellite-settings-back" aria-label="Satellite Settings navigation">
-    {% if event %}<a class="button secondary" href="{{ url_for('dashboard.event_satellites', event_id=event['id']) }}">{{ icon('back', 17) }} Back to Satellites</a>
-    {% else %}<a class="button secondary" href="{{ url_for('dashboard.events') }}">{{ icon('back', 17) }} Back to Events</a>{% endif %}
-</nav>
-
 <section class="satellite-settings-summary panel" aria-labelledby="satellite-settings-title">
     <div><p class="admin-breadcrumb">Satellite Administration <span>/</span> Directory Management</p><h1 id="satellite-settings-title">Satellite Settings</h1><p>Browse, search, add, and maintain the canonical Hub and Satellite directory.</p></div>
     <div class="satellite-settings-summary-actions"><dl><div><dt>Hubs</dt><dd>{{ hierarchy.hub_count|number }}</dd></div><div><dt>Satellites</dt><dd>{{ hierarchy.assigned_count|number }}</dd></div></dl>{% if event %}<form method="post" action="{{ url_for('dashboard.review_registration_satellites') }}" data-settings-form><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="event_id" value="{{ event['id'] }}"><button class="button primary" type="submit" data-sync-open data-loading-label="Scanning Registration Satellites…">{{ icon('satellites', 16) }} Sync Registration Satellites</button></form>{% endif %}</div>
