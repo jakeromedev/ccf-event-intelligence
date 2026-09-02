@@ -727,6 +727,17 @@ class AuthenticationTests(unittest.TestCase):
         )
         self.assertEqual(403, self.client.get("/admin/users").status_code)
         token = self.csrf("/events/{}".format(event_id))
+        for path in (
+            "/satellites/settings/sync/review",
+            "/satellites/settings/sync/confirm",
+        ):
+            self.assertEqual(
+                403,
+                self.client.post(
+                    path,
+                    data={"csrf_token": token, "event_id": event_id},
+                ).status_code,
+            )
         denied = self.client.post(
             "/events/{}/settings".format(event_id),
             data={"csrf_token": token, "participant_target": "100"},

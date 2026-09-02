@@ -244,5 +244,50 @@
         });
     }
 
+    const syncDialog = document.querySelector("[data-sync-review-modal]");
+    if (syncDialog) {
+        returnFocus = document.querySelector("[data-sync-open]");
+        const reasonFilter = syncDialog.querySelector("[data-sync-reason-filter]");
+        const failureRows = [...syncDialog.querySelectorAll("[data-sync-failure-row]")];
+        const filterResult = syncDialog.querySelector("[data-sync-filter-result]");
+        const filterEmpty = syncDialog.querySelector("[data-sync-filter-empty]");
+
+        const applyReasonFilter = () => {
+            const reason = reasonFilter?.value || "all";
+            let visible = 0;
+            failureRows.forEach((row) => {
+                const matches = reason === "all" || row.dataset.syncReason === reason;
+                row.hidden = !matches;
+                if (matches) visible += 1;
+            });
+            if (filterResult) {
+                filterResult.textContent = reason === "all"
+                    ? `Showing all ${visible} registrations requiring review.`
+                    : `Showing ${visible} ${visible === 1 ? "registration" : "registrations"} with reason: ${reason}.`;
+            }
+            if (filterEmpty) filterEmpty.hidden = visible !== 0;
+        };
+
+        syncDialog.querySelectorAll("[data-sync-review-close]").forEach((button) => {
+            button.addEventListener("click", () => closeDialog(syncDialog));
+        });
+        syncDialog.addEventListener("click", (event) => {
+            if (event.target === syncDialog) closeDialog(syncDialog);
+        });
+        syncDialog.addEventListener("cancel", (event) => {
+            event.preventDefault();
+            closeDialog(syncDialog);
+        });
+        reasonFilter?.addEventListener("change", applyReasonFilter);
+        syncDialog.querySelector("[data-sync-view-failures]")?.addEventListener("click", () => {
+            const target = reasonFilter || syncDialog.querySelector(".satellite-sync-table-wrap");
+            target?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+            target?.focus();
+        });
+        applyReasonFilter();
+        syncDialog.showModal();
+        requestAnimationFrame(() => syncDialog.querySelector("#satellite-sync-title").focus());
+    }
+
     applyFilters();
 })();

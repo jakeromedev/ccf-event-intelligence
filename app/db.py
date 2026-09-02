@@ -174,6 +174,13 @@ class Database:
         suffix = " FOR UPDATE" if self.is_mysql else ""
         return self.execute("SELECT id FROM events WHERE id = ?" + suffix, (event_id,)).fetchone()
 
+    def lock_satellite_directory(self):
+        """Keep the canonical Hub/Satellite directory stable during a sync."""
+        if not self.is_mysql:
+            return
+        self.execute("SELECT id FROM satellite_hubs ORDER BY id FOR UPDATE").fetchall()
+        self.execute("SELECT id FROM satellite_directory ORDER BY id FOR UPDATE").fetchall()
+
     def commit(self):
         self.session.commit()
 

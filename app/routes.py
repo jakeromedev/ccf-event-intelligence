@@ -1,11 +1,13 @@
+import hmac
+import secrets
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
 from time import perf_counter
 
-from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, session, url_for
 from flask_login import current_user
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from .auth import (
     admin_required,
@@ -66,6 +68,14 @@ from .satellite_settings import (
     satellite_settings_hierarchy,
     update_hub,
     update_satellite,
+)
+from .satellite_sync import (
+    ALREADY_SYNCED,
+    READY_TO_SYNC,
+    SYNC_STATUSES,
+    SatelliteSyncAnalysisError,
+    analyze_event_satellite_sync,
+    execute_event_satellite_sync,
 )
 from .time_utils import format_operational_datetime
 
@@ -750,7 +760,9 @@ def event_satellites(event_id):
     )
 
 
-def _render_satellite_settings(event_id=None, bulk_review=None, status=200):
+def _render_satellite_settings(
+    event_id=None, bulk_review=None, sync_review=None, status=200
+):
     db = get_db()
     event = get_event_or_404(event_id) if event_id is not None else None
     batch = active_batch(db, event_id) if event is not None else None
@@ -760,18 +772,140 @@ def _render_satellite_settings(event_id=None, bulk_review=None, status=200):
         active_batch=batch,
         hierarchy=satellite_settings_hierarchy(db),
         bulk_review=bulk_review,
+        sync_review=sync_review,
     ), status
 
 
 @bp.get("/satellites/settings")
 @satellite_settings_management_required
 def satellite_settings():
-    return _render_satellite_settings(request.args.get("event_id", type=int))
+    event_id = request.args.get("event_id", type=int)
+    sync_review = None
+    if event_id is not None and request.args.get("sync_complete") == "1":
+        completion = session.pop("satellite_sync_result", None)
+        if completion and completion.get("event_id") == event_id:
+            plan = analyze_event_satellite_sync(get_db(), event_id)
+            sync_review = _prepare_sync_review(plan, completion=completion)
+    return _render_satellite_settings(event_id, sync_review=sync_review)
 
 
-def _satellite_settings_redirect(anchor=""):
+def _prepare_sync_review(plan, confirmation_token=None, completion=None):
+    failure_statuses = set(SYNC_STATUSES) - {READY_TO_SYNC, ALREADY_SYNCED}
+    failures = [
+        registration
+        for registration in plan["registrations"]
+        if registration["status"] in failure_statuses
+    ]
+    plan["ready_count"] = plan["counts"][READY_TO_SYNC]
+    plan["already_synced_count"] = plan["counts"][ALREADY_SYNCED]
+    plan["not_synced_count"] = sum(
+        count
+        for status, count in plan["counts"].items()
+        if status in failure_statuses
+    )
+    plan["failures"] = failures
+    plan["reason_counts"] = [
+        {
+            "reason": status,
+            "count": sum(1 for item in failures if item["status"] == status),
+        }
+        for status in SYNC_STATUSES
+        if status in failure_statuses
+        and any(item["status"] == status for item in failures)
+    ]
+    plan["confirmation_token"] = confirmation_token
+    plan["completion"] = completion
+    return plan
+
+
+@bp.post("/satellites/settings/sync/review")
+@satellite_settings_management_required
+def review_registration_satellites():
     event_id = request.form.get("event_id", type=int)
-    location = url_for("dashboard.satellite_settings", event_id=event_id)
+    if event_id is None:
+        abort(400)
+    get_event_or_404(event_id)
+    plan = analyze_event_satellite_sync(get_db(), event_id)
+    confirmation_token = secrets.token_urlsafe(32)
+    session["satellite_sync_confirmation"] = {
+        "event_id": event_id,
+        "token": confirmation_token,
+    }
+    return _render_satellite_settings(
+        event_id,
+        sync_review=_prepare_sync_review(
+            plan, confirmation_token=confirmation_token
+        ),
+    )
+
+
+@bp.post("/satellites/settings/sync/confirm")
+@satellite_settings_management_required
+def confirm_registration_satellites():
+    event_id = request.form.get("event_id", type=int)
+    if event_id is None:
+        abort(400)
+    get_event_or_404(event_id)
+    pending = session.pop("satellite_sync_confirmation", None)
+    supplied_token = request.form.get("confirmation_token", "")
+    valid_confirmation = (
+        pending
+        and pending.get("event_id") == event_id
+        and supplied_token
+        and hmac.compare_digest(str(pending.get("token", "")), supplied_token)
+    )
+    if not valid_confirmation:
+        flash(
+            "This synchronization review is missing, expired, or was already used. Review the registrations again.",
+            "error",
+        )
+        return _satellite_settings_redirect()
+    db = get_db()
+    try:
+        result = execute_event_satellite_sync(db, event_id)
+        db.commit()
+    except SatelliteSyncAnalysisError as exc:
+        db.rollback()
+        flash(str(exc), "error")
+        return _satellite_settings_redirect()
+    except SQLAlchemyError:
+        db.rollback()
+        current_app.logger.exception("Registration Satellite synchronization failed.")
+        flash(
+            "Registration Satellites could not be synchronized. No changes were saved.",
+            "error",
+        )
+        return _satellite_settings_redirect()
+
+    synchronized = result["synchronized_count"]
+    already_synced = result["already_synced_count"]
+    not_synced = result["not_synced_count"]
+    session["satellite_sync_result"] = {
+        "event_id": event_id,
+        "synchronized_count": synchronized,
+        "synchronized_registration_count": result["synchronized_registration_count"],
+        "already_synced_count": already_synced,
+        "not_synced_count": not_synced,
+    }
+    current_app.logger.info(
+        "registration_satellite_sync_completed",
+        extra={
+            "event": "registration_satellite_sync_completed",
+            "event_id": event_id,
+            "user_id": getattr(current_user, "id", None),
+            "matched_count": synchronized,
+            "skipped_count": already_synced,
+            "failed_count": not_synced,
+        },
+    )
+    return _satellite_settings_redirect(sync_complete=1)
+
+
+def _satellite_settings_redirect(anchor="", **parameters):
+    event_id = request.form.get("event_id", type=int)
+    location = url_for(
+        "dashboard.satellite_settings", event_id=event_id, **parameters
+    )
     return redirect(location + anchor)
 
 
