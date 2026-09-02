@@ -1236,6 +1236,8 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         self.assertIn(".registration-actions-menu", styles)
         self.assertIn("if (index < 3)", script)
         self.assertIn(".registration-sticky-3", styles)
+        self.assertIn(".registrations-data-table .registration-actions-column", styles)
+        self.assertIn("position: static", styles)
         self.assertIn("text-overflow: clip", styles)
         self.assertIn('tr.classList.add("has-pending-remarks")', script)
         self.assertIn("tr.has-pending-remarks td", styles)

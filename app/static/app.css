@@ -3086,6 +3086,31 @@ body.registrations-filter-open { overflow: hidden; }
     .registrations-summary-grid > div:nth-child(n+3) { border-top: 1px solid var(--b1g-border); }
     .registrations-control-bar { padding-block: 14px; }
     .registrations-panel .admin-table-footer { gap: 12px; }
+    .registrations-data-table .registration-sticky-column {
+        position: static;
+        z-index: auto;
+        left: auto;
+    }
+    .registrations-data-table th.registration-sticky-column {
+        position: sticky;
+        z-index: 3;
+        top: 0;
+    }
+    .registrations-data-table .registration-sticky-3 {
+        border-right: 0;
+        box-shadow: none;
+    }
+    .registrations-data-table .registration-actions-column {
+        position: sticky;
+        z-index: 4;
+        left: 0;
+        border-right: 1px solid var(--b1g-border);
+        background: var(--b1g-white);
+    }
+    .registrations-data-table th.registration-actions-column {
+        z-index: 6;
+        background: #f5f9fa;
+    }
     .attestation-status-panel { padding: 20px; }
     .remarks-dialog { width: 100%; height: 100%; max-height: none; border: 0; border-radius: 0; }
 }
