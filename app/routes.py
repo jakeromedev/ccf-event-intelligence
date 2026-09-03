@@ -69,6 +69,7 @@ from .satellite_settings import (
     update_hub,
     update_satellite,
 )
+from .satellite_settings_registrants import event_settings_registrants
 from .satellite_sync import (
     ALREADY_SYNCED,
     READY_TO_SYNC,
@@ -766,14 +767,39 @@ def _render_satellite_settings(
     db = get_db()
     event = get_event_or_404(event_id) if event_id is not None else None
     batch = active_batch(db, event_id) if event is not None else None
+    filters = _satellite_settings_filters() if event is not None else {}
+    registrants = (
+        event_settings_registrants(db, event_id, **filters)
+        if event is not None
+        else None
+    )
     return render_template(
         "satellite_settings.html",
         event=event,
         active_batch=batch,
         hierarchy=satellite_settings_hierarchy(db),
+        registrants=registrants,
+        settings_filters=filters,
+        settings_view=(request.args.get("view") if event is not None else "directory")
+        if request.args.get("view") in ("directory", "registrants")
+        else "directory",
         bulk_review=bulk_review,
         sync_review=sync_review,
     ), status
+
+
+def _satellite_settings_filters():
+    return {
+        "query": (request.args.get("q") or "").strip()[:200],
+        "group_code": (request.args.get("group") or "").strip()[:80],
+        "hub_id": request.args.get("hub_id", type=int),
+        "satellite_id": request.args.get("satellite_id", type=int),
+        "sync_status": (request.args.get("sync_status") or "all").strip()[:80],
+        "sort": (request.args.get("sort") or "participant").strip()[:40],
+        "direction": (request.args.get("direction") or "asc").strip()[:8],
+        "page": request.args.get("page", default=1, type=int),
+        "per_page": request.args.get("per_page", default=25, type=int),
+    }
 
 
 @bp.get("/satellites/settings")
@@ -787,6 +813,25 @@ def satellite_settings():
             plan = analyze_event_satellite_sync(get_db(), event_id)
             sync_review = _prepare_sync_review(plan, completion=completion)
     return _render_satellite_settings(event_id, sync_review=sync_review)
+
+
+@bp.get("/satellites/settings/registrants")
+@satellite_settings_management_required
+def satellite_settings_registrants():
+    event_id = request.args.get("event_id", type=int)
+    if event_id is None:
+        abort(400)
+    get_event_or_404(event_id)
+    payload = event_settings_registrants(
+        get_db(), event_id, **_satellite_settings_filters()
+    )
+    requested_satellite = request.args.get("satellite_id", type=int)
+    if requested_satellite is not None and not any(
+        option["id"] == requested_satellite
+        for option in payload["options"]["satellites"]
+    ):
+        abort(404)
+    return jsonify(payload)
 
 
 def _prepare_sync_review(plan, confirmation_token=None, completion=None):

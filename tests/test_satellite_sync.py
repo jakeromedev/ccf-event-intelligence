@@ -3,6 +3,7 @@ import re
 import tempfile
 import unittest
 from pathlib import Path
+from time import perf_counter
 from unittest.mock import patch
 
 from app import create_app
@@ -10,6 +11,7 @@ from app.db import get_db, get_engine
 from app.models import Base
 from app.satellite_datasets import satellite_dataset_options
 from app.satellite_settings import satellite_settings_hierarchy, update_satellite
+from app.satellite_settings_registrants import event_settings_registrants
 from app.satellite_sync import (
     ALREADY_SYNCED,
     AMBIGUOUS,
@@ -658,6 +660,179 @@ class SatelliteSyncAnalysisTests(unittest.TestCase):
         )
         self.assertEqual("B1G Tagum Central", directory_entry["name"])
         self.assertEqual(1, directory_entry["source_records"])
+
+    def test_event_settings_registrants_aggregate_filter_sort_and_paginate(self):
+        hub_id = self._hub("Mindanao South")
+        canonical_id = self._directory(hub_id, "B1G Tagum")
+        imported_id = self._evidence(directory_id=canonical_id, sequence=1)
+        self._evidence(directory_id=canonical_id, sequence=2, imported_id=imported_id)
+        self._evidence(
+            source_hub="Visayas",
+            source_satellite="B1G Cebu",
+            sequence=3,
+            imported_name="B1G Cebu",
+        )
+
+        with self.app.app_context():
+            result = event_settings_registrants(
+                get_db(), self.event_id, sort="identifier", direction="desc",
+                page=1, per_page=1,
+            )
+            synced = event_settings_registrants(
+                get_db(), self.event_id, sync_status="synced"
+            )
+            review = event_settings_registrants(
+                get_db(), self.event_id, sync_status="needs_review"
+            )
+            searched = event_settings_registrants(
+                get_db(), self.event_id, query="R-2"
+            )
+
+        self.assertEqual(3, result["totals"]["registrants"])
+        self.assertEqual(2, result["totals"]["synced"])
+        self.assertEqual(1, result["totals"]["review"])
+        self.assertEqual(3, result["pagination"]["total"])
+        self.assertEqual(1, len(result["rows"]))
+        self.assertEqual("3", result["rows"][0]["identifier"])
+        self.assertEqual(2, synced["pagination"]["total"])
+        self.assertEqual(1, review["pagination"]["total"])
+        self.assertEqual(1, searched["pagination"]["total"])
+        self.assertEqual(
+            2,
+            result["counts"]["satellite:{}".format(canonical_id)]["registrants"],
+        )
+
+    def test_event_settings_page_and_lazy_registrant_endpoint(self):
+        hub_id = self._hub("Mindanao South")
+        canonical_id = self._directory(hub_id, "B1G Tagum")
+        self._evidence(directory_id=canonical_id)
+        client = self.app.test_client()
+
+        page = client.get(
+            "/satellites/settings",
+            query_string={"event_id": self.event_id, "view": "registrants"},
+        )
+        payload = client.get(
+            "/satellites/settings/registrants",
+            query_string={
+                "event_id": self.event_id,
+                "satellite_id": canonical_id,
+                "per_page": 10,
+            },
+        )
+
+        self.assertEqual(200, page.status_code)
+        self.assertIn(b"Registration Satellite Assignments", page.data)
+        self.assertIn(b"Already Synced", page.data)
+        self.assertEqual(200, payload.status_code)
+        self.assertEqual(1, payload.get_json()["pagination"]["total"])
+        self.assertEqual(
+            "B1G Tagum", payload.get_json()["rows"][0]["satellite"]
+        )
+
+    def test_global_settings_never_embeds_event_registrants(self):
+        hub_id = self._hub("Mindanao South")
+        canonical_id = self._directory(hub_id, "B1G Tagum")
+        self._evidence(directory_id=canonical_id)
+
+        response = self.app.test_client().get("/satellites/settings")
+
+        self.assertEqual(200, response.status_code)
+        self.assertNotIn(b"Test Registrant", response.data)
+        self.assertNotIn(b"Registration Satellite Assignments", response.data)
+        self.assertNotIn(b"data-registrants-url", response.data)
+
+    def test_large_event_registrants_remain_server_paginated(self):
+        hub_id = self._hub("Mindanao South")
+        canonical_id = self._directory(hub_id, "B1G Tagum")
+        imported_id = self._evidence(directory_id=canonical_id, sequence=1)
+        source_data = json.dumps({"Mindanao South Hub": "B1G Tagum"})
+        with self.app.app_context():
+            db = get_db()
+            db.executemany(
+                """
+                INSERT INTO registrants (
+                    batch_id, source_id, registration_code, ticket_code,
+                    first_name, last_name, b1g_satellite_hub_raw,
+                    affiliation, satellite_name, ticket_matched, source_data_json
+                ) VALUES (?, ?, ?, ?, 'Scale', 'Registrant', 'Mindanao South',
+                          'Local Satellite', 'B1G Tagum', 1, ?)
+                """,
+                [
+                    (
+                        self.batch_id,
+                        str(sequence),
+                        "R-{}".format(sequence),
+                        "T-{}".format(sequence),
+                        source_data,
+                    )
+                    for sequence in range(2, 1251)
+                ],
+            )
+            db.execute(
+                "UPDATE satellites SET source_record_count = 1250 WHERE id = ?",
+                (imported_id,),
+            )
+            db.commit()
+            started = perf_counter()
+            result = event_settings_registrants(
+                db, self.event_id, page=25, per_page=25
+            )
+            elapsed = perf_counter() - started
+
+        self.assertEqual(1250, result["pagination"]["total"])
+        self.assertEqual(25, len(result["rows"]))
+        self.assertEqual(25, result["pagination"]["page"])
+        self.assertLess(elapsed, 5.0)
+
+    def test_mobile_filter_sheet_and_accessible_filter_chips_render(self):
+        hub_id = self._hub("Mindanao South")
+        canonical_id = self._directory(hub_id, "B1G Tagum")
+        self._evidence(directory_id=canonical_id)
+
+        response = self.app.test_client().get(
+            "/satellites/settings",
+            query_string={
+                "event_id": self.event_id,
+                "group": "outside_metro_manila",
+                "hub_id": hub_id,
+                "satellite_id": canonical_id,
+                "sync_status": "already_synced",
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        for marker in (
+            b"data-mobile-filters-open",
+            b"data-mobile-filter-dialog",
+            b"Apply Filters",
+            b"aria-haspopup=\"dialog\"",
+            b"aria-label=\"Remove Hub Group filter\"",
+            b"aria-label=\"Remove Hub filter\"",
+            b"aria-label=\"Remove Satellite filter\"",
+            b"aria-label=\"Remove Sync Status filter\"",
+        ):
+            self.assertIn(marker, response.data)
+
+    def test_main_page_metrics_refresh_after_sync(self):
+        hub_id = self._hub("Mindanao South")
+        self._directory(hub_id, "B1G Tagum")
+        self._evidence()
+        client = self.app.test_client()
+
+        before = client.get(
+            "/satellites/settings", query_string={"event_id": self.event_id}
+        )
+        with self.app.app_context():
+            db = get_db()
+            execute_event_satellite_sync(db, self.event_id)
+            db.commit()
+        after = client.get(
+            "/satellites/settings", query_string={"event_id": self.event_id}
+        )
+
+        self.assertIn(b"1 Registrants \xc2\xb7 0 Synced \xc2\xb7 1 Ready", before.data)
+        self.assertIn(b"1 Registrants \xc2\xb7 1 Synced \xc2\xb7 0 Ready", after.data)
 
 
 if __name__ == "__main__":

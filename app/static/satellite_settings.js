@@ -1,10 +1,8 @@
 (() => {
     const tools = document.querySelector("[data-satellite-settings-tools]");
-    if (!tools) return;
-
-    const search = tools.querySelector("[data-settings-search]");
-    const filter = tools.querySelector("[data-settings-group-filter]");
-    const results = tools.querySelector("[data-settings-results]");
+    const search = tools?.querySelector("[data-settings-search]");
+    const filter = tools?.querySelector("[data-settings-group-filter]");
+    const results = tools?.querySelector("[data-settings-results]");
     const noResults = document.querySelector("[data-settings-no-results]");
     const groups = [...document.querySelectorAll("[data-hub-group]")];
     const cards = [...document.querySelectorAll("[data-hub-card]")];
@@ -23,9 +21,10 @@
         body.hidden = !expanded;
     };
 
-    const selectedGroup = () => filter.querySelector("input:checked")?.value || "all";
+    const selectedGroup = () => filter?.querySelector("input:checked")?.value || "all";
 
     const applyFilters = () => {
+        if (!tools) return;
         const query = search.value.trim().toLocaleLowerCase();
         const groupCode = selectedGroup();
         let visibleGroups = 0;
@@ -166,11 +165,11 @@
     };
 
     document.querySelectorAll("[data-hub-toggle]").forEach((toggle) => toggle.addEventListener("click", () => setHubExpanded(toggle.closest("[data-hub-card]"), toggle.getAttribute("aria-expanded") !== "true")));
-    tools.querySelector("[data-expand-all]").addEventListener("click", () => cards.filter((card) => !card.hidden && !card.closest("[data-hub-group]").hidden).forEach((card) => setHubExpanded(card, true)));
-    tools.querySelector("[data-collapse-all]").addEventListener("click", () => cards.filter((card) => !card.hidden && !card.closest("[data-hub-group]").hidden).forEach((card) => setHubExpanded(card, false)));
-    search.addEventListener("input", applyFilters);
-    filter.addEventListener("change", applyFilters);
-    document.querySelector("[data-clear-search]").addEventListener("click", () => { search.value = ""; filter.querySelector("input[value='all']").checked = true; applyFilters(); search.focus(); });
+    document.querySelectorAll("[data-expand-all]").forEach((button) => button.addEventListener("click", () => cards.filter((card) => !card.hidden && !card.closest("[data-hub-group]").hidden).forEach((card) => setHubExpanded(card, true))));
+    document.querySelectorAll("[data-collapse-all]").forEach((button) => button.addEventListener("click", () => cards.filter((card) => !card.hidden && !card.closest("[data-hub-group]").hidden).forEach((card) => setHubExpanded(card, false))));
+    search?.addEventListener("input", applyFilters);
+    filter?.addEventListener("change", applyFilters);
+    document.querySelector("[data-clear-search]")?.addEventListener("click", () => { search.value = ""; filter.querySelector("input[value='all']").checked = true; applyFilters(); search.focus(); });
 
     document.querySelectorAll("[data-settings-record-open]").forEach((trigger) => trigger.addEventListener("click", () => openCreateDialog(trigger)));
     createDialog.querySelectorAll("[data-settings-record-close]").forEach((button) => button.addEventListener("click", () => closeDialog(createDialog)));
@@ -243,6 +242,177 @@
             createForm.querySelector("[data-record-values]").focus();
         });
     }
+
+    document.querySelectorAll("[data-event-settings-filters]").forEach((eventFilters) => {
+        const groupSelect = eventFilters.querySelector("[data-event-group]");
+        const hubSelect = eventFilters.querySelector("[data-event-hub]");
+        const satelliteSelect = eventFilters.querySelector("[data-event-satellite]");
+        const cascade = (resetHub = false) => {
+            if (resetHub) hubSelect.value = "";
+            [...hubSelect.options].forEach((option, index) => {
+                option.hidden = index > 0 && Boolean(groupSelect.value) && option.dataset.groupCode !== groupSelect.value;
+            });
+            if (hubSelect.selectedOptions[0]?.hidden) hubSelect.value = "";
+            [...satelliteSelect.options].forEach((option, index) => {
+                option.hidden = index > 0 && (
+                    (Boolean(groupSelect.value) && option.dataset.groupCode !== groupSelect.value)
+                    || (Boolean(hubSelect.value) && option.dataset.hubId !== hubSelect.value)
+                );
+            });
+            if (satelliteSelect.selectedOptions[0]?.hidden) satelliteSelect.value = "";
+        };
+        groupSelect.addEventListener("change", () => { cascade(true); satelliteSelect.value = ""; });
+        hubSelect.addEventListener("change", () => { satelliteSelect.value = ""; cascade(); });
+        cascade();
+    });
+
+    const mobileFilterDialog = document.querySelector("[data-mobile-filter-dialog]");
+    const mobileFilterOpen = document.querySelector("[data-mobile-filters-open]");
+    if (mobileFilterDialog && mobileFilterOpen) {
+        const closeMobileFilters = () => closeDialog(mobileFilterDialog);
+        mobileFilterOpen.addEventListener("click", () => {
+            returnFocus = mobileFilterOpen;
+            mobileFilterDialog.showModal();
+            requestAnimationFrame(() => mobileFilterDialog.querySelector("[data-event-group]").focus());
+        });
+        mobileFilterDialog.querySelectorAll("[data-mobile-filters-close]").forEach((button) => {
+            button.addEventListener("click", closeMobileFilters);
+        });
+        mobileFilterDialog.addEventListener("click", (event) => {
+            if (event.target === mobileFilterDialog) closeMobileFilters();
+        });
+        mobileFilterDialog.addEventListener("cancel", (event) => {
+            event.preventDefault();
+            closeMobileFilters();
+        });
+    }
+
+    const directory = document.querySelector("[data-settings-directory][data-registrants-url]");
+    const statusClass = (row) => row.needs_review ? "review" : row.status === "Already Synced" ? "synced" : "ready";
+    const makeCell = (value, tag = "td") => {
+        const cell = document.createElement(tag);
+        cell.textContent = value || "—";
+        return cell;
+    };
+    const renderDrilldown = (panel, payload, state) => {
+        panel.replaceChildren();
+        const controls = document.createElement("div");
+        controls.className = "satellite-drilldown-controls";
+        const searchInput = document.createElement("input");
+        searchInput.type = "search";
+        searchInput.placeholder = "Search participant or registration ID";
+        searchInput.value = state.q;
+        searchInput.setAttribute("aria-label", "Search registrants in this Satellite");
+        const status = document.createElement("select");
+        status.setAttribute("aria-label", "Filter registrants by sync status");
+        [["all", "All statuses"], ["synced", "Synced"], ["needs_review", "Needs Review"], ["ready_to_sync", "Ready to Sync"]].forEach(([value, label]) => {
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = label;
+            option.selected = state.syncStatus === value;
+            status.append(option);
+        });
+        controls.append(searchInput, status);
+        panel.append(controls);
+
+        if (!payload.rows.length) {
+            const empty = document.createElement("p");
+            empty.className = "satellite-drilldown-empty";
+            empty.textContent = "No registrants match these filters.";
+            panel.append(empty);
+        } else {
+            const wrap = document.createElement("div");
+            wrap.className = "satellite-drilldown-table";
+            wrap.tabIndex = 0;
+            wrap.setAttribute("role", "region");
+            wrap.setAttribute("aria-label", "Satellite registrants");
+            const table = document.createElement("table");
+            const head = document.createElement("thead");
+            const headRow = document.createElement("tr");
+            ["Participant", "Registration", "Hub", "Satellite", "Status"].forEach((label) => headRow.append(makeCell(label, "th")));
+            head.append(headRow);
+            const body = document.createElement("tbody");
+            payload.rows.forEach((row) => {
+                const tr = document.createElement("tr");
+                tr.append(makeCell(row.participant), makeCell(row.identifier), makeCell(row.hub), makeCell(row.satellite));
+                const statusCell = document.createElement("td");
+                const badge = document.createElement("span");
+                badge.className = `satellite-status is-${statusClass(row)}`;
+                badge.textContent = row.status;
+                statusCell.append(badge);
+                tr.append(statusCell);
+                body.append(tr);
+            });
+            table.append(head, body);
+            wrap.append(table);
+            panel.append(wrap);
+        }
+
+        const footer = document.createElement("div");
+        footer.className = "satellite-drilldown-pagination";
+        const summary = document.createElement("span");
+        summary.setAttribute("aria-live", "polite");
+        summary.textContent = `Showing ${payload.pagination.start}–${payload.pagination.end} of ${payload.pagination.total}`;
+        const actions = document.createElement("div");
+        [["Previous", state.page - 1, !payload.pagination.has_previous], ["Next", state.page + 1, !payload.pagination.has_next]].forEach(([label, page, disabled]) => {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "button secondary compact";
+            button.textContent = label;
+            button.disabled = disabled;
+            button.addEventListener("click", () => loadDrilldown(panel, {...state, page}));
+            actions.append(button);
+        });
+        footer.append(summary, actions);
+        panel.append(footer);
+
+        let timer;
+        searchInput.addEventListener("input", () => {
+            window.clearTimeout(timer);
+            timer = window.setTimeout(() => loadDrilldown(panel, {...state, q: searchInput.value.trim(), page: 1}), 300);
+        });
+        status.addEventListener("change", () => loadDrilldown(panel, {...state, syncStatus: status.value, page: 1}));
+    };
+    const loadDrilldown = async (panel, state) => {
+        panel.hidden = false;
+        panel.setAttribute("aria-busy", "true");
+        if (!panel.childElementCount) panel.textContent = "Loading registrants…";
+        const url = new URL(directory.dataset.registrantsUrl, window.location.origin);
+        url.searchParams.set("satellite_id", state.satelliteId);
+        url.searchParams.set("q", state.q || "");
+        url.searchParams.set("sync_status", state.syncStatus || "all");
+        url.searchParams.set("page", state.page || 1);
+        url.searchParams.set("per_page", 10);
+        try {
+            const response = await fetch(url, {headers: {Accept: "application/json"}});
+            if (!response.ok) throw new Error("Request failed");
+            renderDrilldown(panel, await response.json(), state);
+            if (state.focusPanel && document.activeElement === state.focusTrigger) panel.focus({preventScroll: true});
+            state.focusPanel = false;
+        } catch (_error) {
+            panel.textContent = "Registrants could not be loaded. Try again.";
+        } finally {
+            panel.removeAttribute("aria-busy");
+        }
+    };
+    directory?.querySelectorAll("[data-satellite-registrants-toggle]").forEach((toggle) => toggle.addEventListener("click", () => {
+        const panel = document.getElementById(toggle.getAttribute("aria-controls"));
+        const opening = toggle.getAttribute("aria-expanded") !== "true";
+        toggle.closest("[data-hub-card]").querySelectorAll("[data-satellite-registrants-toggle][aria-expanded='true']").forEach((other) => {
+            if (other === toggle) return;
+            other.setAttribute("aria-expanded", "false");
+            other.textContent = "View Registrants";
+            document.getElementById(other.getAttribute("aria-controls")).hidden = true;
+        });
+        toggle.setAttribute("aria-expanded", String(opening));
+        toggle.textContent = opening ? "Hide Registrants" : "View Registrants";
+        panel.hidden = !opening;
+        if (opening && !panel.dataset.loaded) {
+            panel.dataset.loaded = "true";
+            panel.tabIndex = -1;
+            loadDrilldown(panel, {satelliteId: toggle.dataset.satelliteId, q: "", syncStatus: "all", page: 1, focusPanel: true, focusTrigger: toggle});
+        }
+    }));
 
     const syncDialog = document.querySelector("[data-sync-review-modal]");
     if (syncDialog) {
