@@ -21,6 +21,7 @@ from .auth import (
 from .analytics import AnalyticsFilterError, compare_events, event_analytics, historical_trends
 from .aggregation import (
     active_batch,
+    canonical_satellite_metrics,
     curated_registrant_detail,
     curation_quality,
     data_quality,
@@ -29,7 +30,6 @@ from .aggregation import (
     event_summaries,
     overview_registrants,
     satellite_curation_detail,
-    satellite_metrics,
     satellite_registrants,
 )
 from .admin_tables import (
@@ -79,6 +79,7 @@ from .satellite_sync import (
     execute_event_satellite_sync,
 )
 from .time_utils import format_operational_datetime
+from .url_safety import safe_internal_path
 
 
 bp = Blueprint("dashboard", __name__)
@@ -720,31 +721,28 @@ def event_satellites(event_id):
     db = get_db()
     event = get_event_or_404(event_id)
     batch = active_batch(db, event_id)
-    scope = request.args.get("scope", "all")
-    if scope not in ("all", "local", "international"):
-        scope = "all"
     query = (request.args.get("q") or "").strip()[:100]
-    page = request.args.get("page", default=1, type=int) or 1
-    page = max(page, 1)
-    per_page = request.args.get("per_page", default=10, type=int)
-    if per_page not in (10, 25, 50):
-        per_page = 10
+    group_id = request.args.get("group", type=int)
+    hub_id = request.args.get("hub", type=int)
+    satellite_id = request.args.get("satellite", type=int)
+    link_status = request.args.get("link_status", "all")
     sort = request.args.get("sort", "registrants")
-    if sort not in ("name", "scope", "registrants", "checked_in", "attendance_rate"):
-        sort = "registrants"
     direction = request.args.get("direction", "desc")
-    if direction not in ("asc", "desc"):
-        direction = "desc"
+    page = request.args.get("page", default=1, type=int) or 1
+    per_page = request.args.get("per_page", default=10, type=int) or 10
     metrics = (
-        satellite_metrics(
+        canonical_satellite_metrics(
             db,
             batch["id"],
-            scope=scope,
             query=query,
-            page=page,
-            per_page=per_page,
+            group_id=group_id,
+            hub_id=hub_id,
+            satellite_id=satellite_id,
+            link_status=link_status,
             sort=sort,
             direction=direction,
+            page=page,
+            per_page=per_page,
         )
         if batch
         else None
@@ -754,10 +752,8 @@ def event_satellites(event_id):
         event=event,
         active_batch=batch,
         metrics=metrics,
-        scope=scope,
         query=query,
-        sort=sort,
-        direction=direction,
+        satellite_return_url=request.full_path.rstrip("?") + "#satellite-ranking-table",
     )
 
 
@@ -1174,24 +1170,29 @@ def event_satellite_registrants(event_id):
     db = get_db()
     event = get_event_or_404(event_id)
     batch = active_batch(db, event_id)
+    satellite_id = request.args.get("satellite", type=int)
     satellite_name = (request.args.get("name") or "").strip()[:200]
     scope = request.args.get("scope", "")
+    query = (request.args.get("q") or "").strip()[:100]
     page = max(request.args.get("page", default=1, type=int) or 1, 1)
     per_page = request.args.get("per_page", default=50, type=int)
     if per_page not in (25, 50, 100):
         per_page = 50
+    return_to = safe_internal_path(request.args.get("return_to"))
 
     participant_data = None
     if batch:
-        if not satellite_name or scope not in ("local", "international"):
+        target = satellite_id or satellite_name
+        if not target:
             abort(404)
         participant_data = satellite_registrants(
             db,
             batch["id"],
-            satellite_name,
+            target,
             scope,
             page=page,
             per_page=per_page,
+            query=query,
         )
         if participant_data is None:
             abort(404)
@@ -1200,6 +1201,9 @@ def event_satellite_registrants(event_id):
         event=event,
         active_batch=batch,
         satellite=participant_data,
+        satellite_return_url=return_to
+        or url_for("dashboard.event_satellites", event_id=event_id)
+        + "#satellite-ranking-table",
     )
 
 

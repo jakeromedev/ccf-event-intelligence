@@ -24,7 +24,7 @@ from app.importer import process_batch, store_validation, validate_batch
 from app.models import Base, User
 from app.observability import JsonLogFormatter
 from app.registrations import update_attestation_verification
-from app.url_safety import safe_external_url
+from app.url_safety import safe_external_url, safe_internal_path
 
 
 CSRF_PATTERN = re.compile(rb'name="csrf_token"[^>]*value="([^"]+)"')
@@ -90,6 +90,23 @@ class SafeExternalUrlTests(unittest.TestCase):
         ):
             with self.subTest(value=value):
                 self.assertIsNone(safe_external_url(value))
+
+    def test_only_same_origin_absolute_paths_are_allowed(self):
+        self.assertEqual(
+            "/events/3/satellites?group=1#ranking",
+            safe_internal_path(" /events/3/satellites?group=1#ranking "),
+        )
+        for value in (
+            None,
+            "",
+            "events/3",
+            "//attacker.example/path",
+            "https://attacker.example/path",
+            "/\\attacker.example/path",
+            "/events/3\nunsafe",
+        ):
+            with self.subTest(value=value):
+                self.assertIsNone(safe_internal_path(value))
 
 
 class CategoricalOptionsQueryTests(unittest.TestCase):

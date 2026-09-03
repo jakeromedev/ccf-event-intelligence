@@ -25,6 +25,7 @@ from app.aggregation import (
     satellite_metrics,
     satellite_registrants,
 )
+from app.satellite_analytics import canonical_satellite_metrics
 from app.analytics import event_analytics
 from app.classifier import classify_affiliation
 from app.curation import (
@@ -1276,6 +1277,317 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertNotIn(b"Preserved Current Data", settings.data)
         self.assertNotIn(b"Awaiting Hub Assignment", settings.data)
 
+    def test_canonical_satellite_analytics_use_hierarchy_and_additive_associations(self):
+        batch_id = self._process(self.event_a)
+        with self.app.app_context():
+            db = get_db()
+            db.executemany(
+                """
+                INSERT INTO hub_groups (id, code, name, sort_order)
+                VALUES (?, ?, ?, ?)
+                """,
+                [
+                    (1, "within_metro_manila", "Within Metro Manila Hubs", 1),
+                    (2, "outside_metro_manila", "Outside Metro Manila Hubs", 2),
+                ],
+            )
+            east_hub = db.execute(
+                """
+                INSERT INTO satellite_hubs (hub_group_id, name, normalized_name)
+                VALUES (1, 'Metro East', 'metro east')
+                """
+            ).lastrowid
+            international_hub = db.execute(
+                """
+                INSERT INTO satellite_hubs (hub_group_id, name, normalized_name)
+                VALUES (2, 'International', 'international')
+                """
+            ).lastrowid
+            eastwood = db.execute(
+                "SELECT id FROM satellite_directory WHERE normalized_name = 'ccf eastwood'"
+            ).fetchone()[0]
+            singapore = db.execute(
+                "SELECT id FROM satellite_directory WHERE normalized_name = 'ccf singapore'"
+            ).fetchone()[0]
+            db.execute(
+                "UPDATE satellite_directory SET hub_id = ? WHERE id = ?",
+                (east_hub, eastwood),
+            )
+            db.execute(
+                "UPDATE satellite_directory SET hub_id = ? WHERE id = ?",
+                (international_hub, singapore),
+            )
+
+            imported = {
+                row["normalized_name"]: row
+                for row in db.execute(
+                    "SELECT id, normalized_name FROM satellites WHERE batch_id = ?",
+                    (batch_id,),
+                ).fetchall()
+            }
+            eastwood_person = db.execute(
+                """
+                SELECT curated_registrant_id FROM curated_registrant_satellites
+                WHERE satellite_id = ?
+                """,
+                (imported["ccf eastwood"]["id"],),
+            ).fetchone()[0]
+            # One person belongs to two Satellites. The Hub distribution must
+            # count two additive associations while the KPI remains distinct.
+            db.execute(
+                """
+                INSERT INTO curated_registrant_satellites (
+                    event_id, batch_id, curated_registrant_id, satellite_id
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (
+                    self.event_a,
+                    batch_id,
+                    eastwood_person,
+                    imported["ccf singapore"]["id"],
+                ),
+            )
+            unresolved = db.execute(
+                """
+                INSERT INTO satellites (
+                    event_id, batch_id, name, normalized_name, affiliation,
+                    source_record_count
+                ) VALUES (?, ?, 'Mystery Satellite', 'mystery satellite',
+                          'Local Satellite', 999)
+                """,
+                (self.event_a, batch_id),
+            ).lastrowid
+            db.execute(
+                """
+                INSERT INTO curated_registrant_satellites (
+                    event_id, batch_id, curated_registrant_id, satellite_id
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (self.event_a, batch_id, eastwood_person, unresolved),
+            )
+            db.commit()
+
+            metrics = canonical_satellite_metrics(db, batch_id)
+            self.assertEqual(metrics, satellite_metrics(db, batch_id)["canonical"])
+            within = canonical_satellite_metrics(db, batch_id, group_id=1)
+            searched = canonical_satellite_metrics(db, batch_id, query="R-2")
+            needs_mapping = canonical_satellite_metrics(
+                db, batch_id, link_status="needs_mapping"
+            )
+
+        self.assertEqual(self.event_a, metrics["event_id"])
+        self.assertEqual(2, metrics["linked_registrants"])
+        self.assertEqual(2, metrics["hubs_represented"])
+        self.assertEqual(2, metrics["satellites_represented"])
+        self.assertEqual(3, metrics["association_count"])
+        # The fixture's canonical CCF Main entry also has no Hub, alongside the
+        # deliberately unlinked imported evidence added above.
+        self.assertEqual(2, metrics["needs_mapping"])
+        self.assertEqual(2, metrics["needs_mapping_registrants"])
+        self.assertEqual(2, metrics["needs_mapping_associations"])
+        self.assertEqual(
+            ["Within Metro Manila Hubs", "Outside Metro Manila Hubs"],
+            [group["name"] for group in metrics["hub_groups"]],
+        )
+        self.assertEqual(3, sum(hub["associations"] for hub in metrics["hubs"]))
+        self.assertAlmostEqual(
+            100,
+            sum(hub["percentage"] for hub in metrics["hub_distribution"]),
+        )
+        self.assertEqual("CCF Singapore", metrics["ranking"][0]["name"])
+        self.assertEqual(2, metrics["ranking"][0]["registrants"])
+        mystery = next(
+            item
+            for item in metrics["needs_mapping_records"]
+            if item["source_name"] == "Mystery Satellite"
+        )
+        self.assertEqual("satellite_not_configured", mystery["reason"])
+        self.assertEqual("Satellite Not Configured", mystery["status"])
+        self.assertEqual(999, mystery["source_record_count"])
+        self.assertNotEqual(
+            mystery["source_record_count"],
+            mystery["registrants"],
+        )
+        self.assertEqual(["CCF Eastwood"], [item["name"] for item in within["ranking"]])
+        self.assertEqual(1, within["association_count"])
+        self.assertEqual(
+            {"CCF Eastwood", "CCF Singapore"},
+            {item["name"] for item in searched["ranking"]},
+        )
+        self.assertEqual(0, needs_mapping["association_count"])
+        self.assertEqual(2, needs_mapping["needs_mapping"])
+
+        page = self.app.test_client().get("/events/{}/satellites".format(self.event_a))
+        self.assertEqual(200, page.status_code)
+        for marker in (
+            b"Satellite Overview",
+            b"Linked Registrants",
+            b"Hubs Represented",
+            b"Satellites Represented",
+            b"Needs Mapping",
+            b"Review Needs Mapping",
+            b"Satellite Not Configured",
+            b"Source Rows",
+            b"Satellites by Registrants",
+            b"Associations by Hub",
+            b"Satellite Ranking",
+            b"Satellite Directory Distribution",
+            b"aria-sort=",
+            b"data-satellite-hierarchy",
+            b"View registrants",
+            b"Within Metro Manila",
+            b"Outside Metro Manila",
+            b"data-satellite-filters",
+            b"satellites.js",
+        ):
+            self.assertIn(marker, page.data)
+        self.assertNotIn(b"Unique Checked In", page.data)
+        self.assertNotIn(b"Attendance Rate", page.data)
+        self.assertNotIn(b"Local Satellites", page.data)
+
+        filtered_page = self.app.test_client().get(
+            "/events/{}/satellites".format(self.event_a),
+            query_string={"group": 1, "hub": east_hub, "q": "R-2"},
+        )
+        self.assertEqual(200, filtered_page.status_code)
+        self.assertIn(b"Active filters", filtered_page.data)
+        self.assertIn(b"Metro East", filtered_page.data)
+        self.assertIn(b"CCF Eastwood", filtered_page.data)
+
+        roster = self.app.test_client().get(
+            "/events/{}/satellites/registrants".format(self.event_a),
+            query_string={"satellite": eastwood, "q": "R-2"},
+        )
+        self.assertEqual(200, roster.status_code)
+        self.assertIn(b"Metro East", roster.data)
+        self.assertIn(b"Within Metro Manila Hubs", roster.data)
+        self.assertIn(b"R-2", roster.data)
+        self.assertIn(b"Linked", roster.data)
+        self.assertNotIn(b"Check-In", roster.data)
+        self.assertNotIn(b"test2@example.com", roster.data)
+        self.assertNotIn(b"0900", roster.data)
+
+        preserved = self.app.test_client().get(
+            "/events/{}/satellites/registrants".format(self.event_a),
+            query_string={
+                "satellite": eastwood,
+                "return_to": "/events/{}/satellites?group=1#satellite-ranking-table".format(
+                    self.event_a
+                ),
+            },
+        )
+        self.assertIn(b"?group=1#satellite-ranking-table", preserved.data)
+        unsafe_return = self.app.test_client().get(
+            "/events/{}/satellites/registrants".format(self.event_a),
+            query_string={
+                "satellite": eastwood,
+                "return_to": "https://attacker.example/steal",
+            },
+        )
+        self.assertNotIn(b"attacker.example", unsafe_return.data)
+        self.assertIn(b"#satellite-ranking-table", unsafe_return.data)
+
+        empty_event = self.app.test_client().get(
+            "/events/{}/satellites".format(self.event_b)
+        )
+        self.assertEqual(200, empty_event.status_code)
+        self.assertIn(b"No active dataset for this event", empty_event.data)
+        self.assertNotIn(b"data-satellite-filters", empty_event.data)
+
+        other_batch = self._process(self.event_b)
+        with self.app.app_context():
+            other_metrics = canonical_satellite_metrics(get_db(), other_batch)
+        self.assertEqual(self.event_b, other_metrics["event_id"])
+        self.assertNotIn(
+            "Mystery Satellite",
+            [item["source_name"] for item in other_metrics["needs_mapping_records"]],
+        )
+
+    def test_canonical_ranking_and_roster_are_server_paginated(self):
+        batch_id = self._process(self.event_a)
+        rows = []
+        for number in range(30):
+            rows.append(
+                (
+                    batch_id,
+                    "page-source-{}".format(number),
+                    "R-PAGE-{:03d}".format(number),
+                    "T-PAGE-{:03d}".format(number),
+                    "Paged",
+                    "Registrant {:03d}".format(number),
+                    "Eastwood",
+                )
+            )
+        with self.app.app_context():
+            db = get_db()
+            db.executemany(
+                """
+                INSERT INTO registrants (
+                    batch_id, source_id, registration_code, ticket_code,
+                    first_name, last_name, affiliation, satellite_name,
+                    registration_type, ticket_matched, checked_in
+                ) VALUES (?, ?, ?, ?, ?, ?, 'Local Satellite', ?, 'participant', 1, 0)
+                """,
+                rows,
+            )
+            rebuild_batch_curation(db, batch_id)
+            db.executemany(
+                """
+                INSERT INTO hub_groups (id, code, name, sort_order)
+                VALUES (?, ?, ?, ?)
+                """,
+                [
+                    (1, "within_metro_manila", "Within Metro Manila Hubs", 1),
+                    (2, "outside_metro_manila", "Outside Metro Manila Hubs", 2),
+                ],
+            )
+            hub_id = db.execute(
+                """
+                INSERT INTO satellite_hubs (hub_group_id, name, normalized_name)
+                VALUES (1, 'Metro East', 'metro east')
+                """
+            ).lastrowid
+            db.execute(
+                "UPDATE satellite_directory SET hub_id = ?",
+                (hub_id,),
+            )
+            eastwood = db.execute(
+                "SELECT id FROM satellite_directory WHERE normalized_name = 'ccf eastwood'"
+            ).fetchone()[0]
+            db.commit()
+
+            roster = satellite_registrants(
+                db, batch_id, eastwood, page=2, per_page=25
+            )
+            searched = satellite_registrants(
+                db, batch_id, eastwood, query="R-PAGE-029"
+            )
+            ranking = canonical_satellite_metrics(
+                db,
+                batch_id,
+                sort="satellite",
+                direction="asc",
+                page=1,
+                per_page=10,
+            )
+
+        self.assertEqual(31, roster["registrants"])
+        self.assertEqual(31, roster["pagination"]["total"])
+        self.assertEqual(2, roster["pagination"]["page"])
+        self.assertEqual(6, len(roster["participants"]))
+        self.assertEqual(1, searched["pagination"]["total"])
+        self.assertEqual("R-PAGE-029", searched["participants"][0]["registration_id"])
+        self.assertGreaterEqual(ranking["ranking_pagination"]["total"], 3)
+        self.assertEqual("satellite", ranking["sort"])
+
+        page = self.app.test_client().get(
+            "/events/{}/satellites/registrants".format(self.event_a),
+            query_string={"satellite": eastwood, "page": 2, "per_page": 25},
+        )
+        self.assertEqual(200, page.status_code)
+        self.assertIn(b"Showing 26\xe2\x80\x9331 of 31 registrants", page.data)
+        self.assertNotIn(b"@example.com", page.data)
+
     def test_satellite_settings_individual_hub_and_satellite_management(self):
         self._process(self.event_a)
         with self.app.app_context():
@@ -1689,15 +2001,22 @@ class EventIntegrationTests(unittest.TestCase):
             "&sort=name&direction=asc".format(self.event_a)
         )
         self.assertEqual(200, response.status_code)
-        self.assertIn(b"Showing 11\xe2\x80\x9312 of 12 satellites", response.data)
         self.assertIn(b'value="site"', response.data)
         self.assertIn(b"q=site", response.data)
-        self.assertIn(b"Previous", response.data)
-        self.assertIn(b"#satellite-table", response.data)
+        self.assertIn(b"Linked Registrants", response.data)
+        self.assertIn(b"Needs Mapping", response.data)
+        self.assertIn(b"Satellites by Registrants", response.data)
+        self.assertIn(b"Associations by Hub", response.data)
         self.assertNotIn(b"test1@example.com", response.data)
 
         ranking = client.get("/events/{}/satellites".format(self.event_a))
-        self.assertIn(b"View registrants", ranking.data)
+        self.assertIn(b"data-satellite-filters", ranking.data)
+        self.assertIn(b"data-group-filter", ranking.data)
+        self.assertIn(b"data-hub-filter", ranking.data)
+        self.assertIn(b"data-satellite-filter", ranking.data)
+        self.assertNotIn(b"Unique Checked In", ranking.data)
+        self.assertNotIn(b"Attendance Rate", ranking.data)
+        self.assertNotIn(b"Local Satellites", ranking.data)
         self.assertNotIn(b"Test Registrant", ranking.data)
         participant_page = client.get(
             "/events/{}/satellites/registrants".format(self.event_a),
@@ -1705,7 +2024,14 @@ class EventIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(200, participant_page.status_code)
         self.assertIn(b"Test Registrant", participant_page.data)
-        self.assertIn(b"Names only; contact information is not displayed", participant_page.data)
+        self.assertIn(
+            b"Names and registration identifiers only; contact information is not displayed",
+            participant_page.data,
+        )
+        self.assertIn(b"Registration ID", participant_page.data)
+        self.assertIn(b"R-2", participant_page.data)
+        self.assertNotIn(b"Check-In Status", participant_page.data)
+        self.assertNotIn(b"Attendance Rate", participant_page.data)
         self.assertNotIn(b"test2@example.com", participant_page.data)
         self.assertNotIn(b"0900", participant_page.data)
 
@@ -1719,7 +2045,7 @@ class EventIntegrationTests(unittest.TestCase):
             "/events/{}/satellites?q=does-not-exist".format(self.event_a)
         )
         self.assertEqual(200, empty.status_code)
-        self.assertIn(b"No satellites match the current filters", empty.data)
+        self.assertIn(b"No linked Satellites match these filters", empty.data)
         self.assertIn(b"Clear filters", empty.data)
 
     def test_data_quality_filters_pagination_sorting_scope_and_privacy(self):

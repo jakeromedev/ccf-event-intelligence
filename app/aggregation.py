@@ -8,6 +8,7 @@ from .normalization import (
     normalize_gender,
     normalize_life_stage,
 )
+from .satellite_analytics import canonical_satellite_metrics
 
 
 def active_batch(db, event_id):
@@ -547,6 +548,10 @@ def satellite_metrics(
     sort="registrants",
     direction="desc",
 ):
+    # Keep the legacy presentation payload available until the Phase 2 template
+    # replacement, while making the canonical Phase 1 read model available to
+    # the route immediately.
+    canonical = canonical_satellite_metrics(db, batch_id)
     scope = scope if scope in ("all", "local", "international") else "all"
     query = (query or "").strip()[:100]
     page = max(int(page or 1), 1)
@@ -658,6 +663,7 @@ def satellite_metrics(
     total_registrants = totals["registrants"] or 0
     total_checked = totals["checked_in"] or 0
     return {
+        "canonical": canonical,
         "scope": scope,
         "query": query,
         "sort": sort,
@@ -684,73 +690,142 @@ def satellite_metrics(
     }
 
 
-def satellite_registrants(db, batch_id, satellite_name, scope, page=1, per_page=50):
-    """Return a privacy-limited unique-person list for one curated satellite."""
-    affiliation = {
-        "local": "Local Satellite",
-        "international": "International Satellite",
-    }.get(scope)
-    if not affiliation:
+def satellite_registrants(
+    db,
+    batch_id,
+    satellite,
+    scope=None,
+    page=1,
+    per_page=50,
+    query="",
+):
+    """Return a searchable, privacy-limited roster for one canonical Satellite."""
+    try:
+        directory_id = int(satellite)
+    except (TypeError, ValueError):
+        affiliation = {
+            "local": "Local Satellite",
+            "international": "International Satellite",
+        }.get(scope)
+        row = db.execute(
+            """
+            SELECT directory.id
+            FROM satellites imported
+            JOIN satellite_directory directory ON directory.id = imported.directory_id
+            WHERE imported.batch_id = ?
+              AND directory.name = ? COLLATE NOCASE
+              AND (? IS NULL OR imported.affiliation = ?)
+            ORDER BY directory.id LIMIT 1
+            """,
+            (batch_id, str(satellite or "").strip(), affiliation, affiliation),
+        ).fetchone()
+        directory_id = row["id"] if row else None
+    if not directory_id:
         return None
 
+    metadata = db.execute(
+        """
+        SELECT directory.id, directory.name satellite_name,
+               hubs.id hub_id, hubs.name hub_name,
+               hub_group.id group_id, hub_group.code group_code,
+               hub_group.name group_name
+        FROM satellite_directory directory
+        LEFT JOIN satellite_hubs hubs ON hubs.id = directory.hub_id
+        LEFT JOIN hub_groups hub_group ON hub_group.id = hubs.hub_group_id
+        WHERE directory.id = ?
+          AND EXISTS (
+              SELECT 1 FROM satellites imported
+              WHERE imported.batch_id = ? AND imported.directory_id = directory.id
+          )
+        """,
+        (directory_id, batch_id),
+    ).fetchone()
+    if metadata is None:
+        return None
+
+    query = " ".join(str(query or "").strip().split())[:100]
     page = max(int(page or 1), 1)
     per_page = per_page if per_page in (25, 50, 100) else 50
-    satellite = db.execute(
-        """
-        SELECT s.id, COALESCE(directory.name, s.name) name
-        FROM satellites s
-        LEFT JOIN satellite_directory directory ON directory.id = s.directory_id
-        WHERE s.batch_id = ? AND s.affiliation = ?
-          AND COALESCE(directory.name, s.name) = ? COLLATE NOCASE
-        """,
-        (batch_id, affiliation, satellite_name),
-    ).fetchone()
-    if satellite is None:
-        return None
-    params = (batch_id, satellite["id"])
-    total = db.execute(
-        """
-        SELECT COUNT(*)
-        FROM curated_registrant_satellites link
-        JOIN curated_registrants cr ON cr.id = link.curated_registrant_id
-        WHERE cr.batch_id = ? AND link.satellite_id = ?
-        """,
-        params,
-    ).fetchone()[0]
-    if not total:
-        return None
+    participant_name = (
+        "CONCAT(COALESCE(search_raw.first_name, ''), ' ', "
+        "COALESCE(search_raw.last_name, ''))"
+        if db.is_mysql
+        else "COALESCE(search_raw.first_name, '') || ' ' || "
+        "COALESCE(search_raw.last_name, '')"
+    )
+    search_sql = ""
+    search_params = []
+    if query:
+        search_sql = """
+            AND EXISTS (
+                SELECT 1
+                FROM curated_registrant_sources search_source
+                JOIN registrants search_raw ON search_raw.id = search_source.registrant_id
+                WHERE search_source.curated_registrant_id = matching.id
+                  AND (
+                      LOWER(TRIM({participant_name})) LIKE LOWER(?)
+                      OR LOWER(search_raw.registration_code) LIKE LOWER(?)
+                      OR LOWER(search_raw.source_id) LIKE LOWER(?)
+                  )
+            )
+        """.format(participant_name=participant_name)
+        search_params = ["%{}%".format(query)] * 3
 
-    checked_in = db.execute(
-        """
-        SELECT COALESCE(SUM(cr.checked_in), 0)
-        FROM curated_registrant_satellites link
-        JOIN curated_registrants cr ON cr.id = link.curated_registrant_id
-        WHERE cr.batch_id = ? AND link.satellite_id = ?
-        """,
-        params,
-    ).fetchone()[0]
-    pages = (total + per_page - 1) // per_page
-    page = min(page, pages)
-    offset = (page - 1) * per_page
-    rows = db.execute(
-        """
-        WITH representative AS (
+    roster_sql = """
+        WITH matching AS (
+            SELECT DISTINCT curated.id
+            FROM satellites imported
+            JOIN curated_registrant_satellites association
+              ON association.satellite_id = imported.id
+             AND association.batch_id = imported.batch_id
+             AND association.event_id = imported.event_id
+            JOIN curated_registrants curated
+              ON curated.id = association.curated_registrant_id
+             AND curated.batch_id = imported.batch_id
+             AND curated.event_id = imported.event_id
+            WHERE imported.batch_id = ? AND imported.directory_id = ?
+        ), representative AS (
             SELECT source.curated_registrant_id, MIN(source.registrant_id) registrant_id
             FROM curated_registrant_sources source
             WHERE source.batch_id = ?
             GROUP BY source.curated_registrant_id
         )
-        SELECT raw.first_name, raw.last_name, raw.ticket_status, cr.checked_in
-        FROM curated_registrant_satellites link
-        JOIN curated_registrants cr ON cr.id = link.curated_registrant_id
-        JOIN representative rep ON rep.curated_registrant_id = cr.id
+        SELECT matching.id curated_id, raw.first_name, raw.last_name,
+               raw.registration_code, raw.source_id
+        FROM matching
+        JOIN representative rep ON rep.curated_registrant_id = matching.id
         JOIN registrants raw ON raw.id = rep.registrant_id
-        WHERE link.satellite_id = ?
-        ORDER BY LOWER(COALESCE(raw.last_name, '')),
-                 LOWER(COALESCE(raw.first_name, '')), cr.id
-        LIMIT ? OFFSET ?
+        WHERE 1 = 1 {search_sql}
+    """.format(search_sql=search_sql)
+    base_params = [batch_id, directory_id, batch_id] + search_params
+    total = db.execute(
+        "SELECT COUNT(*) FROM ({}) roster".format(roster_sql), base_params
+    ).fetchone()[0]
+    unfiltered_total = db.execute(
+        """
+        SELECT COUNT(DISTINCT association.curated_registrant_id)
+        FROM satellites imported
+        JOIN curated_registrant_satellites association
+          ON association.satellite_id = imported.id
+         AND association.batch_id = imported.batch_id
+         AND association.event_id = imported.event_id
+        WHERE imported.batch_id = ? AND imported.directory_id = ?
         """,
-        params + (per_page, offset),
+        (batch_id, directory_id),
+    ).fetchone()[0]
+    if not unfiltered_total:
+        return None
+    pages = max(1, (total + per_page - 1) // per_page)
+    page = min(page, pages)
+    offset = (page - 1) * per_page
+    rows = db.execute(
+        roster_sql
+        + """
+          ORDER BY LOWER(COALESCE(last_name, '')),
+                   LOWER(COALESCE(first_name, '')), curated_id
+          LIMIT ? OFFSET ?
+        """,
+        base_params + [per_page, offset],
     ).fetchall()
     participants = []
     for row in rows:
@@ -760,24 +835,31 @@ def satellite_registrants(db, batch_id, satellite_name, scope, page=1, per_page=
         participants.append(
             {
                 "name": display_name,
-                "ticket_status": row["ticket_status"] or "Unknown",
-                "checked_in": bool(row["checked_in"]),
+                "registration_id": row["registration_code"]
+                or row["source_id"]
+                or str(row["curated_id"]),
+                "hub": metadata["hub_name"] or "Unassigned",
+                "satellite": metadata["satellite_name"],
+                "link_status": "Linked" if metadata["group_id"] else "Needs Mapping",
             }
         )
     return {
-        "satellite_name": satellite["name"],
-        "scope": scope,
-        "scope_label": affiliation,
-        "registrants": total,
-        "checked_in": checked_in,
-        "attendance_rate": checked_in / total * 100 if total else 0,
+        "satellite_id": metadata["id"],
+        "satellite_name": metadata["satellite_name"],
+        "hub_id": metadata["hub_id"],
+        "hub_name": metadata["hub_name"] or "Unassigned Hub",
+        "group_id": metadata["group_id"],
+        "group_code": metadata["group_code"],
+        "group_name": metadata["group_name"] or "Needs Mapping",
+        "registrants": unfiltered_total,
+        "query": query,
         "participants": participants,
         "pagination": {
             "page": page,
             "pages": pages,
             "per_page": per_page,
             "total": total,
-            "start": offset + 1,
+            "start": offset + 1 if total else 0,
             "end": min(offset + per_page, total),
             "has_previous": page > 1,
             "has_next": page < pages,
