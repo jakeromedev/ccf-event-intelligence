@@ -59,6 +59,7 @@ REGISTRATION_CAPABILITIES = frozenset(
     {
         CAPABILITY_VIEW_DASHBOARD,
         CAPABILITY_VIEW_REGISTRATIONS,
+        CAPABILITY_VIEW_SATELLITES,
         CAPABILITY_EDIT_ATTESTATION,
         CAPABILITY_EDIT_REMARKS,
     }
@@ -96,6 +97,8 @@ REGISTRATION_ENDPOINT_CAPABILITIES = {
     "dashboard.event_dashboard_api": CAPABILITY_VIEW_DASHBOARD,
     "dashboard.event_registrations": CAPABILITY_VIEW_REGISTRATIONS,
     "dashboard.event_registrations_data": CAPABILITY_VIEW_REGISTRATIONS,
+    "dashboard.event_satellites": CAPABILITY_VIEW_SATELLITES,
+    "dashboard.event_satellite_registrants": CAPABILITY_VIEW_SATELLITES,
     "dashboard.update_registration_attestation": CAPABILITY_EDIT_ATTESTATION,
     "dashboard.registration_remarks": CAPABILITY_VIEW_REGISTRATIONS,
     "dashboard.resolve_registration_remark": CAPABILITY_EDIT_REMARKS,
@@ -110,16 +113,21 @@ def normalize_username(value: str | None) -> str:
     return (value or "").strip().casefold()
 
 
-def validate_public_username(_form, field) -> None:
-    username = normalize_username(field.data)
+def username_policy_error(value: str | None) -> str | None:
+    username = normalize_username(value)
     if len(username) < 3 or len(username) > 64:
-        raise ValidationError("Username must be between 3 and 64 characters.")
+        return "Username must be between 3 and 64 characters."
     if username == "admin":
-        raise ValidationError("That username is reserved.")
+        return "That username is reserved."
     if not USERNAME_PATTERN.fullmatch(username):
-        raise ValidationError(
-            "Use lowercase letters, numbers, periods, underscores, or hyphens."
-        )
+        return "Use lowercase letters, numbers, periods, underscores, or hyphens."
+    return None
+
+
+def validate_public_username(_form, field) -> None:
+    error = username_policy_error(field.data)
+    if error:
+        raise ValidationError(error)
 
 
 def password_policy_error(password: str | None) -> str | None:
@@ -532,6 +540,63 @@ def update_user_status(user_id):
         )
         action = "blocked" if status == "blocked" else "unblocked"
         flash("{} has been {}.".format(user.username, action), "success")
+    return redirect(url_for("auth.users"))
+
+
+@bp.post("/admin/users/<int:user_id>/username")
+@admin_required
+def update_user_username(user_id):
+    db = get_db()
+    user = db.session.get(User, user_id)
+    if user is None or user.is_admin:
+        abort(404)
+
+    username = normalize_username(request.form.get("username"))
+    error = username_policy_error(username)
+    if error:
+        flash(error, "error")
+        return redirect(url_for("auth.users"))
+
+    duplicate = db.session.scalar(
+        select(User.id).where(
+            func.lower(User.username) == username,
+            User.id != user.id,
+        )
+    )
+    if duplicate is not None:
+        flash("That username is already registered.", "error")
+        return redirect(url_for("auth.users"))
+
+    previous_username = user.username
+    if previous_username == username:
+        flash("No username change was needed.", "success")
+        return redirect(url_for("auth.users"))
+
+    user.username = username
+    user.auth_version += 1
+    user.updated_at = utc_now()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        flash("That username is already registered.", "error")
+        return redirect(url_for("auth.users"))
+
+    current_app.logger.info(
+        "user_username_updated",
+        extra={
+            "event": "user_username_updated",
+            "user_id": user.id,
+            "previous_username": previous_username,
+            "username": username,
+        },
+    )
+    flash(
+        "Username changed from {} to {}. Existing sessions were signed out.".format(
+            previous_username, username
+        ),
+        "success",
+    )
     return redirect(url_for("auth.users"))
 
 

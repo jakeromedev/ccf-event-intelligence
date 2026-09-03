@@ -54,11 +54,13 @@ The shared application header shows:
 
 ## Access model
 
-The main page is available to approved administrators and approved standard
-users with the `satellites.view` capability. Registration operators are denied
-by the application's deny-by-default endpoint policy. Unauthenticated users
-are redirected to login. Authentication-disabled local development can access
-the page.
+The main page and registrant drilldown are available to approved
+administrators, approved standard users, and approved Registration operators
+with the `satellites.view` capability. Registration operators remain governed
+by the application's deny-by-default endpoint policy; only these two
+Satellite-reporting endpoints are in their allowlist. Administrative directory
+management remains administrator-only. Unauthenticated users are redirected
+to login. Authentication-disabled local development can access the page.
 
 The Event and active batch are resolved on the server. An unknown Event returns
 HTTP 404.
@@ -647,4 +649,3 @@ JavaScript remains responsible for application navigation behavior.
 - [ ] Both tables remain usable through horizontal scrolling on narrow screens.
 - [ ] Scope, chart, pagination, and tables retain meaningful text without color.
 - [ ] Invalid query parameters fall back safely or return the documented 404.
-

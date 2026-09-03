@@ -1913,9 +1913,9 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
         self.assertIn(b'data-attestation-save', page.data)
         self.assertIn(b">Dashboard</span>", page.data)
         self.assertIn(b">Registrations</span>", page.data)
+        self.assertIn(b">Satellites</span>", page.data)
         for label in (
             b">Analytics</span>",
-            b">Satellites</span>",
             b">Data Quality</span>",
             b">Imports</span>",
             b">Admin Tables</span>",
@@ -1940,6 +1940,20 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
         self.assertNotIn(b"Manage Satellite Targets", overview.data)
         self.assertNotIn(b"Open Imports", overview.data)
         self.assertNotIn(b"Create Event", self.client.get("/events").data)
+        self.assertEqual(
+            200,
+            self.client.get(
+                "/events/{}/satellites".format(self.event_id)
+            ).status_code,
+        )
+        # The registrant drilldown is authorized, but still requires a target
+        # satellite when an active dataset exists.
+        self.assertEqual(
+            404,
+            self.client.get(
+                "/events/{}/satellites/registrants".format(self.event_id)
+            ).status_code,
+        )
 
         denied_gets = (
             "/events/new",
@@ -1961,8 +1975,6 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
                 self.event_id
             ),
             "/events/{}/imports".format(self.event_id),
-            "/events/{}/satellites".format(self.event_id),
-            "/events/{}/satellites/registrants".format(self.event_id),
             "/admin/users",
         )
         for path in denied_gets:

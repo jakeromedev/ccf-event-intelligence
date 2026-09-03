@@ -182,9 +182,18 @@ def resolve_registration_satellite(
         status = MISSING_SATELLITE
     elif imported_satellite["directory_id"] is None:
         status = READY_TO_SYNC
+    elif (
+        imported_satellite["directory_id"] != canonical["id"]
+        and not imported_satellite["directory_link_complete"]
+    ):
+        # Imports created before the canonical Hub hierarchy may still point at
+        # an unassigned directory entry. That non-null link is not complete from
+        # the analytics perspective, so an exact registration-derived match may
+        # safely repair it. Complete existing assignments remain non-destructive.
+        status = READY_TO_SYNC
     else:
-        # Any existing canonical assignment is considered synchronized. The
-        # sync remains non-destructive and never replaces an established link.
+        # A matching or otherwise complete canonical assignment is considered
+        # synchronized. The sync never replaces an established complete link.
         status = ALREADY_SYNCED
     return _result(
         registration, source_hub, source_satellite, expected_hub, canonical,
@@ -256,8 +265,19 @@ def analyze_event_satellite_sync(db, event_id):
 
     imported_rows = db.execute(
         """
-        SELECT id, directory_id, name, normalized_name, source_record_count
-        FROM satellites WHERE event_id = ? AND batch_id = ? ORDER BY id
+        SELECT imported.id, imported.directory_id, imported.name,
+               imported.normalized_name, imported.source_record_count,
+               CASE WHEN current_group.id IS NOT NULL THEN 1 ELSE 0 END
+                    directory_link_complete
+        FROM satellites imported
+        LEFT JOIN satellite_directory current_directory
+          ON current_directory.id = imported.directory_id
+        LEFT JOIN satellite_hubs current_hub
+          ON current_hub.id = current_directory.hub_id
+        LEFT JOIN hub_groups current_group
+          ON current_group.id = current_hub.hub_group_id
+        WHERE imported.event_id = ? AND imported.batch_id = ?
+        ORDER BY imported.id
         """,
         (event_id, batch["id"]),
     ).fetchall()
@@ -367,18 +387,31 @@ def execute_event_satellite_sync(db, event_id):
         canonical = entry["canonical_satellite"]
         if canonical is None:
             continue
-        result = db.execute(
-            """
-            UPDATE satellites SET directory_id = ?
-            WHERE id = ? AND event_id = ? AND batch_id = ?
-              AND directory_id IS NULL
-            """,
-            (
+        previous_directory_id = imported["directory_id"]
+        if previous_directory_id is None:
+            current_link_guard = "directory_id IS NULL"
+            parameters = (
                 canonical["id"],
                 imported["id"],
                 event_id,
                 plan["active_batch_id"],
-            ),
+            )
+        else:
+            current_link_guard = "directory_id = ?"
+            parameters = (
+                canonical["id"],
+                imported["id"],
+                event_id,
+                plan["active_batch_id"],
+                previous_directory_id,
+            )
+        result = db.execute(
+            """
+            UPDATE satellites SET directory_id = ?
+            WHERE id = ? AND event_id = ? AND batch_id = ?
+              AND {current_link_guard}
+            """.format(current_link_guard=current_link_guard),
+            parameters,
         )
         if result.rowcount == 1:
             synchronized.append(entry)

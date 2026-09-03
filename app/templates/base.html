@@ -26,7 +26,7 @@
                     {% set data_quality_active = request.endpoint in ('dashboard.event_quality', 'dashboard.event_quality_issues', 'dashboard.event_curated_registrant_detail', 'dashboard.event_satellite_curation_detail') %}
                     {% set imports_active = request.endpoint in ('dashboard.event_imports', 'dashboard.validate_import', 'dashboard.process_import', 'dashboard.activate_import', 'dashboard.delete_import') %}
                     {% set admin_tables_active = request.endpoint in ('dashboard.event_admin_table', 'dashboard.event_admin_table_data', 'dashboard.event_admin_registration_sources') %}
-                    {% set users_active = request.endpoint in ('auth.users', 'auth.approve_user', 'auth.update_user_role', 'auth.update_user_status', 'auth.update_user_password') %}
+                    {% set users_active = request.endpoint in ('auth.users', 'auth.approve_user', 'auth.update_user_role', 'auth.update_user_status', 'auth.update_user_username', 'auth.update_user_password') %}
                     {% set settings_active = data_quality_active or imports_active or admin_tables_active or users_active %}
                     <div class="nav-module {{ 'active expanded' if settings_active else '' }}" data-nav-group>
                         <button class="nav-link nav-module-link {{ 'active' if settings_active else '' }}" type="button" aria-expanded="{{ 'true' if settings_active else 'false' }}" aria-controls="settings-submenu" data-nav-group-toggle>
@@ -48,7 +48,7 @@
                                         </div>
                                     </div>
                                 {% endif %}
-                                {% if user_management_allowed %}<a class="{{ 'active' if users_active else '' }}" href="{{ url_for('auth.users') }}"><span></span>Users</a>{% endif %}
+                            {% if user_management_allowed %}<a class="{{ 'active' if users_active else '' }}" href="{{ url_for('auth.users') }}"><span></span>Users</a>{% endif %}
                             </div>
                         </div>
                     </div>
@@ -60,7 +60,7 @@
             <nav aria-label="Application navigation">
                 <a class="nav-link {% if request.endpoint == 'dashboard.events' %}active{% endif %}" href="{{ url_for('dashboard.events') }}">{{ icon('events') }}<span>Events</span></a>
                 {% if user_management_allowed %}
-                    {% set users_active = request.endpoint in ('auth.users', 'auth.approve_user', 'auth.update_user_role', 'auth.update_user_status', 'auth.update_user_password') %}
+                    {% set users_active = request.endpoint in ('auth.users', 'auth.approve_user', 'auth.update_user_role', 'auth.update_user_status', 'auth.update_user_username', 'auth.update_user_password') %}
                     <div class="nav-module {{ 'active expanded' if users_active else '' }}" data-nav-group>
                         <button class="nav-link nav-module-link {{ 'active' if users_active else '' }}" type="button" aria-expanded="{{ 'true' if users_active else 'false' }}" aria-controls="application-settings-submenu" data-nav-group-toggle>
                             <span class="nav-module-icon">{{ icon('settings', 18) }}</span>

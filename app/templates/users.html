@@ -10,7 +10,7 @@
         <div>
             <p class="admin-breadcrumb">Administration <span>/</span> Users</p>
             <h1>Registered Users</h1>
-            <p>Approve registrations, assign roles, block access, or reset passwords.</p>
+            <p>Approve registrations, update usernames, assign roles, block access, or reset passwords.</p>
         </div>
         <span>{{ users|length }} account{{ '' if users|length == 1 else 's' }}</span>
     </header>
@@ -27,44 +27,79 @@
                         <td>{{ user.created_at|datetime_short }}</td>
                         <td>{{ user.approved_at|datetime_short if user.approved_at else '—' }}</td>
                         <td class="users-action">
+                            <button class="button {{ 'primary' if user.status == 'pending' else 'secondary' }} compact user-manage-trigger" type="button" aria-haspopup="dialog" aria-controls="user-management-{{ user.id }}" data-user-management-open="user-management-{{ user.id }}">{{ 'Review' if user.status == 'pending' else 'Manage' }}</button>
+                            <dialog class="user-management-dialog" id="user-management-{{ user.id }}" aria-labelledby="user-management-title-{{ user.id }}" data-user-management-dialog>
+                                <div class="user-management-dialog-panel">
+                                    <header>
+                                        <div>
+                                            <p class="admin-breadcrumb">User Administration <span>/</span> {{ 'Review Account' if user.status == 'pending' else 'Manage Account' }}</p>
+                                            <h2 id="user-management-title-{{ user.id }}">{{ user.username }}</h2>
+                                            <p>{{ 'Review this registration and choose an access role.' if user.status == 'pending' else 'Update identity, access, status, or credentials.' }}</p>
+                                        </div>
+                                        <button class="user-management-close" type="button" aria-label="Close account management" data-user-management-close>{{ icon('close', 18) }}</button>
+                                    </header>
+                                    <div class="user-management-body">
+                                        <section class="user-management-section" aria-labelledby="user-identity-title-{{ user.id }}">
+                                            <div class="user-management-section-heading">
+                                                <span class="user-management-section-icon">{{ icon('person', 18) }}</span>
+                                                <div><h3 id="user-identity-title-{{ user.id }}">Account identity</h3><p>Change the username used to sign in.</p></div>
+                                            </div>
+                                            <form class="user-management-inline-form" method="post" action="{{ url_for('auth.update_user_username', user_id=user.id) }}">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                <label for="username-{{ user.id }}"><span>Username</span><input id="username-{{ user.id }}" name="username" value="{{ user.username }}" type="text" minlength="3" maxlength="64" autocomplete="username" autocapitalize="none" spellcheck="false" required><small>Letters, numbers, periods, underscores, or hyphens.</small></label>
+                                                <button class="button secondary compact" type="submit">Save Username</button>
+                                            </form>
+                                        </section>
+
+                                        <section class="user-management-section" aria-labelledby="user-access-title-{{ user.id }}">
+                                            <div class="user-management-section-heading">
+                                                <span class="user-management-section-icon">{{ icon('active', 18) }}</span>
+                                                <div><h3 id="user-access-title-{{ user.id }}">Access and role</h3><p>{{ 'Approval grants access immediately.' if user.status == 'pending' else 'Choose the modules this account can access.' }}</p></div>
+                                            </div>
                             {% if user.status == 'pending' %}
-                                <form method="post" action="{{ url_for('auth.approve_user', user_id=user.id) }}">
-                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                    <label class="visually-hidden" for="approval-role-{{ user.id }}">Role</label>
-                                    <select id="approval-role-{{ user.id }}" name="role">
-                                        <option value="user" {{ 'selected' if user.role == 'user' else '' }}>Standard User</option>
-                                        <option value="registration" {{ 'selected' if user.role == 'registration' else '' }}>Registration</option>
-                                    </select>
-                                    <button class="button primary compact" type="submit">{{ icon('active', 14) }} Approve</button>
-                                </form>
+                                            <form class="user-management-inline-form" method="post" action="{{ url_for('auth.approve_user', user_id=user.id) }}">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                <label for="approval-role-{{ user.id }}"><span>Role</span><select id="approval-role-{{ user.id }}" name="role"><option value="user" {{ 'selected' if user.role == 'user' else '' }}>Standard User</option><option value="registration" {{ 'selected' if user.role == 'registration' else '' }}>Registration</option></select></label>
+                                                <button class="button primary compact" type="submit">{{ icon('active', 14) }} Approve Account</button>
+                                            </form>
                             {% else %}
-                                <div class="user-admin-actions">
-                                    <form method="post" action="{{ url_for('auth.update_user_role', user_id=user.id) }}">
-                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                        <label class="visually-hidden" for="user-role-{{ user.id }}">Role</label>
-                                        <select id="user-role-{{ user.id }}" name="role" onchange="this.form.submit()">
-                                            <option value="user" {{ 'selected' if user.role == 'user' else '' }}>Standard User</option>
-                                            <option value="registration" {{ 'selected' if user.role == 'registration' else '' }}>Registration</option>
-                                        </select>
-                                    </form>
-                                    <form method="post" action="{{ url_for('auth.update_user_status', user_id=user.id) }}">
-                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                        <input type="hidden" name="status" value="{{ 'approved' if user.status == 'blocked' else 'blocked' }}">
-                                        <button class="button {{ 'secondary' if user.status == 'blocked' else 'danger' }} compact" type="submit">{{ 'Unblock' if user.status == 'blocked' else 'Block' }}</button>
-                                    </form>
-                                    <details class="user-password-reset">
-                                        <summary class="button secondary compact">Change Password</summary>
-                                        <form method="post" action="{{ url_for('auth.update_user_password', user_id=user.id) }}">
-                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                            <label for="new-password-{{ user.id }}">New password</label>
-                                            <input id="new-password-{{ user.id }}" name="new_password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
-                                            <label for="confirm-password-{{ user.id }}">Confirm password</label>
-                                            <input id="confirm-password-{{ user.id }}" name="confirm_password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
-                                            <button class="button primary compact" type="submit">Save Password</button>
-                                        </form>
-                                    </details>
-                                </div>
+                                            <form class="user-management-inline-form" method="post" action="{{ url_for('auth.update_user_role', user_id=user.id) }}">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                <label for="user-role-{{ user.id }}"><span>Role</span><select id="user-role-{{ user.id }}" name="role"><option value="user" {{ 'selected' if user.role == 'user' else '' }}>Standard User</option><option value="registration" {{ 'selected' if user.role == 'registration' else '' }}>Registration</option></select></label>
+                                                <button class="button secondary compact" type="submit">Save Role</button>
+                                            </form>
                             {% endif %}
+                                        </section>
+
+                            {% if user.status != 'pending' %}
+                                        <section class="user-management-section" aria-labelledby="user-security-title-{{ user.id }}">
+                                            <div class="user-management-section-heading">
+                                                <span class="user-management-section-icon">{{ icon('settings', 18) }}</span>
+                                                <div><h3 id="user-security-title-{{ user.id }}">Password</h3><p>Set a temporary password and share it through an approved channel.</p></div>
+                                            </div>
+                                            <form class="user-password-form" method="post" action="{{ url_for('auth.update_user_password', user_id=user.id) }}">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                <label for="new-password-{{ user.id }}"><span>New password</span><input id="new-password-{{ user.id }}" name="new_password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label>
+                                                <label for="confirm-password-{{ user.id }}"><span>Confirm password</span><input id="confirm-password-{{ user.id }}" name="confirm_password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label>
+                                                <button class="button secondary compact" type="submit">Change Password</button>
+                                            </form>
+                                        </section>
+
+                                        <section class="user-management-section user-management-danger" aria-labelledby="user-status-title-{{ user.id }}">
+                                            <div class="user-management-section-heading">
+                                                <span class="user-management-section-icon">{{ icon('info', 18) }}</span>
+                                                <div><h3 id="user-status-title-{{ user.id }}">Account status</h3><p>{{ 'Restore access for this blocked account.' if user.status == 'blocked' else 'Temporarily prevent this account from signing in.' }}</p></div>
+                                            </div>
+                                            <form method="post" action="{{ url_for('auth.update_user_status', user_id=user.id) }}">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                <input type="hidden" name="status" value="{{ 'approved' if user.status == 'blocked' else 'blocked' }}">
+                                                <button class="button {{ 'secondary' if user.status == 'blocked' else 'danger' }} compact" type="submit">{{ 'Unblock Account' if user.status == 'blocked' else 'Block Account' }}</button>
+                                            </form>
+                                        </section>
+                            {% endif %}
+                                    </div>
+                                </div>
+                            </dialog>
                         </td>
                     </tr>
                 {% endfor %}
@@ -76,3 +111,4 @@
     {% endif %}
 </section>
 {% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='users.js', v='20260903-user-management-dialog') }}" defer></script>{% endblock %}

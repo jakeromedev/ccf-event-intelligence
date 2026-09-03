@@ -9,6 +9,7 @@ from unittest.mock import patch
 from app import create_app
 from app.db import get_db, get_engine
 from app.models import Base
+from app.satellite_analytics import canonical_satellite_metrics
 from app.satellite_datasets import satellite_dataset_options
 from app.satellite_settings import satellite_settings_hierarchy, update_satellite
 from app.satellite_settings_registrants import event_settings_registrants
@@ -875,6 +876,31 @@ class SatelliteSyncAnalysisTests(unittest.TestCase):
             b'data-registrant-count="1" data-synced-count="1" data-ready-count="0"',
             after.data,
         )
+
+    def test_sync_repairs_incomplete_legacy_link_and_refreshes_analytics(self):
+        hub_id = self._hub("Mindanao South")
+        canonical_id = self._directory(hub_id, "B1G Tagum")
+        legacy_id = self._directory(None, "B1G Tagum")
+        imported_id = self._evidence(directory_id=legacy_id)
+
+        with self.app.app_context():
+            db = get_db()
+            before = canonical_satellite_metrics(db, self.batch_id)
+            plan = analyze_event_satellite_sync(db, self.event_id)
+
+            self.assertEqual(1, before["needs_mapping"])
+            self.assertEqual(READY_TO_SYNC, plan["entries"][0]["status"])
+
+            result = execute_event_satellite_sync(db, self.event_id)
+            db.commit()
+            after = canonical_satellite_metrics(db, self.batch_id)
+            linked_id = db.execute(
+                "SELECT directory_id FROM satellites WHERE id = ?", (imported_id,)
+            ).fetchone()["directory_id"]
+
+        self.assertEqual(1, result["synchronized_count"])
+        self.assertEqual(canonical_id, linked_id)
+        self.assertEqual(0, after["needs_mapping"])
 
     def test_directory_uses_hub_tables_and_breadcrumb_explorer(self):
         hub_id = self._hub("Mindanao South")

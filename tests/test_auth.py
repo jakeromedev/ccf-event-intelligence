@@ -365,6 +365,57 @@ class AuthenticationTests(unittest.TestCase):
         self.assertEqual(302, response.status_code)
         self.assertTrue(response.headers["Location"].endswith("/events"))
 
+    def test_registration_role_can_view_satellites_but_not_satellite_settings(self):
+        self.create_user("satellite-registration", role="registration")
+        with self.app.app_context():
+            event_id = get_db().execute(
+                "INSERT INTO events (name) VALUES ('Satellite Access Event')"
+            ).lastrowid
+            get_db().commit()
+
+        self.login("satellite-registration", "StrongPassword12!")
+        page = self.client.get("/events/{}/satellites".format(event_id))
+        self.assertEqual(200, page.status_code)
+        self.assertIn(b"Satellite Overview", page.data)
+        self.assertIn(
+            'href="/events/{}/satellites"'.format(event_id).encode("utf-8"),
+            page.data,
+        )
+        self.assertNotIn(b'href="/satellites/settings', page.data)
+
+        drilldown = self.client.get(
+            "/events/{}/satellites/registrants".format(event_id)
+        )
+        self.assertEqual(200, drilldown.status_code)
+        self.assertIn(b"No active dataset for this event", drilldown.data)
+
+        self.assertEqual(
+            403,
+            self.client.get(
+                "/satellites/settings", query_string={"event_id": event_id}
+            ).status_code,
+        )
+        self.assertEqual(
+            403,
+            self.client.get(
+                "/satellites/settings/registrants",
+                query_string={"event_id": event_id},
+            ).status_code,
+        )
+        token = CSRF_PATTERN.search(page.data).group(1).decode("utf-8")
+        self.assertEqual(
+            403,
+            self.client.post(
+                "/satellites/settings/hubs",
+                data={
+                    "csrf_token": token,
+                    "event_id": event_id,
+                    "hub_group_id": 1,
+                    "name": "Denied Hub",
+                },
+            ).status_code,
+        )
+
     def test_login_lockout_blocks_correct_password_until_expiry(self):
         user_id = self.create_user("lockout-operator")
         for _attempt in range(5):
@@ -480,7 +531,10 @@ class AuthenticationTests(unittest.TestCase):
 
         page = self.client.get("/admin/users")
         self.assertIn(b"Change Password", page.data)
-        self.assertIn(b">Block</button>", page.data)
+        self.assertIn(b">Block Account</button>", page.data)
+        self.assertIn(b"data-user-management-open", page.data)
+        self.assertIn(b"data-user-management-dialog", page.data)
+        self.assertIn(b"users.js", page.data)
         token = CSRF_PATTERN.search(page.data).group(1).decode("utf-8")
 
         weak = self.client.post(
@@ -530,7 +584,7 @@ class AuthenticationTests(unittest.TestCase):
             follow_redirects=True,
         )
         self.assertIn(b"managed-operator has been blocked", blocked.data)
-        self.assertIn(b">Unblock</button>", blocked.data)
+        self.assertIn(b">Unblock Account</button>", blocked.data)
         with self.app.app_context():
             user = get_db().session.get(User, user_id)
             self.assertEqual("blocked", user.status)
@@ -554,11 +608,94 @@ class AuthenticationTests(unittest.TestCase):
             self.login("managed-operator", "NewStrongPassword12!").status_code,
         )
 
-    def test_non_admin_cannot_manage_user_password_or_block_status(self):
+    def test_admin_can_change_non_admin_username_with_public_username_rules(self):
+        _, admin_password = self.initialize_admin()
+        user_id = self.create_user("original-operator")
+        self.create_user("existing-operator")
+        self.login("admin", admin_password)
+
+        page = self.client.get("/admin/users")
+        self.assertIn(b"Save Username", page.data)
+        self.assertIn(
+            "/admin/users/{}/username".format(user_id).encode("utf-8"),
+            page.data,
+        )
+        with self.app.app_context():
+            original_auth_version = get_db().session.get(User, user_id).auth_version
+
+        token = CSRF_PATTERN.search(page.data).group(1).decode("utf-8")
+        changed = self.client.post(
+            "/admin/users/{}/username".format(user_id),
+            data={"csrf_token": token, "username": "  Renamed.Operator  "},
+            follow_redirects=True,
+        )
+        self.assertIn(
+            b"Username changed from original-operator to renamed.operator",
+            changed.data,
+        )
+        self.assertIn(b"Existing sessions were signed out", changed.data)
+        with self.app.app_context():
+            renamed = get_db().session.get(User, user_id)
+            self.assertEqual("renamed.operator", renamed.username)
+            self.assertGreater(renamed.auth_version, original_auth_version)
+
+        rejected_values = (
+            ("admin", b"username is reserved"),
+            ("ab", b"between 3 and 64 characters"),
+            ("invalid username", b"Use lowercase letters"),
+            ("EXISTING-OPERATOR", b"already registered"),
+        )
+        response = changed
+        for value, message in rejected_values:
+            with self.subTest(value=value):
+                token = CSRF_PATTERN.search(response.data).group(1).decode("utf-8")
+                response = self.client.post(
+                    "/admin/users/{}/username".format(user_id),
+                    data={"csrf_token": token, "username": value},
+                    follow_redirects=True,
+                )
+                self.assertIn(message, response.data)
+                with self.app.app_context():
+                    self.assertEqual(
+                        "renamed.operator",
+                        get_db().session.get(User, user_id).username,
+                    )
+
+        with self.app.app_context():
+            admin_id = get_db().session.scalar(
+                select(User.id).where(User.username == "admin")
+            )
+        token = CSRF_PATTERN.search(response.data).group(1).decode("utf-8")
+        self.assertEqual(
+            404,
+            self.client.post(
+                "/admin/users/{}/username".format(admin_id),
+                data={"csrf_token": token, "username": "renamed-admin"},
+            ).status_code,
+        )
+
+        self.logout()
+        self.assertIn(
+            b"Invalid username or password",
+            self.login("original-operator", "StrongPassword12!").data,
+        )
+        self.assertEqual(
+            200,
+            self.login("renamed.operator", "StrongPassword12!").status_code,
+        )
+
+    def test_non_admin_cannot_manage_user_credentials_or_block_status(self):
         target_id = self.create_user("managed-target")
         self.create_user("ordinary-operator")
         self.login("ordinary-operator", "StrongPassword12!")
         token = self.csrf("/events")
+        self.assertEqual(
+            403,
+            self.client.post(
+                "/admin/users/{}/username".format(target_id),
+                data={"csrf_token": token, "username": "renamed-target"},
+            ).status_code,
+        )
         self.assertEqual(
             403,
             self.client.post(
