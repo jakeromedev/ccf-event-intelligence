@@ -153,27 +153,36 @@ def _status_matches(record, value):
 
 
 def filter_registrants(
-    records, query="", group_code="", hub_id=None, satellite_id=None, sync_status="all"
+    records,
+    query="",
+    group_code="",
+    hub_id=None,
+    satellite_id=None,
+    sync_status="all",
+    search_scope="all",
 ):
     query_key = _key(query)
     hub_id = _positive_int(hub_id, None) if hub_id else None
     satellite_id = _positive_int(satellite_id, None) if satellite_id else None
+    if search_scope == "registrant":
+        search_fields = ("participant", "identifier", "registration_code")
+    elif search_scope == "directory":
+        search_fields = ("group", "hub", "satellite", "source_hub", "source_satellite")
+    else:
+        search_fields = (
+            "participant",
+            "identifier",
+            "registration_code",
+            "group",
+            "hub",
+            "satellite",
+            "source_hub",
+            "source_satellite",
+            "status",
+        )
     filtered = []
     for record in records:
-        searchable = " ".join(
-            str(record[field] or "")
-            for field in (
-                "participant",
-                "identifier",
-                "registration_code",
-                "group",
-                "hub",
-                "satellite",
-                "source_hub",
-                "source_satellite",
-                "status",
-            )
-        )
+        searchable = " ".join(str(record[field] or "") for field in search_fields)
         if query_key and query_key not in _key(searchable):
             continue
         if group_code and group_code != "all" and record["group_code"] != group_code:
@@ -263,6 +272,7 @@ def event_settings_registrants(
     event_id,
     *,
     query="",
+    search_scope="all",
     group_code="",
     hub_id=None,
     satellite_id=None,
@@ -275,7 +285,15 @@ def event_settings_registrants(
     """Return Event-only aggregates plus a filtered, sorted page of registrants."""
     plan, records, directory = _records(db, event_id)
     options = _options(db, directory)
-    filtered = filter_registrants(records, query, group_code, hub_id, satellite_id, sync_status)
+    filtered = filter_registrants(
+        records,
+        query=query,
+        search_scope=search_scope,
+        group_code=group_code,
+        hub_id=hub_id,
+        satellite_id=satellite_id,
+        sync_status=sync_status,
+    )
     filter_active = bool(
         _clean(query)
         or group_code
@@ -286,7 +304,7 @@ def event_settings_registrants(
     visible_satellites = {
         item["satellite_id"] for item in filtered if item["satellite_id"] is not None
     }
-    if sync_status in (None, "", "all"):
+    if search_scope != "registrant" and sync_status in (None, "", "all"):
         query_key = _key(query)
         requested_hub = _positive_int(hub_id, None) if hub_id else None
         requested_satellite = _positive_int(satellite_id, None) if satellite_id else None
@@ -306,7 +324,11 @@ def event_settings_registrants(
     visible_groups = {
         directory[item]["group_id"] for item in visible_satellites if item in directory
     }
-    if sync_status in (None, "", "all") and not satellite_id:
+    if (
+        search_scope != "registrant"
+        and sync_status in (None, "", "all")
+        and not satellite_id
+    ):
         query_key = _key(query)
         groups_by_code = {item["code"]: item for item in options["groups"]}
         for hub in options["hubs"]:

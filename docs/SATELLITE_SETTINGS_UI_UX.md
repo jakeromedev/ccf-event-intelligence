@@ -90,15 +90,16 @@ Directory controls
 
 Directory
 ├── Within Metro Manila Hubs
-│   └── Collapsible Hub cards
-│       └── Satellite rows
+│   └── Hub table
+│       └── View Satellites
 └── Outside Metro Manila Hubs
-    └── Collapsible Hub cards
-        └── Satellite rows
+    └── Hub table
+        └── View Satellites
 
 Overlays
 ├── Add/Bulk Add dialog
 ├── Edit drawer
+├── Satellite explorer (Satellite table → Registrant table)
 └── Registration Satellite sync dialog
 ```
 
@@ -144,7 +145,7 @@ links to the appropriately scoped Registrants view.
 Event-scoped Settings provides two URL-addressable views:
 
 - **Directory** retains the canonical hierarchy and adds Event counts and
-  on-demand registrant drill-downs.
+  a breadcrumb-driven Satellite and registrant explorer.
 - **Registrants** presents a flat, sortable and paginated operational list.
 
 The selected filters remain in the URL when switching views. Global mode does
@@ -167,19 +168,22 @@ status. Directory names can still match even if that directory record has no
 Event registrants. Filters, sorting, and page number are query parameters, so
 views are refresh-safe and shareable.
 
-### 7.1 Search Directory
+### 7.1 Search Directory or Registrant
 
-The search field:
+Event mode provides an explicit **Search For** choice:
+
+- **Directory** locates a Hub Group, Hub, or Satellite.
+- **Registrant** locates a participant or registration identifier and shows
+  the participant's Hub Group, Hub, Satellite, and sync status. **View
+  Satellite** opens that Satellite's registrants in the explorer.
+
+Global Directory search:
 
 - has the placeholder `Search hubs or satellites...`;
 - matches case-insensitively against Hub Group, Hub, and Satellite names;
 - updates on every input event;
-- expands matching Hub cards while a query is active; and
-- restores each Hub's pre-search expanded state when the query is cleared.
-
-When a Hub matches, its card remains visible while its Satellite rows are still
-filtered by Satellite name. When a Hub Group name matches, the group remains
-visible even if none of its Hub cards match.
+- filters Hub table rows by Hub and Satellite name; and
+- retains matching Hub Group tables.
 
 ### 7.2 Hub Group filter
 
@@ -220,12 +224,6 @@ The primary **Add Records** disclosure contains:
 Choosing an action closes the menu and opens the shared add dialog in the
 appropriate mode.
 
-### 7.5 Directory View actions
-
-- **Expand All** opens every visible Hub card.
-- **Collapse All** closes every visible Hub card.
-- Hidden Hubs and Hubs inside filtered-out groups are not changed.
-
 ## 8. Directory hierarchy
 
 The page renders configured Hub Groups in configured sort order. The expected
@@ -244,27 +242,27 @@ and **Add Hub** preconfigured for that group.
 If a group has no Hubs, it displays `No Hubs encoded yet.`, guidance, and an
 **Add Hub** action bound to that group.
 
-### 8.2 Hub card
+### 8.2 Hub table
 
-Each Hub is a collapsible card with an expand/collapse control, Hub name,
-Satellite count, and **Edit**. Cards are collapsed initially. The toggle
-updates `aria-expanded` and its accessible label between `Expand <Hub>` and
-`Collapse <Hub>`.
+Each Hub Group contains a table. A Hub row shows its Satellite count, Event
+registrant/sync/review totals or global source-record total, **View
+Satellites**, and **Edit**. No accordion is used.
 
-### 8.3 Satellite rows
+### 8.3 Satellite explorer
 
-An expanded Hub lists its Satellites. Each row shows:
+**View Satellites** opens one modal and lists the Hub's Satellites in a table.
+Each row shows:
 
 - canonical Satellite name;
 - total imported source records linked to that canonical Satellite; and
+- **View Registrants** in Event mode; and
 - **Edit**.
 
 The imported-record count is aggregated across linked Event Satellite data; it
 is not limited to the Event used to enter the page.
 
-An empty Hub displays `No Satellites are assigned to this Hub.` An
-**Add Satellite** action appears below every expanded Hub and is preconfigured
-for that Hub.
+An empty Hub displays `No Satellites are assigned to this Hub.` The modal's
+**Add Satellite** action is preconfigured for its Hub.
 
 In Event mode, each level also shows filtered Event counts:
 
@@ -272,12 +270,14 @@ In Event mode, each level also shows filtered Event counts:
 - Hubs: Registrants and Need Review; and
 - Satellites: Registrants, Synced, Ready, and Need Review.
 
-Satellites with registrants provide **View Registrants**. Opening it fetches a
-10-row page only for that Satellite; registration rows are not embedded for
-every Satellite in the initial HTML. One drill-down is open per Hub. Its local
-search is debounced by 300 ms, its status control supports All, Synced, Needs
-Review, and Ready to Sync, and Previous/Next requests remain server-paginated.
-Loading, empty, and recoverable failure states are displayed in the panel.
+Satellites provide **View Registrants**. The same modal transforms into a
+registrant table and fetches a 10-row page only for that Satellite;
+registration rows are not embedded in the initial directory HTML. A breadcrumb
+shows Hub Groups / Hub Group / Hub / Satellites / Satellite / Registrants.
+**Satellites** returns to the Satellite table and **Hub Groups** closes the
+explorer. Local search is debounced by 300 ms, status filtering is scoped to
+the selected Satellite, and Previous/Next remain server-paginated. Loading,
+empty, and recoverable failure states are displayed in the modal.
 
 ## 8.4 Registrants view
 

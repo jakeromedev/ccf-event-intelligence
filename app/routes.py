@@ -767,9 +767,12 @@ def _render_satellite_settings(
     db = get_db()
     event = get_event_or_404(event_id) if event_id is not None else None
     batch = active_batch(db, event_id) if event is not None else None
+    search_scope = _satellite_settings_search_scope()
     filters = _satellite_settings_filters() if event is not None else {}
     registrants = (
-        event_settings_registrants(db, event_id, **filters)
+        event_settings_registrants(
+            db, event_id, search_scope=search_scope, **filters
+        )
         if event is not None
         else None
     )
@@ -780,12 +783,21 @@ def _render_satellite_settings(
         hierarchy=satellite_settings_hierarchy(db),
         registrants=registrants,
         settings_filters=filters,
+        settings_search_scope=search_scope,
         settings_view=(request.args.get("view") if event is not None else "directory")
         if request.args.get("view") in ("directory", "registrants")
         else "directory",
         bulk_review=bulk_review,
         sync_review=sync_review,
     ), status
+
+
+def _satellite_settings_search_scope():
+    default_scope = (
+        "registrant" if request.args.get("view") == "registrants" else "directory"
+    )
+    search_scope = request.args.get("search_scope", default_scope)
+    return search_scope if search_scope in ("directory", "registrant") else "directory"
 
 
 def _satellite_settings_filters():
@@ -823,7 +835,10 @@ def satellite_settings_registrants():
         abort(400)
     get_event_or_404(event_id)
     payload = event_settings_registrants(
-        get_db(), event_id, **_satellite_settings_filters()
+        get_db(),
+        event_id,
+        search_scope=_satellite_settings_search_scope(),
+        **_satellite_settings_filters(),
     )
     requested_satellite = request.args.get("satellite_id", type=int)
     if requested_satellite is not None and not any(

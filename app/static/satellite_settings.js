@@ -5,21 +5,11 @@
     const results = tools?.querySelector("[data-settings-results]");
     const noResults = document.querySelector("[data-settings-no-results]");
     const groups = [...document.querySelectorAll("[data-hub-group]")];
-    const cards = [...document.querySelectorAll("[data-hub-card]")];
     const createDialog = document.querySelector("[data-settings-record-modal]");
     const createForm = createDialog.querySelector("[data-settings-record-form]");
     const editDrawer = document.querySelector("[data-settings-edit-drawer]");
     const editForm = editDrawer.querySelector("[data-settings-edit-form]");
     let returnFocus = null;
-
-    const setHubExpanded = (card, expanded) => {
-        const toggle = card.querySelector("[data-hub-toggle]");
-        const body = card.querySelector("[data-hub-body]");
-        if (!toggle || !body) return;
-        toggle.setAttribute("aria-expanded", String(expanded));
-        toggle.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} ${card.querySelector("h3").textContent.trim()}`);
-        body.hidden = !expanded;
-    };
 
     const selectedGroup = () => filter?.querySelector("input:checked")?.value || "all";
 
@@ -35,29 +25,13 @@
             const allowed = groupCode === "all" || group.dataset.groupCode === groupCode;
             const groupMatches = Boolean(query) && group.dataset.groupName.includes(query);
             let groupHubMatches = 0;
-
-            group.querySelectorAll("[data-hub-card]").forEach((card) => {
-                const hubMatches = Boolean(query) && card.dataset.hubName.includes(query);
-                let satelliteMatches = 0;
-                card.querySelectorAll("[data-satellite-row]").forEach((row) => {
-                    const matches = !query || row.dataset.satelliteName.includes(query);
-                    row.hidden = !matches;
-                    if (matches) satelliteMatches += 1;
-                });
-                card.querySelectorAll("[data-hub-empty]").forEach((empty) => { empty.hidden = Boolean(query) && !groupMatches && !hubMatches; });
-                const matches = allowed && (!query || hubMatches || satelliteMatches > 0);
-                card.hidden = !matches;
+            group.querySelectorAll("[data-hub-row]").forEach((row) => {
+                const matches = allowed && (!query || groupMatches || row.dataset.searchText.includes(query));
+                row.hidden = !matches;
                 if (matches) {
                     groupHubMatches += 1;
                     visibleHubs += 1;
-                    visibleSatellites += satelliteMatches;
-                    if (query) {
-                        if (!("preSearchExpanded" in card.dataset)) card.dataset.preSearchExpanded = card.querySelector("[data-hub-toggle]").getAttribute("aria-expanded");
-                        setHubExpanded(card, true);
-                    } else if ("preSearchExpanded" in card.dataset) {
-                        setHubExpanded(card, card.dataset.preSearchExpanded === "true");
-                        delete card.dataset.preSearchExpanded;
-                    }
+                    visibleSatellites += Number(row.cells[1]?.textContent || 0);
                 }
             });
 
@@ -164,9 +138,6 @@
         });
     };
 
-    document.querySelectorAll("[data-hub-toggle]").forEach((toggle) => toggle.addEventListener("click", () => setHubExpanded(toggle.closest("[data-hub-card]"), toggle.getAttribute("aria-expanded") !== "true")));
-    document.querySelectorAll("[data-expand-all]").forEach((button) => button.addEventListener("click", () => cards.filter((card) => !card.hidden && !card.closest("[data-hub-group]").hidden).forEach((card) => setHubExpanded(card, true))));
-    document.querySelectorAll("[data-collapse-all]").forEach((button) => button.addEventListener("click", () => cards.filter((card) => !card.hidden && !card.closest("[data-hub-group]").hidden).forEach((card) => setHubExpanded(card, false))));
     search?.addEventListener("input", applyFilters);
     filter?.addEventListener("change", applyFilters);
     document.querySelector("[data-clear-search]")?.addEventListener("click", () => { search.value = ""; filter.querySelector("input[value='all']").checked = true; applyFilters(); search.focus(); });
@@ -177,7 +148,7 @@
     createForm.querySelector("[data-record-values]").addEventListener("input", updateBulkCount);
     createForm.addEventListener("submit", () => setSubmitting(createForm));
 
-    document.querySelectorAll("[data-settings-edit-open]").forEach((trigger) => trigger.addEventListener("click", () => {
+    const openEditDrawer = (trigger) => {
         returnFocus = trigger;
         const kind = trigger.dataset.kind;
         editForm.action = trigger.dataset.action;
@@ -196,7 +167,8 @@
         editForm.querySelector("[data-move-notice]").hidden = true;
         editDrawer.showModal();
         requestAnimationFrame(() => editForm.querySelector("[data-edit-name]").focus());
-    }));
+    };
+    document.querySelectorAll("[data-settings-edit-open]").forEach((trigger) => trigger.addEventListener("click", () => openEditDrawer(trigger)));
     editDrawer.querySelectorAll("[data-settings-edit-close]").forEach((button) => button.addEventListener("click", () => closeDialog(editDrawer)));
     editDrawer.addEventListener("click", (event) => { if (event.target === editDrawer) closeDialog(editDrawer); });
 
@@ -287,15 +259,90 @@
         });
     }
 
-    const directory = document.querySelector("[data-settings-directory][data-registrants-url]");
+    const directory = document.querySelector("[data-settings-directory]");
+    const explorer = document.querySelector("[data-satellite-explorer]");
+    const explorerContent = explorer?.querySelector("[data-explorer-content]");
+    const explorerTitle = explorer?.querySelector("[data-explorer-title]");
+    const explorerBreadcrumb = explorer?.querySelector("[data-explorer-breadcrumb]");
     const statusClass = (row) => row.needs_review ? "review" : row.status === "Already Synced" ? "synced" : "ready";
     const makeCell = (value, tag = "td") => {
         const cell = document.createElement(tag);
         cell.textContent = value || "—";
         return cell;
     };
+    const renderExplorerBreadcrumb = (state, registrantsOpen) => {
+        explorerBreadcrumb.replaceChildren();
+        const root = document.createElement("button");
+        root.type = "button";
+        root.textContent = "Hub Groups";
+        root.addEventListener("click", () => closeDialog(explorer));
+        explorerBreadcrumb.append(root);
+        [state.groupName, state.hubName].forEach((label) => {
+            const separator = document.createElement("span");
+            separator.textContent = "/";
+            separator.setAttribute("aria-hidden", "true");
+            const crumb = document.createElement("span");
+            crumb.textContent = label;
+            explorerBreadcrumb.append(separator, crumb);
+        });
+        const separator = document.createElement("span");
+        separator.textContent = "/";
+        separator.setAttribute("aria-hidden", "true");
+        if (!registrantsOpen) {
+            const current = document.createElement("span");
+            current.textContent = "Satellites";
+            current.setAttribute("aria-current", "page");
+            explorerBreadcrumb.append(separator, current);
+            return;
+        }
+        const satellites = document.createElement("button");
+        satellites.type = "button";
+        satellites.textContent = "Satellites";
+        satellites.addEventListener("click", () => showExplorerSatellites(state, false));
+        explorerBreadcrumb.append(separator, satellites);
+        [state.satelliteName, "Registrants"].forEach((label) => {
+            const divider = document.createElement("span");
+            divider.textContent = "/";
+            divider.setAttribute("aria-hidden", "true");
+            const crumb = document.createElement("span");
+            crumb.textContent = label;
+            explorerBreadcrumb.append(divider, crumb);
+        });
+    };
+    const bindExplorerContent = (state) => {
+        explorerContent.querySelectorAll("[data-settings-record-open]").forEach((trigger) => trigger.addEventListener("click", () => openCreateDialog(trigger)));
+        explorerContent.querySelectorAll("[data-settings-edit-open]").forEach((trigger) => trigger.addEventListener("click", () => openEditDrawer(trigger)));
+        explorerContent.querySelectorAll("[data-modal-view-registrants]").forEach((trigger) => trigger.addEventListener("click", () => loadDrilldown(explorerContent, {
+            ...state,
+            satelliteId: trigger.dataset.satelliteId,
+            satelliteName: trigger.dataset.satelliteName,
+            q: "",
+            syncStatus: "all",
+            page: 1,
+        })));
+    };
+    const showExplorerSatellites = (state, moveFocus = true) => {
+        const template = document.getElementById(state.templateId || `hub-satellites-${state.hubId}`);
+        if (!template || !explorer) return;
+        explorerContent.replaceChildren(template.content.cloneNode(true));
+        explorerTitle.textContent = `${state.hubName} Satellites`;
+        renderExplorerBreadcrumb(state, false);
+        bindExplorerContent(state);
+        if (!explorer.open) explorer.showModal();
+        if (moveFocus) requestAnimationFrame(() => explorerTitle.focus());
+    };
     const renderDrilldown = (panel, payload, state) => {
         panel.replaceChildren();
+        const heading = document.createElement("div");
+        heading.className = "satellite-explorer-heading";
+        const headingText = document.createElement("div");
+        const headingTitle = document.createElement("h3");
+        headingTitle.textContent = state.satelliteName;
+        const headingSummary = document.createElement("p");
+        headingSummary.textContent = `${payload.pagination.total} ${payload.pagination.total === 1 ? "registrant" : "registrants"}`;
+        headingText.append(headingTitle, headingSummary);
+        heading.append(headingText);
+        panel.append(heading);
         const controls = document.createElement("div");
         controls.className = "satellite-drilldown-controls";
         const searchInput = document.createElement("input");
@@ -374,11 +421,13 @@
         status.addEventListener("change", () => loadDrilldown(panel, {...state, syncStatus: status.value, page: 1}));
     };
     const loadDrilldown = async (panel, state) => {
-        panel.hidden = false;
         panel.setAttribute("aria-busy", "true");
-        if (!panel.childElementCount) panel.textContent = "Loading registrants…";
+        panel.textContent = "Loading registrants…";
+        explorerTitle.textContent = `${state.satelliteName} Registrants`;
+        renderExplorerBreadcrumb(state, true);
         const url = new URL(directory.dataset.registrantsUrl, window.location.origin);
         url.searchParams.set("satellite_id", state.satelliteId);
+        url.searchParams.set("search_scope", "registrant");
         url.searchParams.set("q", state.q || "");
         url.searchParams.set("sync_status", state.syncStatus || "all");
         url.searchParams.set("page", state.page || 1);
@@ -387,32 +436,40 @@
             const response = await fetch(url, {headers: {Accept: "application/json"}});
             if (!response.ok) throw new Error("Request failed");
             renderDrilldown(panel, await response.json(), state);
-            if (state.focusPanel && document.activeElement === state.focusTrigger) panel.focus({preventScroll: true});
-            state.focusPanel = false;
+            requestAnimationFrame(() => explorerTitle.focus());
         } catch (_error) {
             panel.textContent = "Registrants could not be loaded. Try again.";
         } finally {
             panel.removeAttribute("aria-busy");
         }
     };
-    directory?.querySelectorAll("[data-satellite-registrants-toggle]").forEach((toggle) => toggle.addEventListener("click", () => {
-        const panel = document.getElementById(toggle.getAttribute("aria-controls"));
-        const opening = toggle.getAttribute("aria-expanded") !== "true";
-        toggle.closest("[data-hub-card]").querySelectorAll("[data-satellite-registrants-toggle][aria-expanded='true']").forEach((other) => {
-            if (other === toggle) return;
-            other.setAttribute("aria-expanded", "false");
-            other.textContent = "View Registrants";
-            document.getElementById(other.getAttribute("aria-controls")).hidden = true;
+    document.querySelectorAll("[data-open-satellite-explorer]").forEach((trigger) => trigger.addEventListener("click", () => {
+        returnFocus = trigger;
+        showExplorerSatellites({
+            templateId: trigger.dataset.templateId,
+            groupName: trigger.dataset.groupName,
+            hubName: trigger.dataset.hubName,
         });
-        toggle.setAttribute("aria-expanded", String(opening));
-        toggle.textContent = opening ? "Hide Registrants" : "View Registrants";
-        panel.hidden = !opening;
-        if (opening && !panel.dataset.loaded) {
-            panel.dataset.loaded = "true";
-            panel.tabIndex = -1;
-            loadDrilldown(panel, {satelliteId: toggle.dataset.satelliteId, q: "", syncStatus: "all", page: 1, focusPanel: true, focusTrigger: toggle});
-        }
     }));
+    document.querySelectorAll("[data-open-registrants-from-search]").forEach((trigger) => trigger.addEventListener("click", () => {
+        returnFocus = trigger;
+        const state = {
+            templateId: `hub-satellites-${trigger.dataset.hubId}`,
+            hubId: trigger.dataset.hubId,
+            groupName: trigger.dataset.groupName,
+            hubName: trigger.dataset.hubName,
+            satelliteId: trigger.dataset.satelliteId,
+            satelliteName: trigger.dataset.satelliteName,
+            q: "",
+            syncStatus: "all",
+            page: 1,
+        };
+        showExplorerSatellites(state, false);
+        loadDrilldown(explorerContent, state);
+    }));
+    explorer?.querySelectorAll("[data-explorer-close]").forEach((button) => button.addEventListener("click", () => closeDialog(explorer)));
+    explorer?.addEventListener("click", (event) => { if (event.target === explorer) closeDialog(explorer); });
+    explorer?.addEventListener("cancel", (event) => { event.preventDefault(); closeDialog(explorer); });
 
     const syncDialog = document.querySelector("[data-sync-review-modal]");
     if (syncDialog) {

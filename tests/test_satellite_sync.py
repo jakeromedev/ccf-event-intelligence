@@ -831,8 +831,58 @@ class SatelliteSyncAnalysisTests(unittest.TestCase):
             "/satellites/settings", query_string={"event_id": self.event_id}
         )
 
-        self.assertIn(b"1 Registrants \xc2\xb7 0 Synced \xc2\xb7 1 Ready", before.data)
-        self.assertIn(b"1 Registrants \xc2\xb7 1 Synced \xc2\xb7 0 Ready", after.data)
+        self.assertIn(
+            b'data-registrant-count="1" data-synced-count="0" data-ready-count="1"',
+            before.data,
+        )
+        self.assertIn(
+            b'data-registrant-count="1" data-synced-count="1" data-ready-count="0"',
+            after.data,
+        )
+
+    def test_directory_uses_hub_tables_and_breadcrumb_explorer(self):
+        hub_id = self._hub("Mindanao South")
+        canonical_id = self._directory(hub_id, "B1G Tagum")
+        self._evidence(directory_id=canonical_id)
+
+        response = self.app.test_client().get(
+            "/satellites/settings", query_string={"event_id": self.event_id}
+        )
+
+        self.assertEqual(200, response.status_code)
+        for marker in (
+            b"satellite-hub-table",
+            b"data-open-satellite-explorer",
+            b"View Satellites",
+            b"data-hub-satellites-template",
+            b"data-modal-view-registrants",
+            b"data-satellite-explorer",
+            b"data-explorer-breadcrumb",
+        ):
+            self.assertIn(marker, response.data)
+        self.assertNotIn(b"data-hub-toggle", response.data)
+        self.assertNotIn(b"Test Registrant", response.data)
+
+    def test_registrant_search_shows_satellite_information(self):
+        hub_id = self._hub("Mindanao South")
+        canonical_id = self._directory(hub_id, "B1G Tagum")
+        self._evidence(directory_id=canonical_id)
+
+        response = self.app.test_client().get(
+            "/satellites/settings",
+            query_string={
+                "event_id": self.event_id,
+                "search_scope": "registrant",
+                "q": "R-1",
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertIn(b"Satellite Information", response.data)
+        self.assertIn(b"Test Registrant", response.data)
+        self.assertIn(b"B1G Tagum", response.data)
+        self.assertIn(b"View Satellite", response.data)
+        self.assertIn(b'<option value="registrant" selected>', response.data)
 
 
 if __name__ == "__main__":
