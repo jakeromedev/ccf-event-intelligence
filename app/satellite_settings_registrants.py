@@ -103,12 +103,13 @@ def _directory_index(db):
     }
 
 
-def _effective_directory_id(resolution):
+def _effective_directory_id(resolution, directory):
     imported = resolution.get("imported_satellite") or {}
-    if imported.get("directory_id"):
-        return imported["directory_id"]
+    imported_directory_id = imported.get("directory_id")
+    if imported_directory_id in directory:
+        return imported_directory_id
     canonical = resolution.get("canonical_satellite") or {}
-    if resolution["status"] == READY_TO_SYNC:
+    if resolution["status"] in (READY_TO_SYNC, ALREADY_SYNCED):
         return canonical.get("id")
     return None
 
@@ -118,7 +119,7 @@ def _records(db, event_id):
     directory = _directory_index(db)
     records = []
     for resolution in plan["registrations"]:
-        location = directory.get(_effective_directory_id(resolution), {})
+        location = directory.get(_effective_directory_id(resolution, directory), {})
         registration = resolution["registration"]
         records.append(
             {

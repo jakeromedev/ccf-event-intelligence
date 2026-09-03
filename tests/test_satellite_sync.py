@@ -702,6 +702,42 @@ class SatelliteSyncAnalysisTests(unittest.TestCase):
             result["counts"]["satellite:{}".format(canonical_id)]["registrants"],
         )
 
+    def test_event_settings_uses_canonical_match_for_unassigned_legacy_link(self):
+        hub_id = self._hub("Mindanao South")
+        canonical_id = self._directory(hub_id, "B1G Tagum")
+        with self.app.app_context():
+            db = get_db()
+            legacy_id = db.execute(
+                """
+                INSERT INTO satellite_directory (hub_id, name, normalized_name)
+                VALUES (NULL, 'B1G Tagum', 'b1g tagum')
+                """
+            ).lastrowid
+            db.commit()
+        imported_id = self._evidence(directory_id=legacy_id)
+
+        with self.app.app_context():
+            db = get_db()
+            result = event_settings_registrants(
+                db,
+                self.event_id,
+                satellite_id=canonical_id,
+                search_scope="registrant",
+            )
+            stored_directory_id = db.execute(
+                "SELECT directory_id FROM satellites WHERE id = ?", (imported_id,)
+            ).fetchone()["directory_id"]
+
+        self.assertEqual(1, result["pagination"]["total"])
+        self.assertEqual(canonical_id, result["rows"][0]["satellite_id"])
+        self.assertEqual("Mindanao South", result["rows"][0]["hub"])
+        self.assertEqual("B1G Tagum", result["rows"][0]["satellite"])
+        self.assertEqual(
+            1,
+            result["counts"]["hub:{}".format(hub_id)]["registrants"],
+        )
+        self.assertEqual(legacy_id, stored_directory_id)
+
     def test_event_settings_page_and_lazy_registrant_endpoint(self):
         hub_id = self._hub("Mindanao South")
         canonical_id = self._directory(hub_id, "B1G Tagum")
