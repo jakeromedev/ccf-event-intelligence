@@ -68,7 +68,6 @@ STANDARD_USER_CAPABILITIES = frozenset(
     {
         CAPABILITY_VIEW_DASHBOARD,
         CAPABILITY_VIEW_REGISTRATIONS,
-        CAPABILITY_VIEW_ANALYTICS,
         CAPABILITY_VIEW_SATELLITES,
         CAPABILITY_CREATE_EVENTS,
         CAPABILITY_VIEW_EVENT_SETTINGS,
@@ -76,6 +75,11 @@ STANDARD_USER_CAPABILITIES = frozenset(
 )
 
 STANDARD_USER_RESTRICTED_ENDPOINT_CAPABILITIES = {
+    "dashboard.event_analytics_page": CAPABILITY_VIEW_ANALYTICS,
+    "dashboard.event_analytics_api": CAPABILITY_VIEW_ANALYTICS,
+    "dashboard.event_analytics_trends_api": CAPABILITY_VIEW_ANALYTICS,
+    "dashboard.analytics_compare_page": CAPABILITY_VIEW_ANALYTICS,
+    "dashboard.analytics_compare_api": CAPABILITY_VIEW_ANALYTICS,
     "dashboard.event_quality": CAPABILITY_VIEW_DATA_QUALITY,
     "dashboard.event_quality_issues": CAPABILITY_VIEW_DATA_QUALITY,
     "dashboard.event_curated_registrant_detail": CAPABILITY_VIEW_DATA_QUALITY,

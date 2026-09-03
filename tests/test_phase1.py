@@ -25,7 +25,7 @@ from app.aggregation import (
     satellite_metrics,
     satellite_registrants,
 )
-from app.satellite_analytics import canonical_satellite_metrics
+from app.satellite_analytics import HUB_CHART_COLORS, canonical_satellite_metrics
 from app.analytics import event_analytics
 from app.classifier import classify_affiliation
 from app.curation import (
@@ -2007,6 +2007,8 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertIn(b"Needs Mapping", response.data)
         self.assertIn(b"Satellites by Registrants", response.data)
         self.assertIn(b"Associations by Hub", response.data)
+        self.assertEqual(len(HUB_CHART_COLORS), len(set(HUB_CHART_COLORS)))
+        self.assertEqual(("#2563eb", "#f97316"), HUB_CHART_COLORS[:2])
         self.assertNotIn(b"test1@example.com", response.data)
 
         ranking = client.get("/events/{}/satellites".format(self.event_a))

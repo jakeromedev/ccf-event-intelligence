@@ -7,8 +7,10 @@ from time import perf_counter
 from unittest.mock import patch
 
 from app import create_app
+from app.attestation_identity import reconcile_attestation_participants
 from app.db import get_db, get_engine
 from app.models import Base
+from app.registrant_satellite_assignments import set_manual_satellite_assignment
 from app.satellite_analytics import canonical_satellite_metrics
 from app.satellite_datasets import satellite_dataset_options
 from app.satellite_settings import satellite_settings_hierarchy, update_satellite
@@ -17,6 +19,7 @@ from app.satellite_sync import (
     ALREADY_SYNCED,
     AMBIGUOUS,
     HUB_NOT_FOUND,
+    MANUAL_PROTECTED,
     MISSING_SATELLITE,
     READY_TO_SYNC,
     SATELLITE_NOT_CONFIGURED,
@@ -241,6 +244,47 @@ class SatelliteSyncAnalysisTests(unittest.TestCase):
         existing_id = self._directory(other_hub, "B1G Cebu")
         self._evidence(directory_id=existing_id)
         self.assertEqual(ALREADY_SYNCED, self._analyze()["entries"][0]["status"])
+
+    def test_manual_override_is_protected_and_removed_from_sync_issues(self):
+        hub_id = self._hub("Mindanao South")
+        manual_directory_id = self._directory(hub_id, "B1G Davao")
+        imported_id = self._evidence(source_hub="Luzon South")
+        with self.app.app_context():
+            db = get_db()
+            reconcile_attestation_participants(db, self.event_id, self.batch_id)
+            participant_id = db.execute(
+                """
+                SELECT attestation_participant_id
+                FROM attestation_participant_registrants
+                WHERE event_id = ? AND batch_id = ?
+                """,
+                (self.event_id, self.batch_id),
+            ).fetchone()["attestation_participant_id"]
+            set_manual_satellite_assignment(
+                db,
+                self.event_id,
+                participant_id,
+                manual_directory_id,
+            )
+            db.commit()
+
+            plan = analyze_event_satellite_sync(db, self.event_id)
+            settings = event_settings_registrants(db, self.event_id)
+            result = execute_event_satellite_sync(db, self.event_id)
+            imported_directory_id = db.execute(
+                "SELECT directory_id FROM satellites WHERE id = ?", (imported_id,)
+            ).fetchone()["directory_id"]
+
+        self.assertEqual(MANUAL_PROTECTED, plan["entries"][0]["status"])
+        self.assertEqual(MANUAL_PROTECTED, plan["registrations"][0]["status"])
+        self.assertEqual(1, plan["counts"][MANUAL_PROTECTED])
+        self.assertEqual(0, settings["totals"]["review"])
+        self.assertEqual(1, settings["totals"]["synced"])
+        self.assertEqual(MANUAL_PROTECTED, settings["rows"][0]["status"])
+        self.assertFalse(settings["rows"][0]["needs_review"])
+        self.assertEqual(0, result["not_synced_count"])
+        self.assertEqual(0, result["synchronized_count"])
+        self.assertIsNone(imported_directory_id)
 
     def test_aggregate_with_two_hub_interpretations_is_ambiguous(self):
         south = self._hub("Mindanao South")
@@ -766,6 +810,121 @@ class SatelliteSyncAnalysisTests(unittest.TestCase):
         self.assertEqual(
             "B1G Tagum", payload.get_json()["rows"][0]["satellite"]
         )
+
+    def test_admin_can_save_and_replace_a_manual_registrant_satellite(self):
+        hub_id = self._hub("Mindanao South")
+        imported_directory_id = self._directory(hub_id, "B1G Tagum")
+        manual_directory_id = self._directory(hub_id, "B1G Davao")
+        self._evidence(directory_id=imported_directory_id)
+        with self.app.app_context():
+            db = get_db()
+            reconcile_attestation_participants(db, self.event_id, self.batch_id)
+            participant_id = db.execute(
+                """
+                SELECT attestation_participant_id
+                FROM attestation_participant_registrants
+                WHERE event_id = ? AND batch_id = ?
+                """,
+                (self.event_id, self.batch_id),
+            ).fetchone()["attestation_participant_id"]
+            db.commit()
+
+        client = self.app.test_client()
+        response = client.post(
+            "/satellites/settings/registrants/{}/satellite".format(participant_id),
+            data={
+                "event_id": self.event_id,
+                "directory_id": manual_directory_id,
+                "return_to": "/satellites/settings?event_id={}&view=registrants".format(
+                    self.event_id
+                ),
+            },
+        )
+        page = client.get(
+            "/satellites/settings",
+            query_string={"event_id": self.event_id, "view": "registrants"},
+        )
+        manual_payload = client.get(
+            "/satellites/settings/registrants",
+            query_string={
+                "event_id": self.event_id,
+                "satellite_id": manual_directory_id,
+            },
+        ).get_json()
+        imported_payload = client.get(
+            "/satellites/settings/registrants",
+            query_string={
+                "event_id": self.event_id,
+                "satellite_id": imported_directory_id,
+            },
+        ).get_json()
+
+        self.assertEqual(302, response.status_code)
+        self.assertIn(b"Imported Satellite", page.data)
+        self.assertIn(b"Effective Satellite", page.data)
+        self.assertIn(b"Manual Override", page.data)
+        self.assertIn(b"B1G Davao", page.data)
+        self.assertIn(b"Save Manual Override", page.data)
+        self.assertIn(b"Reset to Imported Satellite", page.data)
+        self.assertIn(b"Reset manual override?", page.data)
+        self.assertIn(b"data-assignment-reset-dialog", page.data)
+        self.assertEqual(1, manual_payload["pagination"]["total"])
+        self.assertEqual(0, imported_payload["pagination"]["total"])
+        row = manual_payload["rows"][0]
+        self.assertEqual("B1G Tagum", row["imported_satellite"])
+        self.assertEqual("B1G Davao", row["effective_satellite"])
+        self.assertEqual("manual", row["assignment_source"])
+        with self.app.app_context():
+            assignment = get_db().execute(
+                """
+                SELECT directory_id, assignment_source, source_batch_id
+                FROM event_registrant_satellites
+                WHERE event_id = ? AND attestation_participant_id = ?
+                """,
+                (self.event_id, participant_id),
+            ).fetchone()
+        self.assertEqual(manual_directory_id, assignment["directory_id"])
+        self.assertEqual("manual", assignment["assignment_source"])
+        self.assertIsNone(assignment["source_batch_id"])
+
+        reset_url = "/satellites/settings/registrants/{}/satellite/reset".format(
+            participant_id
+        )
+        first_reset = client.post(
+            reset_url,
+            data={"event_id": self.event_id},
+        )
+        duplicate_reset = client.post(
+            reset_url,
+            data={"event_id": self.event_id},
+        )
+        with self.app.app_context():
+            db = get_db()
+            reset_assignment = db.execute(
+                """
+                SELECT directory_id, assignment_source, source_batch_id
+                FROM event_registrant_satellites
+                WHERE event_id = ? AND attestation_participant_id = ?
+                """,
+                (self.event_id, participant_id),
+            ).fetchone()
+            audits = db.execute(
+                """
+                SELECT action, previous_directory_name, new_directory_name
+                FROM event_registrant_satellite_audits
+                WHERE event_id = ? AND attestation_participant_id = ?
+                ORDER BY id
+                """,
+                (self.event_id, participant_id),
+            ).fetchall()
+        self.assertEqual(302, first_reset.status_code)
+        self.assertEqual(302, duplicate_reset.status_code)
+        self.assertEqual(imported_directory_id, reset_assignment["directory_id"])
+        self.assertEqual("automatic", reset_assignment["assignment_source"])
+        self.assertEqual(self.batch_id, reset_assignment["source_batch_id"])
+        self.assertEqual(["manual", "reset"], [row["action"] for row in audits])
+        self.assertEqual("B1G Davao", audits[-1]["previous_directory_name"])
+        self.assertEqual("B1G Tagum", audits[-1]["new_directory_name"])
 
     def test_global_settings_never_embeds_event_registrants(self):
         hub_id = self._hub("Mindanao South")

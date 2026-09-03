@@ -10,6 +10,7 @@ from .satellite_sync import (
     ALREADY_SYNCED,
     AMBIGUOUS,
     HUB_NOT_FOUND,
+    MANUAL_PROTECTED,
     MISSING_SATELLITE,
     READY_TO_SYNC,
     SATELLITE_NOT_CONFIGURED,
@@ -24,6 +25,7 @@ NEEDS_REVIEW_STATUSES = frozenset(
 STATUS_VALUES = {
     "ready_to_sync": READY_TO_SYNC,
     "already_synced": ALREADY_SYNCED,
+    "manual_protected": MANUAL_PROTECTED,
     "satellite_not_configured": SATELLITE_NOT_CONFIGURED,
     "hub_not_found": HUB_NOT_FOUND,
     "missing_satellite": MISSING_SATELLITE,
@@ -114,16 +116,65 @@ def _effective_directory_id(resolution, directory):
     return None
 
 
+def _participant_assignments(db, event_id, batch_id):
+    if batch_id is None:
+        return {}, {}
+    participant_ids = {
+        row["registrant_id"]: row["attestation_participant_id"]
+        for row in db.execute(
+            """
+            SELECT registrant_id, attestation_participant_id
+            FROM attestation_participant_registrants
+            WHERE event_id = ? AND batch_id = ?
+            """,
+            (event_id, batch_id),
+        ).fetchall()
+    }
+    assignments = {
+        row["attestation_participant_id"]: row
+        for row in db.execute(
+            """
+            SELECT assignment.id, assignment.attestation_participant_id,
+                   assignment.directory_id, assignment.assignment_source,
+                   assignment.source_batch_id, assignment.updated_at,
+                   users.username updated_by_username
+            FROM event_registrant_satellites assignment
+            LEFT JOIN users ON users.id = assignment.updated_by_user_id
+            WHERE assignment.event_id = ?
+            """,
+            (event_id,),
+        ).fetchall()
+    }
+    return participant_ids, assignments
+
+
 def _records(db, event_id):
     plan = analyze_event_satellite_sync(db, event_id)
     directory = _directory_index(db)
+    participant_ids, assignments = _participant_assignments(db, event_id, plan["active_batch_id"])
     records = []
     for resolution in plan["registrations"]:
-        location = directory.get(_effective_directory_id(resolution, directory), {})
         registration = resolution["registration"]
+        participant_id = participant_ids.get(registration["id"])
+        assignment = assignments.get(participant_id)
+        automatic_directory_id = _effective_directory_id(resolution, directory)
+        is_manual = bool(assignment and assignment["assignment_source"] == "manual")
+        effective_directory_id = (
+            assignment["directory_id"]
+            if is_manual
+            else automatic_directory_id
+            or (
+                assignment["directory_id"]
+                if assignment and assignment["assignment_source"] == "automatic"
+                else None
+            )
+        )
+        location = directory.get(effective_directory_id, {})
+        assignment_source = "manual" if is_manual else "automatic" if location else None
         records.append(
             {
                 "id": registration["id"],
+                "attestation_participant_id": participant_id,
                 "identifier": registration["identifier"],
                 "registration_code": registration["registration_code"],
                 "participant": registration["participant"] or "—",
@@ -134,10 +185,26 @@ def _records(db, event_id):
                 "hub": location.get("hub") or resolution.get("source_hub") or "—",
                 "satellite_id": location.get("satellite_id"),
                 "satellite": location.get("satellite") or resolution.get("source_satellite") or "—",
+                "imported_hub": resolution.get("source_hub") or "—",
+                "imported_satellite": resolution.get("source_satellite") or "—",
+                "effective_hub": location.get("hub") or "—",
+                "effective_satellite": location.get("satellite") or "Unassigned",
+                "assignment_source": assignment_source,
+                "assignment_source_label": (
+                    "Manual Override" if is_manual else "Automatic" if location else "Unassigned"
+                ),
+                "is_manual": is_manual,
+                "assignment_updated_at": assignment["updated_at"] if assignment else None,
+                "assignment_updated_by": (
+                    assignment["updated_by_username"] if assignment else None
+                ),
+                "latest_batch_id": plan["active_batch_id"],
                 "source_hub": resolution.get("source_hub") or "—",
                 "source_satellite": resolution.get("source_satellite") or "—",
-                "status": resolution["status"],
-                "needs_review": resolution["status"] in NEEDS_REVIEW_STATUSES,
+                "status": MANUAL_PROTECTED if is_manual else resolution["status"],
+                "needs_review": (
+                    False if is_manual else resolution["status"] in NEEDS_REVIEW_STATUSES
+                ),
             }
         )
     return plan, records, directory
@@ -147,7 +214,7 @@ def _status_matches(record, value):
     if value in (None, "", "all"):
         return True
     if value == "synced":
-        return record["status"] == ALREADY_SYNCED
+        return record["status"] in (ALREADY_SYNCED, MANUAL_PROTECTED)
     if value == "needs_review":
         return record["needs_review"]
     return record["status"] == STATUS_VALUES.get(value)
@@ -224,7 +291,7 @@ def _counts(records):
                 continue
             bucket = totals[(kind, identifier)]
             bucket["registrants"] += 1
-            bucket["synced"] += record["status"] == ALREADY_SYNCED
+            bucket["synced"] += record["status"] in (ALREADY_SYNCED, MANUAL_PROTECTED)
             bucket["ready"] += record["status"] == READY_TO_SYNC
             bucket["review"] += record["needs_review"]
     return {
@@ -256,7 +323,9 @@ def _options(db, directory):
             "id": item["satellite_id"],
             "name": item["satellite"],
             "hub_id": item["hub_id"],
+            "hub_name": item["hub"],
             "group_code": item["group_code"],
+            "group_name": item["group"],
         }
         for item in directory.values()
     ]
@@ -325,11 +394,7 @@ def event_settings_registrants(
     visible_groups = {
         directory[item]["group_id"] for item in visible_satellites if item in directory
     }
-    if (
-        search_scope != "registrant"
-        and sync_status in (None, "", "all")
-        and not satellite_id
-    ):
+    if search_scope != "registrant" and sync_status in (None, "", "all") and not satellite_id:
         query_key = _key(query)
         groups_by_code = {item["code"]: item for item in options["groups"]}
         for hub in options["hubs"]:
@@ -357,7 +422,9 @@ def event_settings_registrants(
     rows = ordered[pagination["offset"] : pagination["offset"] + pagination["per_page"]]
     overall = Counter(
         registrants=len(records),
-        synced=sum(item["status"] == ALREADY_SYNCED for item in records),
+        synced=sum(
+            item["status"] in (ALREADY_SYNCED, MANUAL_PROTECTED) for item in records
+        ),
         ready=sum(item["status"] == READY_TO_SYNC for item in records),
         review=sum(item["needs_review"] for item in records),
     )
@@ -367,7 +434,10 @@ def event_settings_registrants(
         "totals": dict(overall),
         "filtered_totals": {
             "registrants": len(filtered),
-            "synced": sum(item["status"] == ALREADY_SYNCED for item in filtered),
+            "synced": sum(
+                item["status"] in (ALREADY_SYNCED, MANUAL_PROTECTED)
+                for item in filtered
+            ),
             "ready": sum(item["status"] == READY_TO_SYNC for item in filtered),
             "review": sum(item["needs_review"] for item in filtered),
         },

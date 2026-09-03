@@ -718,6 +718,128 @@ class SatelliteDirectoryEntry(Base):
     )
 
 
+class EventRegistrantSatellite(Base):
+    """Effective canonical Satellite ownership for one durable registrant."""
+
+    __tablename__ = "event_registrant_satellites"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["event_id", "attestation_participant_id"],
+            ["attestation_participants.event_id", "attestation_participants.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["event_id", "source_batch_id"],
+            ["import_batches.event_id", "import_batches.id"],
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "assignment_source IN ('manual','automatic')",
+            name="ck_event_registrant_satellites_source",
+        ),
+        CheckConstraint(
+            "(assignment_source = 'manual' AND source_batch_id IS NULL) OR "
+            "(assignment_source = 'automatic' AND source_batch_id IS NOT NULL)",
+            name="ck_event_registrant_satellites_source_batch",
+        ),
+        UniqueConstraint(
+            "event_id",
+            "attestation_participant_id",
+            name="uq_event_registrant_satellites_participant",
+        ),
+        Index(
+            "idx_event_registrant_satellites_directory",
+            "directory_id",
+            "event_id",
+        ),
+        Index(
+            "idx_event_registrant_satellites_source_batch",
+            "event_id",
+            "source_batch_id",
+        ),
+        Index(
+            "idx_event_registrant_satellites_updater",
+            "updated_by_user_id",
+        ),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    attestation_participant_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    directory_id: Mapped[int] = mapped_column(
+        ID_TYPE,
+        ForeignKey("satellite_directory.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    assignment_source: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_batch_id: Mapped[Optional[int]] = mapped_column(ID_TYPE)
+    updated_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ID_TYPE,
+        ForeignKey("users.id", ondelete="SET NULL"),
+    )
+    created_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+    updated_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+    updated_by: Mapped[Optional[User]] = relationship(
+        foreign_keys=[updated_by_user_id]
+    )
+
+
+class EventRegistrantSatelliteAudit(Base):
+    """Immutable audit trail for administrator assignment decisions."""
+
+    __tablename__ = "event_registrant_satellite_audits"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["event_id", "attestation_participant_id"],
+            ["attestation_participants.event_id", "attestation_participants.id"],
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "action IN ('manual','reset')",
+            name="ck_event_registrant_satellite_audits_action",
+        ),
+        Index(
+            "idx_event_registrant_satellite_audits_participant",
+            "event_id",
+            "attestation_participant_id",
+            "created_at",
+        ),
+        Index(
+            "idx_event_registrant_satellite_audits_actor",
+            "changed_by_user_id",
+        ),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    attestation_participant_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    previous_directory_id: Mapped[Optional[int]] = mapped_column(
+        ID_TYPE,
+        ForeignKey("satellite_directory.id", ondelete="SET NULL"),
+    )
+    previous_directory_name: Mapped[Optional[str]] = mapped_column(String(512))
+    new_directory_id: Mapped[Optional[int]] = mapped_column(
+        ID_TYPE,
+        ForeignKey("satellite_directory.id", ondelete="SET NULL"),
+    )
+    new_directory_name: Mapped[Optional[str]] = mapped_column(String(512))
+    changed_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ID_TYPE,
+        ForeignKey("users.id", ondelete="SET NULL"),
+    )
+    created_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+
 class Satellite(Base):
     __tablename__ = "satellites"
     __table_args__ = (

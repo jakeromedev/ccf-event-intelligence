@@ -564,6 +564,44 @@ def _insert_issues(db, batch_id, issues):
     )
 
 
+def _manual_assignment_snapshot(db, event_id):
+    """Capture import-protected fields for existing manual assignments."""
+    return {
+        row["id"]: (
+            row["attestation_participant_id"],
+            row["directory_id"],
+            row["assignment_source"],
+            row["source_batch_id"],
+            row["updated_by_user_id"],
+            row["created_at"],
+            row["updated_at"],
+        )
+        for row in db.execute(
+            """
+            SELECT id, attestation_participant_id, directory_id,
+                   assignment_source, source_batch_id, updated_by_user_id,
+                   created_at, updated_at
+            FROM event_registrant_satellites
+            WHERE event_id = ? AND assignment_source = 'manual'
+            ORDER BY id
+            """,
+            (event_id,),
+        ).fetchall()
+    }
+
+
+def _assert_manual_assignments_preserved(db, event_id, protected):
+    """Reject an import transaction that mutates a pre-existing manual row."""
+    if not protected:
+        return
+    current = _manual_assignment_snapshot(db, event_id)
+    if any(current.get(assignment_id) != values for assignment_id, values in protected.items()):
+        raise RuntimeError(
+            "Registration import attempted to change a protected manual "
+            "Satellite assignment."
+        )
+
+
 def process_batch(db, batch_id):
     batch = db.execute("SELECT * FROM import_batches WHERE id = ?", (batch_id,)).fetchone()
     if not batch or batch["status"] != "validated":
@@ -593,6 +631,9 @@ def process_batch(db, batch_id):
     # Serialize replacement of an Event's active batch. The checked nullable
     # unique column remains the final database-level guard against concurrent writers.
     db.lock_event(batch["event_id"])
+    protected_manual_assignments = _manual_assignment_snapshot(
+        db, batch["event_id"]
+    )
     db.execute(
         "UPDATE import_batches SET status = 'processing', active_event_id = NULL WHERE id = ?",
         (batch_id,),
@@ -767,9 +808,13 @@ def process_batch(db, batch_id):
         _insert_issues(db, batch_id, quality_issues)
         rebuild_batch_curation(db, batch_id)
         reconcile_attestation_participants(db, batch["event_id"], batch_id)
-        # Application-owned attestation verification and registrant remark rows
-        # are intentionally outside the import mutation boundary. Reconciliation
-        # only attaches this batch's replaceable source rows to durable owners.
+        # Application-owned attestation verification, registrant remark, and
+        # manual Satellite assignment rows are outside the import mutation
+        # boundary. Reconciliation only attaches this batch's replaceable source
+        # rows to durable owners; imported Satellite evidence remains batch-scoped.
+        _assert_manual_assignments_preserved(
+            db, batch["event_id"], protected_manual_assignments
+        )
         _set_active_batch(db, batch["event_id"], batch_id)
         db.commit()
     except Exception as exc:

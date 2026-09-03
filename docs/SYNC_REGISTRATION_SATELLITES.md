@@ -95,3 +95,6 @@ answers are deliberately excluded from synchronization logs.
 
 Both routes use the application's CSRF protection and Satellite Settings
 management authorization.
+Registrant-level manual overrides are stored separately and always take
+precedence over these shared imported links. See
+[Manual Registrant Satellite Overrides](MANUAL_REGISTRANT_SATELLITE_OVERRIDES.md).

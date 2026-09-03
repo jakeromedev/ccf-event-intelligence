@@ -17,6 +17,7 @@ from .satellite_settings import (
 
 READY_TO_SYNC = "Ready to Sync"
 ALREADY_SYNCED = "Already Synced"
+MANUAL_PROTECTED = "Manual Assignment — Protected"
 SATELLITE_NOT_CONFIGURED = "Satellite Not Configured"
 HUB_NOT_FOUND = "Hub Not Found"
 MISSING_SATELLITE = "Missing Satellite"
@@ -25,6 +26,7 @@ AMBIGUOUS = "Ambiguous"
 SYNC_STATUSES = (
     READY_TO_SYNC,
     ALREADY_SYNCED,
+    MANUAL_PROTECTED,
     SATELLITE_NOT_CONFIGURED,
     HUB_NOT_FOUND,
     MISSING_SATELLITE,
@@ -121,7 +123,11 @@ def _result(
             else None
         ),
         "status": status,
-        "reason": None if status in (READY_TO_SYNC, ALREADY_SYNCED) else status,
+        "reason": (
+            None
+            if status in (READY_TO_SYNC, ALREADY_SYNCED, MANUAL_PROTECTED)
+            else status
+        ),
     }
 
 
@@ -290,6 +296,26 @@ def analyze_event_satellite_sync(db, event_id):
         """,
         (batch["id"],),
     ).fetchall()
+    manual_assignments = {
+        row["registrant_id"]: {
+            "directory_id": row["directory_id"],
+            "satellite_name": row["satellite_name"],
+        }
+        for row in db.execute(
+            """
+            SELECT owner.registrant_id, assignment.directory_id,
+                   directory.name satellite_name
+            FROM attestation_participant_registrants owner
+            JOIN event_registrant_satellites assignment
+              ON assignment.event_id = owner.event_id
+             AND assignment.attestation_participant_id = owner.attestation_participant_id
+             AND assignment.assignment_source = 'manual'
+            JOIN satellite_directory directory ON directory.id = assignment.directory_id
+            WHERE owner.event_id = ? AND owner.batch_id = ?
+            """,
+            (event_id, batch["id"]),
+        ).fetchall()
+    }
 
     resolutions = []
     by_imported_id = defaultdict(list)
@@ -301,6 +327,11 @@ def analyze_event_satellite_sync(db, event_id):
         resolution = resolve_registration_satellite(
             registration, imported, hubs_by_name, satellites_by_hub_and_name
         )
+        manual_assignment = manual_assignments.get(registration["id"])
+        if manual_assignment is not None:
+            resolution["status"] = MANUAL_PROTECTED
+            resolution["reason"] = None
+            resolution["manual_assignment"] = manual_assignment
         resolutions.append(resolution)
         if imported is not None:
             by_imported_id[imported["id"]].append(resolution)
@@ -308,21 +339,27 @@ def analyze_event_satellite_sync(db, event_id):
     entries = []
     for imported in imported_rows:
         represented = by_imported_id.get(imported["id"], [])
+        unprotected = [
+            item for item in represented if item["status"] != MANUAL_PROTECTED
+        ]
         if not represented:
             status = MISSING_SATELLITE
             representative = None
-        elif _ambiguous_aggregate(represented):
-            status = AMBIGUOUS
+        elif not unprotected:
+            status = MANUAL_PROTECTED
             representative = represented[0]
-            for item in represented:
+        elif _ambiguous_aggregate(unprotected):
+            status = AMBIGUOUS
+            representative = unprotected[0]
+            for item in unprotected:
                 item["status"] = AMBIGUOUS
                 item["reason"] = AMBIGUOUS
         else:
-            representative = represented[0]
-            statuses = {item["status"] for item in represented}
+            representative = unprotected[0]
+            statuses = {item["status"] for item in unprotected}
             status = representative["status"] if len(statuses) == 1 else AMBIGUOUS
             if status == AMBIGUOUS:
-                for item in represented:
+                for item in unprotected:
                     item["status"] = AMBIGUOUS
                     item["reason"] = AMBIGUOUS
         entries.append(
@@ -342,7 +379,11 @@ def analyze_event_satellite_sync(db, event_id):
                     representative["canonical_satellite"] if representative else None
                 ),
                 "status": status,
-                "reason": None if status in (READY_TO_SYNC, ALREADY_SYNCED) else status,
+                "reason": (
+                    None
+                    if status in (READY_TO_SYNC, ALREADY_SYNCED, MANUAL_PROTECTED)
+                    else status
+                ),
                 "registrations": represented,
             }
         )
@@ -428,7 +469,7 @@ def execute_event_satellite_sync(db, event_id):
         "not_synced_count": sum(
             count
             for status, count in plan["counts"].items()
-            if status not in (READY_TO_SYNC, ALREADY_SYNCED)
+            if status not in (READY_TO_SYNC, ALREADY_SYNCED, MANUAL_PROTECTED)
         ),
         "plan": plan,
     }

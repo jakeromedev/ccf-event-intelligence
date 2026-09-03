@@ -300,24 +300,43 @@ class AuthenticationTests(unittest.TestCase):
         self.assertIn(b"You have been logged out", logged_out.data)
         self.assertEqual(302, self.client.get("/events").status_code)
 
-    def test_analytics_pages_and_aggregate_apis_require_approved_authentication(self):
+    def test_analytics_is_hidden_and_denied_for_standard_users(self):
         with self.app.app_context():
             db = get_db()
             event_a = db.execute("INSERT INTO events (name) VALUES ('Analytics A')").lastrowid
             event_b = db.execute("INSERT INTO events (name) VALUES ('Analytics B')").lastrowid
             db.commit()
-        for path in (
+        analytics_paths = (
             "/events/{}/analytics".format(event_a),
             "/api/events/{}/analytics".format(event_a),
             "/api/events/{}/analytics/trends".format(event_a),
             "/analytics/compare?events={},{}".format(event_a, event_b),
             "/api/analytics/compare?events={},{}".format(event_a, event_b),
-        ):
+        )
+        for path in analytics_paths:
             with self.subTest(path=path):
                 self.assertEqual(302, self.client.get(path).status_code)
 
         self.create_user("analytics-operator")
         self.login("analytics-operator", "StrongPassword12!")
+        event_page = self.client.get("/events/{}".format(event_a))
+        self.assertEqual(200, event_page.status_code)
+        self.assertNotIn(
+            'href="/events/{}/analytics"'.format(event_a).encode("utf-8"),
+            event_page.data,
+        )
+        for path in analytics_paths:
+            with self.subTest(role="standard", path=path):
+                self.assertEqual(403, self.client.get(path).status_code)
+
+        self.logout()
+        _, admin_password = self.initialize_admin()
+        self.login("admin", admin_password)
+        admin_page = self.client.get("/events/{}".format(event_a))
+        self.assertIn(
+            'href="/events/{}/analytics"'.format(event_a).encode("utf-8"),
+            admin_page.data,
+        )
         self.assertEqual(
             200, self.client.get("/api/events/{}/analytics".format(event_a)).status_code
         )
@@ -413,6 +432,24 @@ class AuthenticationTests(unittest.TestCase):
                     "hub_group_id": 1,
                     "name": "Denied Hub",
                 },
+            ).status_code,
+        )
+        self.assertEqual(
+            403,
+            self.client.post(
+                "/satellites/settings/registrants/1/satellite",
+                data={
+                    "csrf_token": token,
+                    "event_id": event_id,
+                    "directory_id": 1,
+                },
+            ).status_code,
+        )
+        self.assertEqual(
+            403,
+            self.client.post(
+                "/satellites/settings/registrants/1/satellite/reset",
+                data={"csrf_token": token, "event_id": event_id},
             ).status_code,
         )
 

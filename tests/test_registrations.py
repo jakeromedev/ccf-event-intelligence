@@ -1859,12 +1859,12 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
         self.assertNotIn(b'data-attestation-save', standard_page.data)
         for label in (
             b">Dashboard</span>",
-            b">Analytics</span>",
             b">Registrations</span>",
             b">Satellites</span>",
         ):
             self.assertIn(label, standard_page.data)
         for label in (
+            b">Analytics</span>",
             b">Data Quality</span>",
             b">Imports</span>",
             b">Admin Tables</span>",

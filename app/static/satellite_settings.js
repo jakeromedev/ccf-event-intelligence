@@ -264,12 +264,97 @@
     const explorerContent = explorer?.querySelector("[data-explorer-content]");
     const explorerTitle = explorer?.querySelector("[data-explorer-title]");
     const explorerBreadcrumb = explorer?.querySelector("[data-explorer-breadcrumb]");
-    const statusClass = (row) => row.needs_review ? "review" : row.status === "Already Synced" ? "synced" : "ready";
+    const assignmentDialog = document.querySelector("[data-registrant-assignment-dialog]");
+    const assignmentForm = assignmentDialog?.querySelector("[data-registrant-assignment-form]");
+    const assignmentSelect = assignmentDialog?.querySelector("[data-registrant-assignment-select]");
+    const assignmentResetButton = assignmentDialog?.querySelector("[data-assignment-reset-open]");
+    const resetDialog = document.querySelector("[data-assignment-reset-dialog]");
+    const resetForm = resetDialog?.querySelector("[data-assignment-reset-form]");
+    let assignmentReturnFocus = null;
+    let currentAssignmentTrigger = null;
+    const statusClass = (row) => row.needs_review ? "review" : (row.status === "Already Synced" || row.is_manual) ? "synced" : "ready";
     const makeCell = (value, tag = "td") => {
         const cell = document.createElement(tag);
         cell.textContent = value || "—";
         return cell;
     };
+    const makeLocationCell = (name, hub) => {
+        const cell = document.createElement("td");
+        const strong = document.createElement("strong");
+        const small = document.createElement("small");
+        strong.textContent = name || "—";
+        small.textContent = hub || "—";
+        cell.append(strong, small);
+        return cell;
+    };
+    const closeAssignmentDialog = () => {
+        if (!assignmentDialog?.open) return;
+        assignmentDialog.close();
+        assignmentReturnFocus?.focus();
+        assignmentReturnFocus = null;
+    };
+    const openAssignmentDialog = (trigger) => {
+        if (!assignmentDialog || !assignmentForm || !assignmentSelect || !trigger.dataset.participantId) return;
+        assignmentReturnFocus = trigger;
+        currentAssignmentTrigger = trigger;
+        assignmentForm.action = assignmentForm.dataset.actionTemplate.replace(
+            /\/0\/satellite$/,
+            `/${trigger.dataset.participantId}/satellite`,
+        );
+        assignmentDialog.querySelector("[data-assignment-participant]").textContent = trigger.dataset.participantName || "this registrant";
+        assignmentDialog.querySelector("[data-assignment-imported]").textContent = trigger.dataset.importedSatellite || "—";
+        assignmentDialog.querySelector("[data-assignment-effective]").textContent = trigger.dataset.effectiveSatellite || "Unassigned";
+        const auditRow = assignmentDialog.querySelector("[data-assignment-audit-row]");
+        const audit = assignmentDialog.querySelector("[data-assignment-audit]");
+        const isManual = trigger.dataset.isManual === "true";
+        assignmentResetButton.hidden = !isManual;
+        auditRow.hidden = !isManual || !trigger.dataset.updatedBy;
+        audit.textContent = trigger.dataset.updatedBy
+            ? `${trigger.dataset.updatedBy}${trigger.dataset.updatedAt ? ` · ${trigger.dataset.updatedAt}` : ""}`
+            : "—";
+        assignmentSelect.value = trigger.dataset.directoryId || "";
+        assignmentDialog.showModal();
+        requestAnimationFrame(() => assignmentSelect.focus());
+    };
+    const bindAssignmentTriggers = (root) => root?.querySelectorAll("[data-registrant-assignment-open]").forEach((trigger) => {
+        trigger.addEventListener("click", () => openAssignmentDialog(trigger));
+    });
+    bindAssignmentTriggers(document);
+    assignmentDialog?.querySelectorAll("[data-registrant-assignment-close]").forEach((button) => {
+        button.addEventListener("click", closeAssignmentDialog);
+    });
+    assignmentDialog?.addEventListener("click", (event) => {
+        if (event.target === assignmentDialog) closeAssignmentDialog();
+    });
+    assignmentDialog?.addEventListener("cancel", (event) => {
+        event.preventDefault();
+        closeAssignmentDialog();
+    });
+    const closeResetDialog = () => {
+        if (!resetDialog?.open) return;
+        resetDialog.close();
+        assignmentResetButton?.focus();
+    };
+    assignmentResetButton?.addEventListener("click", () => {
+        if (!resetDialog || !resetForm || !currentAssignmentTrigger) return;
+        resetForm.action = resetForm.dataset.actionTemplate.replace(
+            /\/0\/satellite\/reset$/,
+            `/${currentAssignmentTrigger.dataset.participantId}/satellite/reset`,
+        );
+        resetDialog.querySelector("[data-reset-participant]").textContent = currentAssignmentTrigger.dataset.participantName || "this registrant";
+        resetDialog.showModal();
+        requestAnimationFrame(() => resetDialog.querySelector("#registrant-satellite-reset-title").focus());
+    });
+    resetDialog?.querySelectorAll("[data-assignment-reset-close]").forEach((button) => {
+        button.addEventListener("click", closeResetDialog);
+    });
+    resetDialog?.addEventListener("click", (event) => {
+        if (event.target === resetDialog) closeResetDialog();
+    });
+    resetDialog?.addEventListener("cancel", (event) => {
+        event.preventDefault();
+        closeResetDialog();
+    });
     const renderExplorerBreadcrumb = (state, registrantsOpen) => {
         explorerBreadcrumb.replaceChildren();
         const root = document.createElement("button");
@@ -352,7 +437,7 @@
         searchInput.setAttribute("aria-label", "Search registrants in this Satellite");
         const status = document.createElement("select");
         status.setAttribute("aria-label", "Filter registrants by sync status");
-        [["all", "All statuses"], ["synced", "Synced"], ["needs_review", "Needs Review"], ["ready_to_sync", "Ready to Sync"]].forEach(([value, label]) => {
+        [["all", "All statuses"], ["synced", "Synced"], ["manual_protected", "Manual Assignment — Protected"], ["needs_review", "Needs Review"], ["ready_to_sync", "Ready to Sync"]].forEach(([value, label]) => {
             const option = document.createElement("option");
             option.value = value;
             option.textContent = label;
@@ -376,18 +461,54 @@
             const table = document.createElement("table");
             const head = document.createElement("thead");
             const headRow = document.createElement("tr");
-            ["Participant", "Registration", "Hub", "Satellite", "Status"].forEach((label) => headRow.append(makeCell(label, "th")));
+            ["Participant", "Registration", "Imported Satellite", "Effective Satellite", "Assignment Source", "Sync Status", "Action"].forEach((label) => headRow.append(makeCell(label, "th")));
             head.append(headRow);
             const body = document.createElement("tbody");
             payload.rows.forEach((row) => {
                 const tr = document.createElement("tr");
-                tr.append(makeCell(row.participant), makeCell(row.identifier), makeCell(row.hub), makeCell(row.satellite));
+                tr.append(
+                    makeCell(row.participant),
+                    makeCell(row.identifier),
+                    makeLocationCell(row.imported_satellite, row.imported_hub),
+                    makeLocationCell(row.effective_satellite, row.effective_hub),
+                );
+                const assignmentCell = document.createElement("td");
+                const assignmentBadge = document.createElement("span");
+                assignmentBadge.className = `satellite-assignment-source is-${row.assignment_source || "unassigned"}`;
+                assignmentBadge.textContent = row.assignment_source_label;
+                if (row.is_manual) assignmentBadge.title = "This manual assignment takes precedence over imported Satellite data.";
+                assignmentCell.append(assignmentBadge);
+                tr.append(assignmentCell);
                 const statusCell = document.createElement("td");
                 const badge = document.createElement("span");
                 badge.className = `satellite-status is-${statusClass(row)}`;
                 badge.textContent = row.status;
                 statusCell.append(badge);
                 tr.append(statusCell);
+                const actionCell = document.createElement("td");
+                if (row.attestation_participant_id) {
+                    const edit = document.createElement("button");
+                    edit.type = "button";
+                    edit.className = "button secondary compact";
+                    edit.textContent = "Edit Satellite";
+                    edit.dataset.registrantAssignmentOpen = "";
+                    edit.dataset.participantId = row.attestation_participant_id;
+                    edit.dataset.participantName = row.participant;
+                    edit.dataset.importedSatellite = row.imported_satellite;
+                    edit.dataset.effectiveSatellite = row.effective_satellite;
+                    edit.dataset.directoryId = row.satellite_id || "";
+                    edit.dataset.isManual = row.is_manual ? "true" : "false";
+                    edit.dataset.updatedBy = row.assignment_updated_by || "";
+                    edit.dataset.updatedAt = row.assignment_updated_at || "";
+                    edit.addEventListener("click", () => openAssignmentDialog(edit));
+                    actionCell.append(edit);
+                } else {
+                    const unavailable = document.createElement("span");
+                    unavailable.className = "satellite-unresolved";
+                    unavailable.textContent = "Edit unavailable";
+                    actionCell.append(unavailable);
+                }
+                tr.append(actionCell);
                 body.append(tr);
             });
             table.append(head, body);

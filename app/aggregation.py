@@ -8,7 +8,7 @@ from .normalization import (
     normalize_gender,
     normalize_life_stage,
 )
-from .satellite_analytics import canonical_satellite_metrics
+from .satellite_analytics import EFFECTIVE_ASSOCIATIONS_CTE, canonical_satellite_metrics
 
 
 def active_batch(db, event_id):
@@ -318,19 +318,23 @@ def satellite_dataset_metrics(db, event_id, batch_id):
     counts = {dataset["id"]: 0 for dataset in datasets}
     if batch_id is not None:
         count_rows = db.execute(
-            """
+            EFFECTIVE_ASSOCIATIONS_CTE
+            + """
             SELECT d.id dataset_id, COUNT(DISTINCT cr.id) actual_participants
             FROM satellite_datasets d
             LEFT JOIN satellite_dataset_satellites dss
               ON dss.satellite_dataset_id = d.id AND dss.event_id = d.event_id
-            LEFT JOIN curated_registrant_satellites crs
-              ON crs.satellite_id = dss.satellite_id
-             AND crs.event_id = d.event_id
-             AND crs.batch_id = ?
+            LEFT JOIN satellites selected
+              ON selected.id = dss.satellite_id
+             AND selected.event_id = dss.event_id
+            LEFT JOIN effective_associations association
+              ON association.event_id = d.event_id
+             AND association.batch_id = ?
+             AND association.directory_id = selected.directory_id
             LEFT JOIN curated_registrants cr
-              ON cr.id = crs.curated_registrant_id
-             AND cr.event_id = crs.event_id
-             AND cr.batch_id = crs.batch_id
+              ON cr.id = association.curated_registrant_id
+             AND cr.event_id = association.event_id
+             AND cr.batch_id = association.batch_id
              AND cr.registration_type = 'participant'
             WHERE d.event_id = ?
             GROUP BY d.id
@@ -723,6 +727,13 @@ def satellite_registrants(
     if not directory_id:
         return None
 
+    batch = db.execute(
+        "SELECT event_id FROM import_batches WHERE id = ?", (batch_id,)
+    ).fetchone()
+    if batch is None:
+        return None
+    event_id = batch["event_id"]
+
     metadata = db.execute(
         """
         SELECT directory.id, directory.name satellite_name,
@@ -736,9 +747,14 @@ def satellite_registrants(
           AND EXISTS (
               SELECT 1 FROM satellites imported
               WHERE imported.batch_id = ? AND imported.directory_id = directory.id
+              UNION ALL
+              SELECT 1 FROM event_registrant_satellites assignment
+              WHERE assignment.event_id = ?
+                AND assignment.assignment_source = 'manual'
+                AND assignment.directory_id = directory.id
           )
         """,
-        (directory_id, batch_id),
+        (directory_id, batch_id, event_id),
     ).fetchone()
     if metadata is None:
         return None
@@ -771,19 +787,46 @@ def satellite_registrants(
         """.format(participant_name=participant_name)
         search_params = ["%{}%".format(query)] * 3
 
-    roster_sql = """
+    roster_template = """
         WITH matching AS (
-            SELECT DISTINCT curated.id
-            FROM satellites imported
-            JOIN curated_registrant_satellites association
-              ON association.satellite_id = imported.id
-             AND association.batch_id = imported.batch_id
-             AND association.event_id = imported.event_id
-            JOIN curated_registrants curated
-              ON curated.id = association.curated_registrant_id
-             AND curated.batch_id = imported.batch_id
-             AND curated.event_id = imported.event_id
-            WHERE imported.batch_id = ? AND imported.directory_id = ?
+            SELECT curated.id
+            FROM curated_registrants curated
+            WHERE curated.batch_id = ? AND (
+                EXISTS (
+                    SELECT 1
+                    FROM curated_registrant_sources owner_source
+                    JOIN attestation_participant_registrants owner
+                      ON owner.batch_id = owner_source.batch_id
+                     AND owner.registrant_id = owner_source.registrant_id
+                    JOIN event_registrant_satellites assignment
+                      ON assignment.event_id = owner.event_id
+                     AND assignment.attestation_participant_id = owner.attestation_participant_id
+                    WHERE owner_source.curated_registrant_id = curated.id
+                      AND assignment.assignment_source = 'manual'
+                      AND assignment.directory_id = ?
+                ) OR (
+                    NOT EXISTS (
+                        SELECT 1
+                        FROM curated_registrant_sources owner_source
+                        JOIN attestation_participant_registrants owner
+                          ON owner.batch_id = owner_source.batch_id
+                         AND owner.registrant_id = owner_source.registrant_id
+                        JOIN event_registrant_satellites assignment
+                          ON assignment.event_id = owner.event_id
+                         AND assignment.attestation_participant_id = owner.attestation_participant_id
+                        WHERE owner_source.curated_registrant_id = curated.id
+                          AND assignment.assignment_source = 'manual'
+                    )
+                    AND EXISTS (
+                        SELECT 1
+                        FROM curated_registrant_satellites association
+                        JOIN satellites imported ON imported.id = association.satellite_id
+                        WHERE association.curated_registrant_id = curated.id
+                          AND imported.batch_id = ?
+                          AND imported.directory_id = ?
+                    )
+                )
+            )
         ), representative AS (
             SELECT source.curated_registrant_id, MIN(source.registrant_id) registrant_id
             FROM curated_registrant_sources source
@@ -796,22 +839,22 @@ def satellite_registrants(
         JOIN representative rep ON rep.curated_registrant_id = matching.id
         JOIN registrants raw ON raw.id = rep.registrant_id
         WHERE 1 = 1 {search_sql}
-    """.format(search_sql=search_sql)
-    base_params = [batch_id, directory_id, batch_id] + search_params
+    """
+    roster_sql = roster_template.format(search_sql=search_sql)
+    unfiltered_roster_sql = roster_template.format(search_sql="")
+    base_params = [
+        batch_id,
+        directory_id,
+        batch_id,
+        directory_id,
+        batch_id,
+    ] + search_params
     total = db.execute(
         "SELECT COUNT(*) FROM ({}) roster".format(roster_sql), base_params
     ).fetchone()[0]
     unfiltered_total = db.execute(
-        """
-        SELECT COUNT(DISTINCT association.curated_registrant_id)
-        FROM satellites imported
-        JOIN curated_registrant_satellites association
-          ON association.satellite_id = imported.id
-         AND association.batch_id = imported.batch_id
-         AND association.event_id = imported.event_id
-        WHERE imported.batch_id = ? AND imported.directory_id = ?
-        """,
-        (batch_id, directory_id),
+        "SELECT COUNT(*) FROM ({}) roster".format(unfiltered_roster_sql),
+        base_params[:5],
     ).fetchone()[0]
     if not unfiltered_total:
         return None
@@ -1095,7 +1138,46 @@ def curated_registrant_detail(db, batch_id, curated_registrant_id):
         """,
         (curated_registrant_id, batch_id),
     ).fetchall()
-    return {"curated_registrant": dict(curated), "source_registrations": [dict(row) for row in sources]}
+    effective_satellites = db.execute(
+        """
+        SELECT DISTINCT directory.id, directory.name,
+               hubs.id hub_id, hubs.name hub_name,
+               'manual' assignment_source
+        FROM curated_registrant_sources source
+        JOIN attestation_participant_registrants owner
+          ON owner.batch_id = source.batch_id
+         AND owner.registrant_id = source.registrant_id
+        JOIN event_registrant_satellites assignment
+          ON assignment.event_id = owner.event_id
+         AND assignment.attestation_participant_id = owner.attestation_participant_id
+         AND assignment.assignment_source = 'manual'
+        JOIN satellite_directory directory ON directory.id = assignment.directory_id
+        LEFT JOIN satellite_hubs hubs ON hubs.id = directory.hub_id
+        WHERE source.curated_registrant_id = ? AND source.batch_id = ?
+        ORDER BY directory.name
+        """,
+        (curated_registrant_id, batch_id),
+    ).fetchall()
+    if not effective_satellites:
+        effective_satellites = db.execute(
+            """
+            SELECT DISTINCT directory.id, directory.name,
+                   hubs.id hub_id, hubs.name hub_name,
+                   'automatic' assignment_source
+            FROM curated_registrant_satellites association
+            JOIN satellites imported ON imported.id = association.satellite_id
+            JOIN satellite_directory directory ON directory.id = imported.directory_id
+            LEFT JOIN satellite_hubs hubs ON hubs.id = directory.hub_id
+            WHERE association.curated_registrant_id = ? AND association.batch_id = ?
+            ORDER BY directory.name
+            """,
+            (curated_registrant_id, batch_id),
+        ).fetchall()
+    return {
+        "curated_registrant": dict(curated),
+        "source_registrations": [dict(row) for row in sources],
+        "effective_satellites": [dict(row) for row in effective_satellites],
+    }
 
 
 def satellite_curation_detail(db, batch_id, satellite_id):

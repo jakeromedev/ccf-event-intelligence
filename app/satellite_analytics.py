@@ -8,15 +8,38 @@ def _percentage(value, total):
 
 
 HUB_CHART_COLORS = (
-    "#007d8a",
-    "#00a6b2",
-    "#42b9b1",
-    "#77c8a5",
-    "#f0b35a",
-    "#e48764",
-    "#8c78b8",
-    "#78909c",
+    "#2563eb",
+    "#f97316",
+    "#16a34a",
+    "#7c3aed",
+    "#dc2626",
+    "#0891b2",
+    "#db2777",
+    "#ca8a04",
 )
+
+
+EFFECTIVE_ASSOCIATIONS_CTE = """
+WITH manual_curated AS (
+    SELECT DISTINCT source.curated_registrant_id, assignment.directory_id
+    FROM curated_registrant_sources source
+    JOIN attestation_participant_registrants owner
+      ON owner.batch_id = source.batch_id
+     AND owner.registrant_id = source.registrant_id
+    JOIN event_registrant_satellites assignment
+      ON assignment.event_id = owner.event_id
+     AND assignment.attestation_participant_id = owner.attestation_participant_id
+     AND assignment.assignment_source = 'manual'
+), effective_associations AS (
+    SELECT association.id, association.event_id, association.batch_id,
+           association.curated_registrant_id, association.satellite_id,
+           COALESCE(manual.directory_id, imported.directory_id) directory_id
+    FROM curated_registrant_satellites association
+    JOIN satellites imported ON imported.id = association.satellite_id
+    LEFT JOIN manual_curated manual
+      ON manual.curated_registrant_id = association.curated_registrant_id
+)
+"""
 
 
 def _rows(db, level, where_sql, params):
@@ -38,20 +61,18 @@ def _rows(db, level, where_sql, params):
     }
     select_identity, group_by = levels[level]
     return db.execute(
-        """
+        EFFECTIVE_ASSOCIATIONS_CTE
+        + """
         SELECT {select_identity},
                {hub_columns}
                {group_columns}
                COUNT(DISTINCT curated.id) registrants,
                COUNT(association.id) associations
-        FROM satellites imported
-        JOIN satellite_directory directory ON directory.id = imported.directory_id
+        FROM effective_associations association
+        JOIN satellites imported ON imported.id = association.satellite_id
+        JOIN satellite_directory directory ON directory.id = association.directory_id
         JOIN satellite_hubs hubs ON hubs.id = directory.hub_id
         JOIN hub_groups hub_group ON hub_group.id = hubs.hub_group_id
-        JOIN curated_registrant_satellites association
-          ON association.satellite_id = imported.id
-         AND association.batch_id = imported.batch_id
-         AND association.event_id = imported.event_id
         JOIN curated_registrants curated
           ON curated.id = association.curated_registrant_id
          AND curated.batch_id = imported.batch_id
@@ -137,6 +158,48 @@ def canonical_satellite_filter_options(db, batch_id):
             (batch_id,),
         ).fetchall()
     ]
+    manual_satellites = [
+        dict(row)
+        for row in db.execute(
+            """
+            SELECT DISTINCT directory.id, directory.name, directory.hub_id,
+                            hubs.hub_group_id group_id
+            FROM attestation_participant_registrants owner
+            JOIN event_registrant_satellites assignment
+              ON assignment.event_id = owner.event_id
+             AND assignment.attestation_participant_id = owner.attestation_participant_id
+             AND assignment.assignment_source = 'manual'
+            JOIN satellite_directory directory ON directory.id = assignment.directory_id
+            JOIN satellite_hubs hubs ON hubs.id = directory.hub_id
+            WHERE owner.batch_id = ?
+            ORDER BY LOWER(directory.name), directory.id
+            """,
+            (batch_id,),
+        ).fetchall()
+    ]
+    satellite_ids = {item["id"] for item in satellites}
+    satellites.extend(
+        item for item in manual_satellites if item["id"] not in satellite_ids
+    )
+    hub_ids = {item["id"] for item in hubs}
+    manual_hub_ids = {
+        item["hub_id"] for item in manual_satellites if item["hub_id"] not in hub_ids
+    }
+    if manual_hub_ids:
+        placeholders = ", ".join("?" for _identifier in manual_hub_ids)
+        hubs.extend(
+            dict(row)
+            for row in db.execute(
+                """
+                SELECT id, name, hub_group_id group_id
+                FROM satellite_hubs WHERE id IN ({})
+                ORDER BY LOWER(name), id
+                """.format(placeholders),
+                tuple(sorted(manual_hub_ids)),
+            ).fetchall()
+        )
+    hubs.sort(key=lambda item: (item["name"].casefold(), item["id"]))
+    satellites.sort(key=lambda item: (item["name"].casefold(), item["id"]))
     return {"groups": groups, "hubs": hubs, "satellites": satellites}
 
 
@@ -301,7 +364,8 @@ def canonical_satellite_metrics(
     where_sql, params = _where(db, batch_id, filters, query)
 
     totals = db.execute(
-        """
+        EFFECTIVE_ASSOCIATIONS_CTE
+        + """
         SELECT COUNT(DISTINCT CASE WHEN hub_group.id IS NOT NULL
                               THEN curated.id END) linked_registrants,
                COUNT(DISTINCT CASE WHEN hub_group.id IS NOT NULL
@@ -319,13 +383,14 @@ def canonical_satellite_metrics(
                                       AND association.id IS NOT NULL
                             THEN 1 ELSE 0 END), 0) needs_mapping_associations
         FROM satellites imported
-        LEFT JOIN satellite_directory directory ON directory.id = imported.directory_id
-        LEFT JOIN satellite_hubs hubs ON hubs.id = directory.hub_id
-        LEFT JOIN hub_groups hub_group ON hub_group.id = hubs.hub_group_id
-        LEFT JOIN curated_registrant_satellites association
+        LEFT JOIN effective_associations association
           ON association.satellite_id = imported.id
          AND association.batch_id = imported.batch_id
          AND association.event_id = imported.event_id
+        LEFT JOIN satellite_directory directory
+          ON directory.id = COALESCE(association.directory_id, imported.directory_id)
+        LEFT JOIN satellite_hubs hubs ON hubs.id = directory.hub_id
+        LEFT JOIN hub_groups hub_group ON hub_group.id = hubs.hub_group_id
         LEFT JOIN curated_registrants curated
           ON curated.id = association.curated_registrant_id
          AND curated.batch_id = imported.batch_id
@@ -444,7 +509,8 @@ def canonical_satellite_metrics(
         groups.append(group)
 
     unresolved_rows = db.execute(
-        """
+        EFFECTIVE_ASSOCIATIONS_CTE
+        + """
         SELECT imported.id, imported.name source_name,
                imported.source_record_count, directory.id directory_id,
                directory.name canonical_name, directory.hub_id,
@@ -453,13 +519,14 @@ def canonical_satellite_metrics(
                COUNT(DISTINCT curated.id) registrants,
                COUNT(association.id) associations
         FROM satellites imported
-        LEFT JOIN satellite_directory directory ON directory.id = imported.directory_id
-        LEFT JOIN satellite_hubs hubs ON hubs.id = directory.hub_id
-        LEFT JOIN hub_groups hub_group ON hub_group.id = hubs.hub_group_id
-        LEFT JOIN curated_registrant_satellites association
+        LEFT JOIN effective_associations association
           ON association.satellite_id = imported.id
          AND association.batch_id = imported.batch_id
          AND association.event_id = imported.event_id
+        LEFT JOIN satellite_directory directory
+          ON directory.id = COALESCE(association.directory_id, imported.directory_id)
+        LEFT JOIN satellite_hubs hubs ON hubs.id = directory.hub_id
+        LEFT JOIN hub_groups hub_group ON hub_group.id = hubs.hub_group_id
         LEFT JOIN curated_registrants curated
           ON curated.id = association.curated_registrant_id
          AND curated.batch_id = imported.batch_id

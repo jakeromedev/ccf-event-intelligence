@@ -50,6 +50,11 @@ from .registrations import (
     resolve_registrant_remark,
     update_attestation_verification,
 )
+from .registrant_satellite_assignments import (
+    RegistrantSatelliteAssignmentError,
+    reset_manual_satellite_assignment,
+    set_manual_satellite_assignment,
+)
 from .satellite_datasets import (
     create_satellite_dataset,
     delete_satellite_dataset,
@@ -72,6 +77,7 @@ from .satellite_settings import (
 from .satellite_settings_registrants import event_settings_registrants
 from .satellite_sync import (
     ALREADY_SYNCED,
+    MANUAL_PROTECTED,
     READY_TO_SYNC,
     SYNC_STATUSES,
     SatelliteSyncAnalysisError,
@@ -845,8 +851,151 @@ def satellite_settings_registrants():
     return jsonify(payload)
 
 
+@bp.post(
+    "/satellites/settings/registrants/"
+    "<int:attestation_participant_id>/satellite"
+)
+@satellite_settings_management_required
+def update_registrant_satellite_assignment(attestation_participant_id):
+    event_id = request.form.get("event_id", type=int)
+    if event_id is None:
+        abort(400)
+    get_event_or_404(event_id)
+    db = get_db()
+    try:
+        result = set_manual_satellite_assignment(
+            db,
+            event_id,
+            attestation_participant_id,
+            request.form.get("directory_id"),
+            updated_by_user_id=getattr(current_user, "id", None),
+        )
+        db.commit()
+    except RegistrantSatelliteAssignmentError as exc:
+        db.rollback()
+        flash(str(exc), "error")
+        return redirect(
+            safe_internal_path(request.form.get("return_to"))
+            or url_for(
+                "dashboard.satellite_settings",
+                event_id=event_id,
+                view="registrants",
+            )
+        )
+    except IntegrityError:
+        db.rollback()
+        flash(
+            "The registrant or Satellite changed while this assignment was being saved.",
+            "error",
+        )
+        return redirect(
+            safe_internal_path(request.form.get("return_to"))
+            or url_for(
+                "dashboard.satellite_settings",
+                event_id=event_id,
+                view="registrants",
+            )
+        )
+
+    current_app.logger.info(
+        "registrant_satellite_manually_assigned",
+        extra={
+            "event": "registrant_satellite_manually_assigned",
+            "event_id": event_id,
+            "attestation_participant_id": attestation_participant_id,
+            "directory_id": result["directory_id"],
+            "user_id": getattr(current_user, "id", None),
+        },
+    )
+    flash(
+        "{} is now the manually assigned Satellite.".format(
+            result["satellite_name"]
+        ),
+        "success",
+    )
+    return redirect(
+        safe_internal_path(request.form.get("return_to"))
+        or url_for(
+            "dashboard.satellite_settings",
+            event_id=event_id,
+            view="registrants",
+        )
+    )
+
+
+@bp.post(
+    "/satellites/settings/registrants/"
+    "<int:attestation_participant_id>/satellite/reset"
+)
+@satellite_settings_management_required
+def reset_registrant_satellite_assignment(attestation_participant_id):
+    event_id = request.form.get("event_id", type=int)
+    if event_id is None:
+        abort(400)
+    get_event_or_404(event_id)
+    db = get_db()
+    try:
+        result = reset_manual_satellite_assignment(
+            db,
+            event_id,
+            attestation_participant_id,
+            updated_by_user_id=getattr(current_user, "id", None),
+        )
+        db.commit()
+    except RegistrantSatelliteAssignmentError as exc:
+        db.rollback()
+        flash(str(exc), "error")
+        return redirect(
+            safe_internal_path(request.form.get("return_to"))
+            or url_for(
+                "dashboard.satellite_settings",
+                event_id=event_id,
+                view="registrants",
+            )
+        )
+    except IntegrityError:
+        db.rollback()
+        flash("The assignment changed while the reset was being saved.", "error")
+        return redirect(
+            safe_internal_path(request.form.get("return_to"))
+            or url_for(
+                "dashboard.satellite_settings",
+                event_id=event_id,
+                view="registrants",
+            )
+        )
+
+    current_app.logger.info(
+        "registrant_satellite_manual_assignment_reset",
+        extra={
+            "event": "registrant_satellite_manual_assignment_reset",
+            "event_id": event_id,
+            "attestation_participant_id": attestation_participant_id,
+            "directory_id": result["directory_id"],
+            "user_id": getattr(current_user, "id", None),
+            "changed": result["changed"],
+        },
+    )
+    if result["changed"]:
+        flash("The manual Satellite override was reset.", "success")
+    else:
+        flash("The manual Satellite override was already reset.", "success")
+    return redirect(
+        safe_internal_path(request.form.get("return_to"))
+        or url_for(
+            "dashboard.satellite_settings",
+            event_id=event_id,
+            view="registrants",
+        )
+    )
+
+
 def _prepare_sync_review(plan, confirmation_token=None, completion=None):
-    failure_statuses = set(SYNC_STATUSES) - {READY_TO_SYNC, ALREADY_SYNCED}
+    failure_statuses = set(SYNC_STATUSES) - {
+        READY_TO_SYNC,
+        ALREADY_SYNCED,
+        MANUAL_PROTECTED,
+    }
     failures = [
         registration
         for registration in plan["registrations"]
@@ -854,6 +1003,10 @@ def _prepare_sync_review(plan, confirmation_token=None, completion=None):
     ]
     plan["ready_count"] = plan["counts"][READY_TO_SYNC]
     plan["already_synced_count"] = plan["counts"][ALREADY_SYNCED]
+    plan["manual_protected_count"] = sum(
+        registration["status"] == MANUAL_PROTECTED
+        for registration in plan["registrations"]
+    )
     plan["not_synced_count"] = sum(
         count
         for status, count in plan["counts"].items()
