@@ -8,7 +8,7 @@ from app.db import get_db, get_engine
 from app.importer import process_batch, store_validation, validate_batch
 from app.models import Base
 from app.registrant_satellite_assignments import set_manual_satellite_assignment
-from app.satellite_analytics import canonical_satellite_metrics
+from app.satellite_analytics import EFFECTIVE_ASSOCIATIONS_CTE, canonical_satellite_metrics
 from app.satellite_settings_registrants import event_settings_registrants
 from app.satellite_sync import (
     MANUAL_PROTECTED,
@@ -24,6 +24,11 @@ from tests.test_phase1 import (
 
 
 class RegistrantSatelliteAssignmentImportTests(unittest.TestCase):
+    def test_effective_assignment_cte_avoids_mysql_reserved_manual_alias(self):
+        self.assertNotIn("manual.directory_id", EFFECTIVE_ASSOCIATIONS_CTE)
+        self.assertNotIn("manual\n", EFFECTIVE_ASSOCIATIONS_CTE)
+        self.assertIn("manual_override", EFFECTIVE_ASSOCIATIONS_CTE)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         root = Path(self.temp.name)

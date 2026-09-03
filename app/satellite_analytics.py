@@ -33,11 +33,11 @@ WITH manual_curated AS (
 ), effective_associations AS (
     SELECT association.id, association.event_id, association.batch_id,
            association.curated_registrant_id, association.satellite_id,
-           COALESCE(manual.directory_id, imported.directory_id) directory_id
+           COALESCE(manual_override.directory_id, imported.directory_id) directory_id
     FROM curated_registrant_satellites association
     JOIN satellites imported ON imported.id = association.satellite_id
-    LEFT JOIN manual_curated manual
-      ON manual.curated_registrant_id = association.curated_registrant_id
+    LEFT JOIN manual_curated manual_override
+      ON manual_override.curated_registrant_id = association.curated_registrant_id
 )
 """
 
