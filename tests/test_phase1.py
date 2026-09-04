@@ -96,6 +96,13 @@ REGISTRANT_REGIONAL_B1G_FIELDS = [
     "Luzon North West Hub", "Luzon South Hub", "Mindanao South Hub",
     "Mindanao North Hub", "Visayas Hub", "Specify Icp Hub",
 ]
+REGISTRANT_EXPANDED_REGIONAL_B1G_FIELDS = [
+    *(
+        "Icp Hub" if field == "Specify Icp Hub" else field
+        for field in REGISTRANT_REGIONAL_B1G_FIELDS
+    ),
+    "Metro East Hub", "Metro West Hub", "Metro South Hub", "Main Hub",
+]
 
 
 def write_csv(path, fields, rows):
@@ -2467,6 +2474,32 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertEqual("Mindanao South", result.rows[0]["B1g Satellite Hub"])
         self.assertEqual("B1G Tagum", result.rows[0]["B1g Satellite"])
         self.assertNotIn("Bg Satellite Hub", result.rows[0])
+
+    def test_expanded_regional_b1g_registrants_variant_is_normalized_and_recognized(self):
+        rows = [
+            {
+                "ID": "1", "Event Name": "B1G Event", "Event Slug": "b1g-event",
+                "Registration Code": "R-1", "Ticket Code": "T-1", "Ticket Status": "Assigned",
+                "Bg Satellite Hub": "Metro East", "Metro East Hub": "B1G Antipolo",
+            },
+            {
+                "ID": "2", "Event Name": "B1G Event", "Event Slug": "b1g-event",
+                "Registration Code": "R-2", "Ticket Code": "T-2", "Ticket Status": "Assigned",
+                "Bg Satellite Hub": "ICP", "Icp Hub": "B1G Hong Kong",
+            },
+        ]
+        write_csv(self.paths["registrants"], REGISTRANT_EXPANDED_REGIONAL_B1G_FIELDS, rows)
+
+        result = validate_file(
+            "registrants", self.paths["registrants"].name, str(self.paths["registrants"])
+        )
+
+        self.assertEqual("valid", result.status)
+        self.assertEqual("registrants", result.detected_type)
+        self.assertEqual("B1G Antipolo", result.rows[0]["B1g Satellite"])
+        self.assertEqual("B1G Hong Kong", result.rows[1]["B1g Satellite"])
+        self.assertNotIn("Icp Hub", result.rows[1])
+        self.assertEqual("B1G Hong Kong", result.rows[1]["Specify Icp Hub"])
 
     def test_regional_b1g_registrants_process_regional_satellites(self):
         base = {

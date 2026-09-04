@@ -49,8 +49,16 @@ REGISTRANT_REGIONAL_SATELLITE_HEADERS = (
     "Specify Icp Hub",
 )
 
+REGISTRANT_OPTIONAL_REGIONAL_SATELLITE_HEADERS = (
+    "Metro East Hub",
+    "Metro West Hub",
+    "Metro South Hub",
+    "Main Hub",
+)
+
 REGISTRANT_HEADER_ALIASES = {
     "Bg Satellite Hub": "B1g Satellite Hub",
+    "Icp Hub": "Specify Icp Hub",
 }
 
 
@@ -175,9 +183,14 @@ def normalize_export_rows(headers, numbered_rows):
                 normalized_headers.append(canonical)
                 header_set.add(canonical)
 
+        regional_headers = REGISTRANT_REGIONAL_SATELLITE_HEADERS + tuple(
+            header
+            for header in REGISTRANT_OPTIONAL_REGIONAL_SATELLITE_HEADERS
+            if header in header_set
+        )
         hub_columns = {
             header.removesuffix(" Hub").casefold(): header
-            for header in REGISTRANT_REGIONAL_SATELLITE_HEADERS
+            for header in regional_headers
             if header != "Specify Icp Hub"
         }
         hub_columns["icp"] = "Specify Icp Hub"
@@ -186,7 +199,7 @@ def normalize_export_rows(headers, numbered_rows):
             hub = clean(row.get("B1g Satellite Hub"))
             regional_values = [
                 clean(row.get(header))
-                for header in REGISTRANT_REGIONAL_SATELLITE_HEADERS
+                for header in regional_headers
                 if clean(row.get(header))
             ]
             satellite = clean(row.get(hub_columns.get(hub.casefold(), "")))

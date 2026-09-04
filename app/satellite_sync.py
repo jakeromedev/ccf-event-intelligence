@@ -45,6 +45,10 @@ REGISTRATION_SATELLITE_FIELDS = {
     "mindanao north": "Mindanao North Hub",
     "visayas": "Visayas Hub",
     "icp": "Specify Icp Hub",
+    "metro east": "Metro East Hub",
+    "metro west": "Metro West Hub",
+    "metro south": "Metro South Hub",
+    "main": "Main Hub",
 }
 
 
