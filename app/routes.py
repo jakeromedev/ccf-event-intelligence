@@ -58,7 +58,6 @@ from .registrant_satellite_assignments import (
 from .satellite_datasets import (
     create_satellite_dataset,
     delete_satellite_dataset,
-    satellite_dataset_options,
     update_satellite_dataset,
     validate_satellite_dataset_form,
 )
@@ -75,6 +74,15 @@ from .satellite_settings import (
     update_satellite,
 )
 from .satellite_settings_registrants import event_settings_registrants
+from .satellite_target_categories import (
+    SatelliteTargetCategoryValidationError,
+    ensure_event_satellite_target_categories,
+    replace_satellite_target_memberships,
+    satellite_target_settings,
+    update_satellite_target_values,
+    validate_satellite_target_memberships,
+    validate_satellite_target_values,
+)
 from .satellite_sync import (
     ALREADY_SYNCED,
     MANUAL_PROTECTED,
@@ -215,6 +223,7 @@ def create_event():
 
     db = get_db()
     cursor = db.execute("INSERT INTO events (name) VALUES (?)", (name,))
+    ensure_event_satellite_target_categories(db, cursor.lastrowid)
     db.commit()
     flash("Event created. Upload the three required exports to build its dashboard.", "success")
     return redirect(url_for("dashboard.event_overview", event_id=cursor.lastrowid))
@@ -233,9 +242,6 @@ def event_overview(event_id):
         dashboard=dashboard,
         metrics=dashboard["overview"],
         profile=dashboard["participant_profile"],
-        satellite_options=satellite_dataset_options(
-            db, event_id, batch["id"] if batch else None
-        ),
     )
 
 
@@ -784,10 +790,13 @@ def _render_satellite_settings(
         active_batch=batch,
         hierarchy=satellite_settings_hierarchy(db),
         registrants=registrants,
+        target_settings=(
+            satellite_target_settings(db, event_id) if event is not None else None
+        ),
         settings_filters=filters,
         settings_search_scope=search_scope,
         settings_view=(request.args.get("view") if event is not None else "directory")
-        if request.args.get("view") in ("directory", "registrants")
+        if request.args.get("view") in ("directory", "registrants", "targets")
         else "directory",
         bulk_review=bulk_review,
         sync_review=sync_review,
@@ -849,6 +858,98 @@ def satellite_settings_registrants():
     ):
         abort(404)
     return jsonify(payload)
+
+
+@bp.post("/events/<int:event_id>/satellite-target-categories/memberships")
+@satellite_settings_management_required
+@event_mutation_required
+def update_satellite_target_category_memberships(event_id):
+    get_event_or_404(event_id)
+    db = get_db()
+    try:
+        memberships = validate_satellite_target_memberships(
+            db, event_id, request.form.getlist("category_assignments")
+        )
+        replace_satellite_target_memberships(db, event_id, memberships)
+        db.commit()
+    except SatelliteTargetCategoryValidationError as exc:
+        db.rollback()
+        flash("{} No changes were made.".format(exc), "error")
+        return redirect(
+            url_for("dashboard.satellite_settings", event_id=event_id, view="targets")
+            + "#dashboard-target-satellites"
+        )
+    except (IntegrityError, SQLAlchemyError):
+        db.rollback()
+        current_app.logger.exception(
+            "Dashboard Target Satellite membership update failed."
+        )
+        flash(
+            "Dashboard Target Satellites could not be saved. No changes were made.",
+            "error",
+        )
+        return redirect(
+            url_for("dashboard.satellite_settings", event_id=event_id, view="targets")
+            + "#dashboard-target-satellites"
+        )
+
+    current_app.logger.info(
+        "satellite_target_category_memberships_updated",
+        extra={
+            "event": "satellite_target_category_memberships_updated",
+            "event_id": event_id,
+            "membership_count": len(memberships),
+            "user_id": getattr(current_user, "id", None),
+        },
+    )
+    flash("Dashboard Target Satellites saved.", "success")
+    return redirect(
+        url_for("dashboard.satellite_settings", event_id=event_id, view="targets")
+        + "#dashboard-target-satellites"
+    )
+
+
+@bp.post("/events/<int:event_id>/satellite-target-categories/targets")
+@event_mutation_required
+def update_satellite_target_category_targets(event_id):
+    get_event_or_404(event_id)
+    db = get_db()
+    try:
+        values = validate_satellite_target_values(request.form)
+        update_satellite_target_values(db, event_id, values)
+        db.commit()
+    except SatelliteTargetCategoryValidationError as exc:
+        db.rollback()
+        flash("{} No changes were made.".format(exc), "error")
+        return redirect(
+            url_for("dashboard.event_overview", event_id=event_id)
+            + "#satellite-targets"
+        )
+    except SQLAlchemyError:
+        db.rollback()
+        current_app.logger.exception("Dashboard Satellite Targets update failed.")
+        flash(
+            "Dashboard Satellite Targets could not be saved. No changes were made.",
+            "error",
+        )
+        return redirect(
+            url_for("dashboard.event_overview", event_id=event_id)
+            + "#satellite-targets"
+        )
+
+    current_app.logger.info(
+        "satellite_target_category_targets_updated",
+        extra={
+            "event": "satellite_target_category_targets_updated",
+            "event_id": event_id,
+            "user_id": getattr(current_user, "id", None),
+        },
+    )
+    flash("Dashboard Satellite Targets saved.", "success")
+    return redirect(
+        url_for("dashboard.event_overview", event_id=event_id)
+        + "#satellite-targets"
+    )
 
 
 @bp.post(

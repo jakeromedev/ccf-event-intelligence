@@ -8,7 +8,11 @@ from .normalization import (
     normalize_gender,
     normalize_life_stage,
 )
-from .satellite_analytics import EFFECTIVE_ASSOCIATIONS_CTE, canonical_satellite_metrics
+from .satellite_analytics import (
+    EFFECTIVE_ASSOCIATIONS_CTE,
+    canonical_satellite_metrics,
+    satellite_target_category_analytics,
+)
 
 
 def active_batch(db, event_id):
@@ -368,6 +372,36 @@ def satellite_dataset_metrics(db, event_id, batch_id):
     return result
 
 
+def satellite_target_category_metrics(db, event_id, batch_id):
+    """Calculate the three fixed Dashboard Target vs Actual categories."""
+    analytics = satellite_target_category_analytics(db, event_id, batch_id)
+    result = []
+    for category in analytics["categories"]:
+        actual = category["actual_participants"]
+        target = category["participant_target"]
+        progress = registration_progress(actual, target)
+        result.append(
+            {
+                "key": category["key"],
+                "name": category["name"],
+                "participant_target": target,
+                "actual_participants": actual,
+                "satellite_count": category["satellite_count"],
+                "exceeded_amount": max(actual - target, 0),
+                **progress,
+            }
+        )
+    chart_max = max(
+        [1]
+        + [item["participant_target"] for item in result]
+        + [item["actual_participants"] for item in result]
+    )
+    for item in result:
+        item["target_bar_percentage"] = item["participant_target"] / chart_max * 100
+        item["actual_bar_percentage"] = item["actual_participants"] / chart_max * 100
+    return result
+
+
 def event_dashboard_metrics(db, event_id):
     """Return the authoritative, event-scoped Phase 1 dashboard response."""
     event = db.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
@@ -429,6 +463,9 @@ def event_dashboard_metrics(db, event_id):
             **progress,
         },
         "participant_profile": profile,
+        "satellite_target_categories": satellite_target_category_metrics(
+            db, event_id, batch["id"] if batch else None
+        ),
         "satellite_datasets": satellite_dataset_metrics(
             db, event_id, batch["id"] if batch else None
         ),

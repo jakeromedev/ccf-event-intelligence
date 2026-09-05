@@ -109,6 +109,28 @@
     </a>
 </section>
 
+<section class="panel satellite-target-category-panel" id="target-category-distribution" aria-labelledby="target-category-distribution-title">
+    <header class="satellite-chart-heading">
+        <div><h2 id="target-category-distribution-title">Registration Distribution by Target Category</h2><p>Based on effective Satellite associations in the active Event batch.</p></div>
+        <span>Event-wide</span>
+    </header>
+    <div class="satellite-target-category-body">
+        {% if metrics.target_category_distribution.association_count %}
+        <div class="satellite-target-category-donut" role="img" aria-label="{{ metrics.target_category_distribution.association_count|number }} effective Satellite associations across the three Dashboard Target categories" style="background: conic-gradient({% for category in metrics.target_category_distribution.categories %}{{ category.color }} {{ category.start }}% {{ category.end }}%{{ ', ' if not loop.last else '' }}{% endfor %})">
+            <div><strong>{{ metrics.target_category_distribution.association_count|number }}</strong><span>Associations</span></div>
+        </div>
+        {% else %}
+        <div class="satellite-target-category-empty">{{ icon('chart', 30) }}<strong>No categorized associations yet</strong><span>Assign canonical Satellites to Dashboard Target categories to populate this distribution.</span></div>
+        {% endif %}
+        <ul class="satellite-target-category-legend" aria-label="Target category association distribution data">
+            {% for category in metrics.target_category_distribution.categories %}
+            <li><i style="background: {{ category.color }}"></i><span><strong>{{ category.name }}</strong><small>{{ category.satellite_count|number }} configured {{ 'Satellite' if category.satellite_count == 1 else 'Satellites' }}</small></span><b>{{ category.associations|number }}</b><em>{{ category.percentage|percent }}</em></li>
+            {% endfor %}
+        </ul>
+    </div>
+    <footer>{{ icon('info', 16) }} <span>Shares use additive effective associations, not unique people. Unmapped evidence and Satellites outside these categories are excluded.</span></footer>
+</section>
+
 {% if metrics.needs_mapping and metrics.filters.link_status == 'needs_mapping' %}
 <aside class="satellite-mapping-callout" role="status">
     {{ icon('warning', 20) }}

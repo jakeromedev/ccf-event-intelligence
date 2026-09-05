@@ -718,6 +718,98 @@ class SatelliteDirectoryEntry(Base):
     )
 
 
+class EventSatelliteTargetCategory(Base):
+    """One fixed Dashboard Satellite target owned by an Event."""
+
+    __tablename__ = "event_satellite_target_categories"
+    __table_args__ = (
+        CheckConstraint(
+            "category_key IN "
+            "('outside_metro_manila','within_metro_manila','main')",
+            name="ck_event_satellite_target_categories_key",
+        ),
+        CheckConstraint(
+            "participant_target >= 0 AND participant_target <= 1000000000",
+            name="ck_event_satellite_target_categories_target",
+        ),
+        UniqueConstraint(
+            "event_id",
+            "category_key",
+            name="uq_event_satellite_target_categories_event_key",
+        ),
+        Index(
+            "idx_event_satellite_target_categories_event",
+            "event_id",
+            "category_key",
+        ),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(
+        ID_TYPE, ForeignKey("events.id", ondelete="CASCADE"), nullable=False
+    )
+    category_key: Mapped[str] = mapped_column(String(32), nullable=False)
+    participant_target: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    created_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+    updated_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+
+class EventSatelliteTargetSatellite(Base):
+    """Canonical Satellite membership in one fixed Event target category."""
+
+    __tablename__ = "event_satellite_target_satellites"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["event_id", "category_key"],
+            [
+                "event_satellite_target_categories.event_id",
+                "event_satellite_target_categories.category_key",
+            ],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "event_id",
+            "category_key",
+            "directory_id",
+            name="uq_event_satellite_target_satellites_member",
+        ),
+        UniqueConstraint(
+            "event_id",
+            "directory_id",
+            name="uq_event_satellite_target_satellites_exclusive",
+        ),
+        Index(
+            "idx_event_satellite_target_satellites_category",
+            "event_id",
+            "category_key",
+        ),
+        Index(
+            "idx_event_satellite_target_satellites_directory",
+            "directory_id",
+        ),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    category_key: Mapped[str] = mapped_column(String(32), nullable=False)
+    directory_id: Mapped[int] = mapped_column(
+        ID_TYPE,
+        ForeignKey("satellite_directory.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    created_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+
 class EventRegistrantSatellite(Base):
     """Effective canonical Satellite ownership for one durable registrant."""
 

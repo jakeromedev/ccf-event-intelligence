@@ -46,7 +46,9 @@ from app.normalization import (
     normalize_registration_type,
 )
 from app.models import Base
+from app.registrant_satellite_assignments import set_manual_satellite_assignment
 from app.satellite_datasets import satellite_dataset_options
+from app.satellite_target_categories import ensure_event_satellite_target_categories
 from scripts.migrate_sqlite_to_mysql import MigrationError, migrate
 
 
@@ -778,9 +780,298 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertNotIn("@example.com", str(payload))
         self.assertNotIn("Mobile Number", str(payload))
         page = client.get("/events/{}".format(self.event_a))
-        self.assertIn(b"Manage Satellite Targets", page.data)
-        self.assertIn(b"Combined", page.data)
-        self.assertIn(b"satellite-dataset-modal", page.data)
+        self.assertIn(b"Target vs Actual Participants", page.data)
+        self.assertIn(b"Set Satellite Targets", page.data)
+        self.assertIn(b"satellite-target-modal", page.data)
+        self.assertNotIn(b"satellite-dataset-modal", page.data)
+        self.assertNotIn(b"Manage Satellite Targets", page.data)
+
+    def test_fixed_satellite_targets_use_effective_distinct_participants(self):
+        batch_id = self._process(self.event_a)
+        client = self.app.test_client()
+        with self.app.app_context():
+            db = get_db()
+            ensure_event_satellite_target_categories(db, self.event_a)
+            within_group = db.execute(
+                """
+                INSERT INTO hub_groups (code, name, sort_order)
+                VALUES ('within_metro_manila', 'Within Metro Manila Hubs', 1)
+                """
+            ).lastrowid
+            outside_group = db.execute(
+                """
+                INSERT INTO hub_groups (code, name, sort_order)
+                VALUES ('outside_metro_manila', 'Outside Metro Manila Hubs', 2)
+                """
+            ).lastrowid
+            main_hub = db.execute(
+                """
+                INSERT INTO satellite_hubs (hub_group_id, name, normalized_name)
+                VALUES (?, 'Main Hub', 'main hub')
+                """,
+                (within_group,),
+            ).lastrowid
+            outside_hub = db.execute(
+                """
+                INSERT INTO satellite_hubs (hub_group_id, name, normalized_name)
+                VALUES (?, 'International', 'international')
+                """,
+                (outside_group,),
+            ).lastrowid
+            directories = {
+                row["normalized_name"]: row["id"]
+                for row in db.execute(
+                    """
+                    SELECT id, normalized_name FROM satellite_directory
+                    WHERE normalized_name IN (
+                        'ccf main', 'ccf eastwood', 'ccf singapore'
+                    )
+                    """
+                ).fetchall()
+            }
+            db.execute(
+                "UPDATE satellite_directory SET hub_id = ? WHERE id = ?",
+                (main_hub, directories["ccf main"]),
+            )
+            db.executemany(
+                "UPDATE satellite_directory SET hub_id = ? WHERE id = ?",
+                [
+                    (outside_hub, directories["ccf eastwood"]),
+                    (outside_hub, directories["ccf singapore"]),
+                ],
+            )
+            db.executemany(
+                """
+                INSERT INTO event_satellite_target_satellites (
+                    event_id, category_key, directory_id
+                ) VALUES (?, ?, ?)
+                """,
+                [
+                    (self.event_a, "main", directories["ccf main"]),
+                    (
+                        self.event_a,
+                        "outside_metro_manila",
+                        directories["ccf eastwood"],
+                    ),
+                    (
+                        self.event_a,
+                        "outside_metro_manila",
+                        directories["ccf singapore"],
+                    ),
+                ],
+            )
+
+            # The duplicate has the same complete identity as R-2 but another
+            # Satellite association. It remains one person within the category.
+            db.execute(
+                """
+                INSERT INTO registrants (
+                    batch_id, registration_code, ticket_code, last_name,
+                    gender_raw, life_stage_raw, birth_month_raw, birth_year_raw,
+                    affiliation, satellite_name, registration_type,
+                    ticket_matched, checked_in
+                ) VALUES (?, 'R-DUP-EAST', 'T-DUP-EAST', 'Registrant',
+                          'Female', 'Single', 'October', '1990',
+                          'International Satellite', 'Singapore', 'participant', 1, 0)
+                """,
+                (batch_id,),
+            )
+            db.execute(
+                """
+                INSERT INTO registrants (
+                    batch_id, registration_code, ticket_code, last_name,
+                    gender_raw, life_stage_raw, birth_month_raw, birth_year_raw,
+                    affiliation, satellite_name, registration_type,
+                    ticket_matched, checked_in
+                ) VALUES (?, 'R-VOL-EAST', 'T-VOL-EAST', 'Volunteer',
+                          'Male', 'Single', 'March', '1985',
+                          'Local Satellite', 'Eastwood', 'volunteer', 1, 0)
+                """,
+                (batch_id,),
+            )
+            rebuild_batch_curation(db, batch_id)
+            eastwood_satellite = db.execute(
+                """
+                SELECT id FROM satellites
+                WHERE batch_id = ? AND normalized_name = 'ccf eastwood'
+                """,
+                (batch_id,),
+            ).fetchone()[0]
+            eastwood_person = db.execute(
+                """
+                SELECT curated_registrant_id
+                FROM curated_registrant_satellites
+                WHERE satellite_id = ? LIMIT 1
+                """,
+                (eastwood_satellite,),
+            ).fetchone()[0]
+            unresolved = db.execute(
+                """
+                INSERT INTO satellites (
+                    event_id, batch_id, name, normalized_name, affiliation,
+                    source_record_count
+                ) VALUES (?, ?, 'Unmapped Evidence', 'unmapped evidence',
+                          'Local Satellite', 50)
+                """,
+                (self.event_a, batch_id),
+            ).lastrowid
+            db.execute(
+                """
+                INSERT INTO curated_registrant_satellites (
+                    event_id, batch_id, curated_registrant_id, satellite_id
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (self.event_a, batch_id, eastwood_person, unresolved),
+            )
+            db.commit()
+
+        saved = client.post(
+            "/events/{}/satellite-target-categories/targets".format(self.event_a),
+            data={
+                "target_outside_metro_manila": "1",
+                "target_within_metro_manila": "0",
+                "target_main": "5",
+            },
+        )
+        self.assertEqual(302, saved.status_code)
+
+        payload = client.get("/events/{}/dashboard".format(self.event_a)).get_json()
+        categories = {
+            item["key"]: item for item in payload["satellite_target_categories"]
+        }
+        outside = categories["outside_metro_manila"]
+        self.assertEqual(2, outside["actual_participants"])
+        self.assertEqual(200, outside["progress_percentage"])
+        self.assertTrue(outside["target_exceeded"])
+        self.assertEqual(1, outside["exceeded_amount"])
+        self.assertEqual(1, categories["main"]["actual_participants"])
+        self.assertFalse(categories["within_metro_manila"]["target_configured"])
+        self.assertIsNone(categories["within_metro_manila"]["progress_percentage"])
+
+        with self.app.app_context():
+            before_satellites = canonical_satellite_metrics(get_db(), batch_id)
+        distribution = before_satellites["target_category_distribution"]
+        distribution_categories = {
+            item["key"]: item for item in distribution["categories"]
+        }
+        self.assertEqual(5, distribution["association_count"])
+        self.assertEqual(4, distribution_categories["outside_metro_manila"]["associations"])
+        self.assertEqual(2, distribution_categories["outside_metro_manila"]["actual_participants"])
+        self.assertEqual(1, distribution_categories["main"]["associations"])
+        self.assertAlmostEqual(
+            100,
+            sum(item["percentage"] for item in distribution["categories"]),
+        )
+        self.assertEqual(1, before_satellites["needs_mapping"])
+        self.assertEqual(1, before_satellites["needs_mapping_associations"])
+
+        with self.app.app_context():
+            db = get_db()
+            participant_id = db.execute(
+                """
+                SELECT owner.attestation_participant_id
+                FROM attestation_participant_registrants owner
+                JOIN registrants source
+                  ON source.id = owner.registrant_id
+                 AND source.batch_id = owner.batch_id
+                WHERE owner.event_id = ? AND owner.batch_id = ?
+                  AND source.registration_code = 'R-2'
+                """,
+                (self.event_a, batch_id),
+            ).fetchone()[0]
+            set_manual_satellite_assignment(
+                db,
+                self.event_a,
+                participant_id,
+                directories["ccf main"],
+            )
+            db.commit()
+            moved = event_dashboard_metrics(db, self.event_a)
+            moved_satellites = canonical_satellite_metrics(db, batch_id)
+
+        moved_categories = {
+            item["key"]: item for item in moved["satellite_target_categories"]
+        }
+        self.assertEqual(1, moved_categories["outside_metro_manila"]["actual_participants"])
+        self.assertEqual(2, moved_categories["main"]["actual_participants"])
+        self.assertEqual(40, moved_categories["main"]["progress_percentage"])
+        moved_distribution = {
+            item["key"]: item
+            for item in moved_satellites["target_category_distribution"]["categories"]
+        }
+        self.assertEqual(
+            6,
+            moved_satellites["target_category_distribution"]["association_count"],
+        )
+        self.assertEqual(2, moved_distribution["outside_metro_manila"]["associations"])
+        self.assertEqual(4, moved_distribution["main"]["associations"])
+        self.assertEqual(0, moved_satellites["needs_mapping"])
+
+        page = client.get("/events/{}".format(self.event_a))
+        self.assertEqual(1, page.data.count(b'name="target_outside_metro_manila"'))
+        self.assertEqual(1, page.data.count(b'name="target_within_metro_manila"'))
+        self.assertEqual(1, page.data.count(b'name="target_main"'))
+        self.assertNotIn(b"satellite-dataset-modal", page.data)
+
+        satellite_page = client.get("/events/{}/satellites".format(self.event_a))
+        self.assertIn(b"Registration Distribution by Target Category", satellite_page.data)
+        self.assertIn(b"Based on effective Satellite associations", satellite_page.data)
+        self.assertIn(b"Shares use additive effective associations", satellite_page.data)
+        self.assertIn(b"conic-gradient", satellite_page.data)
+        self.assertNotIn(b"No categorized associations yet", satellite_page.data)
+
+        # A replacement batch reuses durable membership, targets, and the
+        # manual override, while inactive associations stop contributing.
+        replacement_batch = self._process(self.event_a)
+        with self.app.app_context():
+            replacement_dashboard = event_dashboard_metrics(get_db(), self.event_a)
+            replacement_satellites = canonical_satellite_metrics(
+                get_db(), replacement_batch
+            )
+        replacement_categories = {
+            item["key"]: item
+            for item in replacement_dashboard["satellite_target_categories"]
+        }
+        self.assertEqual(1, replacement_categories["outside_metro_manila"]["actual_participants"])
+        self.assertEqual(2, replacement_categories["main"]["actual_participants"])
+        self.assertEqual(1, replacement_categories["outside_metro_manila"]["participant_target"])
+        self.assertEqual(5, replacement_categories["main"]["participant_target"])
+        replacement_distribution = {
+            item["key"]: item
+            for item in replacement_satellites["target_category_distribution"]["categories"]
+        }
+        self.assertEqual(3, replacement_satellites["target_category_distribution"]["association_count"])
+        self.assertEqual(1, replacement_distribution["outside_metro_manila"]["associations"])
+        self.assertEqual(2, replacement_distribution["main"]["associations"])
+
+        other_batch = self._process(self.event_b)
+        with self.app.app_context():
+            other_distribution = canonical_satellite_metrics(
+                get_db(), other_batch
+            )["target_category_distribution"]
+        self.assertEqual(0, other_distribution["association_count"])
+        self.assertEqual(
+            [0, 0, 0],
+            [item["associations"] for item in other_distribution["categories"]],
+        )
+
+        reactivated = client.post(
+            "/events/{}/imports/{}/activate".format(self.event_a, batch_id)
+        )
+        self.assertEqual(302, reactivated.status_code)
+        with self.app.app_context():
+            historical_dashboard = event_dashboard_metrics(get_db(), self.event_a)
+            historical_satellites = canonical_satellite_metrics(get_db(), batch_id)
+        historical_categories = {
+            item["key"]: item
+            for item in historical_dashboard["satellite_target_categories"]
+        }
+        self.assertEqual(1, historical_categories["outside_metro_manila"]["actual_participants"])
+        self.assertEqual(2, historical_categories["main"]["actual_participants"])
+        self.assertEqual(
+            6,
+            historical_satellites["target_category_distribution"]["association_count"],
+        )
 
     def test_satellite_dataset_survives_active_batch_replacement_and_recalculates(self):
         first_batch = self._process(self.event_a)
@@ -1500,6 +1791,7 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertEqual(200, empty_event.status_code)
         self.assertIn(b"No active dataset for this event", empty_event.data)
         self.assertNotIn(b"data-satellite-filters", empty_event.data)
+        self.assertNotIn(b"conic-gradient", empty_event.data)
 
         other_batch = self._process(self.event_b)
         with self.app.app_context():

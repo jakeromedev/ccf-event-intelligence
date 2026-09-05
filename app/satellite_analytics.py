@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from .satellite_target_categories import (
+    SATELLITE_TARGET_CATEGORIES,
+    satellite_target_category_rows,
+)
+
 
 def _percentage(value, total):
     return value / total * 100 if total else 0
@@ -16,6 +21,12 @@ HUB_CHART_COLORS = (
     "#0891b2",
     "#db2777",
     "#ca8a04",
+)
+
+TARGET_CATEGORY_CHART_COLORS = (
+    "#2563eb",
+    "#f59e0b",
+    "#dc2626",
 )
 
 
@@ -40,6 +51,94 @@ WITH manual_curated AS (
       ON manual_override.curated_registrant_id = association.curated_registrant_id
 )
 """
+
+
+def satellite_target_category_analytics(db, event_id, batch_id):
+    """Return shared Dashboard and Satellite Overview category analytics.
+
+    Dashboard Actuals use distinct participants. The Satellite Overview
+    distribution uses additive effective association rows so its pie has a
+    mathematically valid denominator when one person has multiple Satellites.
+    """
+    categories = satellite_target_category_rows(db, event_id)
+    counts = {
+        category.key: {"actual_participants": 0, "associations": 0}
+        for category in SATELLITE_TARGET_CATEGORIES
+    }
+    if batch_id is not None:
+        batch = db.execute(
+            "SELECT event_id FROM import_batches WHERE id = ?", (batch_id,)
+        ).fetchone()
+        if batch is None or batch["event_id"] != event_id:
+            raise ValueError("The import batch does not belong to this Event.")
+        rows = db.execute(
+            EFFECTIVE_ASSOCIATIONS_CTE
+            + """
+            SELECT membership.category_key,
+                   COUNT(DISTINCT CASE
+                       WHEN curated.registration_type = 'participant'
+                       THEN curated.id END
+                   ) actual_participants,
+                   COUNT(association.id) associations
+            FROM event_satellite_target_satellites membership
+            JOIN effective_associations association
+              ON association.event_id = membership.event_id
+             AND association.batch_id = ?
+             AND association.directory_id = membership.directory_id
+            JOIN satellite_directory directory
+              ON directory.id = association.directory_id
+            JOIN satellite_hubs hub ON hub.id = directory.hub_id
+            JOIN hub_groups hub_group ON hub_group.id = hub.hub_group_id
+            JOIN curated_registrants curated
+              ON curated.id = association.curated_registrant_id
+             AND curated.event_id = association.event_id
+             AND curated.batch_id = association.batch_id
+            WHERE membership.event_id = ?
+            GROUP BY membership.category_key
+            """,
+            (batch_id, event_id),
+        ).fetchall()
+        counts.update(
+            {
+                row["category_key"]: {
+                    "actual_participants": row["actual_participants"],
+                    "associations": row["associations"],
+                }
+                for row in rows
+            }
+        )
+
+    association_total = sum(item["associations"] for item in counts.values())
+    cursor = 0.0
+    result = []
+    for index, (definition, stored) in enumerate(
+        zip(SATELLITE_TARGET_CATEGORIES, categories)
+    ):
+        associations = counts[definition.key]["associations"]
+        percentage = _percentage(associations, association_total)
+        result.append(
+            {
+                "key": definition.key,
+                "name": definition.name,
+                "participant_target": stored["participant_target"],
+                "satellite_count": stored["satellite_count"],
+                "actual_participants": counts[definition.key][
+                    "actual_participants"
+                ],
+                "associations": associations,
+                "percentage": percentage,
+                "start": cursor,
+                "end": cursor + percentage,
+                "color": TARGET_CATEGORY_CHART_COLORS[index],
+            }
+        )
+        cursor += percentage
+    return {
+        "event_id": event_id,
+        "batch_id": batch_id,
+        "association_count": association_total,
+        "categories": result,
+    }
 
 
 def _rows(db, level, where_sql, params):
@@ -351,6 +450,9 @@ def canonical_satellite_metrics(
     ).fetchone()
     if batch is None:
         raise ValueError("The import batch does not exist.")
+    target_category_distribution = satellite_target_category_analytics(
+        db, batch["event_id"], batch["id"]
+    )
     query = " ".join(str(query or "").strip().split())[:100]
     sort = sort if sort in ("registrants", "satellite", "hub", "group") else "registrants"
     direction = direction if direction in ("asc", "desc") else "desc"
@@ -608,5 +710,6 @@ def canonical_satellite_metrics(
         },
         "hub_distribution": hubs,
         "hub_chart": _hub_chart(hubs, association_total),
+        "target_category_distribution": target_category_distribution,
         "needs_mapping_records": needs_mapping,
     }

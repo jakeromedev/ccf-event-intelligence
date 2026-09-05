@@ -143,50 +143,37 @@
     </section>
 </div>
 
-<section class="satellite-targets panel" aria-labelledby="satellite-targets-title">
+<section class="satellite-targets panel" id="satellite-targets" aria-labelledby="satellite-targets-title">
     <header class="satellite-targets-heading">
         <div class="phase1-section-heading">
             <span class="phase1-section-icon">{{ icon('location', 20) }}</span>
             <div>
                 <p class="eyebrow">Satellite Targets</p>
-                <h2 id="satellite-targets-title">Satellite Datasets</h2>
+                <h2 id="satellite-targets-title">Target vs Actual Participants</h2>
             </div>
         </div>
-        {% if event_mutations_allowed %}<button class="button secondary" type="button" data-satellite-dataset-open>{{ icon('chart', 17) }} Manage Satellite Targets</button>{% endif %}
+        <div class="satellite-target-actions">{% if satellite_settings_management_allowed %}<a class="button secondary" href="{{ url_for('dashboard.satellite_settings', event_id=event.id, view='targets') }}">{{ icon('settings', 17) }} Assign Satellites</a>{% endif %}{% if event_mutations_allowed %}<button class="button primary" type="button" data-satellite-targets-open>{{ icon('chart', 17) }} Set Satellite Targets</button>{% endif %}</div>
     </header>
-    {% if dashboard.satellite_datasets %}
+    <div class="satellite-target-comparison">
+        <div class="satellite-target-chart" role="img" aria-label="Grouped bar chart comparing participant Target and Actual across Outside Metro Manila Hubs, Within Metro Manila Hubs, and Main">
+            <div class="satellite-target-chart-legend"><span class="is-target">Target</span><span class="is-actual">Actual</span></div>
+            <div class="satellite-target-chart-plot">
+                {% for category in dashboard.satellite_target_categories %}<div class="satellite-target-chart-group">
+                    <div class="satellite-target-chart-bars"><i class="is-target" style="height: {{ category.target_bar_percentage }}%"><span>{{ category.participant_target|number }}</span></i><i class="is-actual" style="height: {{ category.actual_bar_percentage }}%"><span>{{ category.actual_participants|number }}</span></i></div>
+                    <strong>{{ category.name }}</strong>
+                </div>{% endfor %}
+            </div>
+            <p>Participants · Actuals use distinct curated participants from the active Event batch.</p>
+        </div>
         <div class="satellite-target-grid">
-            {% for dataset in dashboard.satellite_datasets %}
-                <article class="satellite-target-card {{ 'exceeded' if dataset.target_exceeded else '' }}">
-                    <header>
-                        <div>
-                            <h3>{{ dataset.name }}</h3>
-                            <small>{{ dataset.satellite_count|number }} {{ 'satellite' if dataset.satellite_count == 1 else 'satellites' }}</small>
-                        </div>
-                        {% if dataset.target_exceeded %}<span class="satellite-target-status">Target exceeded</span>{% endif %}
-                    </header>
-                    <p class="satellite-target-total"><strong>{{ dataset.actual_participants|number }}</strong><span> / {{ dataset.participant_target|number }} Participants</span></p>
-                    {% if dataset.target_configured %}
-                        {% set visual_progress = 100 if dataset.progress_percentage > 100 else dataset.progress_percentage %}
-                        <div class="satellite-target-progress" role="progressbar" aria-label="{{ dataset.name }} participant progress" aria-valuenow="{{ visual_progress }}" aria-valuemin="0" aria-valuemax="100"><i style="width: {{ visual_progress }}%"></i></div>
-                        <footer>
-                            <strong>{{ dataset.progress_percentage|percent }}</strong>
-                            <span>{{ dataset.remaining_slots|number }} {{ 'Remaining' if not dataset.target_exceeded else 'Remaining · target exceeded' }}</span>
-                        </footer>
-                    {% else %}
-                        <div class="satellite-target-progress unconfigured"><i></i></div>
-                        <footer><strong>—</strong><span>Target is zero · progress unconfigured</span></footer>
-                    {% endif %}
-                </article>
-            {% endfor %}
+            {% for category in dashboard.satellite_target_categories %}<article class="satellite-target-card {{ 'exceeded' if category.target_exceeded else '' }}">
+                <header><div><h3>{{ category.name }}</h3><small>{{ category.satellite_count|number }} configured {{ 'Satellite' if category.satellite_count == 1 else 'Satellites' }}</small></div>{% if category.target_exceeded %}<span class="satellite-target-status">Exceeded by {{ category.exceeded_amount|number }}</span>{% endif %}</header>
+                <p class="satellite-target-total"><strong>{{ category.actual_participants|number }}</strong><span> Actual / {{ category.participant_target|number }} Target</span></p>
+                {% if category.target_configured %}{% set visual_progress = 100 if category.progress_percentage > 100 else category.progress_percentage %}<div class="satellite-target-progress" role="progressbar" aria-label="{{ category.name }} participant progress" aria-valuenow="{{ visual_progress }}" aria-valuemin="0" aria-valuemax="100"><i style="width: {{ visual_progress }}%"></i></div><footer><strong>{{ category.progress_percentage|percent }}</strong><span>{% if category.target_exceeded %}Exceeded by {{ category.exceeded_amount|number }}{% else %}{{ category.remaining_slots|number }} Remaining{% endif %}</span></footer>
+                {% else %}<div class="satellite-target-progress unconfigured"><i></i></div><footer><strong>—</strong><span>Target is zero · progress unconfigured</span></footer>{% endif %}
+            </article>{% endfor %}
         </div>
-    {% else %}
-        <div class="satellite-target-empty">
-            <span class="phase1-target-icon">{{ icon('location', 28) }}</span>
-            <div><strong>No satellite targets configured yet.</strong><p>Create a reusable group of Event satellites and track unique participant progress.</p></div>
-            {% if event_mutations_allowed %}<button class="button secondary" type="button" data-satellite-dataset-open>Configure a target</button>{% endif %}
-        </div>
-    {% endif %}
+    </div>
 </section>
 
 <section class="phase1-profile panel" aria-labelledby="participant-profile-title">
@@ -234,92 +221,21 @@
     <small>Last updated: {{ dashboard.last_updated|datetime_short }}</small>
 </aside>
 
-{% if event_mutations_allowed %}<div class="satellite-dataset-modal" data-satellite-dataset-modal data-create-url="{{ url_for('dashboard.create_event_satellite_dataset', event_id=event['id']) }}" hidden>
-    <div class="satellite-dataset-backdrop" data-satellite-dataset-close></div>
-    <section class="satellite-dataset-dialog" role="dialog" aria-modal="true" aria-labelledby="satellite-dataset-modal-title">
-        <header class="satellite-dataset-modal-header">
-            <div>
-                <p class="eyebrow">Event configuration</p>
-                <h2 id="satellite-dataset-modal-title">Manage Satellite Targets</h2>
-                <p>Group satellites for {{ event['name'] }} and set independent participant targets.</p>
-            </div>
-            <button class="satellite-dataset-modal-close" type="button" aria-label="Close satellite target manager" data-satellite-dataset-close>×</button>
-        </header>
-        <div class="satellite-dataset-modal-body">
-            <aside class="satellite-dataset-list-panel">
-                <div class="satellite-dataset-list-heading">
-                    <strong>Configured datasets</strong>
-                    <button type="button" data-satellite-dataset-new>+ New</button>
-                </div>
-                <div class="satellite-dataset-list" data-satellite-dataset-list>
-                    {% for dataset in dashboard.satellite_datasets %}
-                        <button type="button" data-satellite-dataset-select="{{ dataset.id }}">
-                            <span><strong>{{ dataset.name }}</strong><small>{{ dataset.satellite_count|number }} {{ 'satellite' if dataset.satellite_count == 1 else 'satellites' }} · Target {{ dataset.participant_target|number }}</small></span>
-                            <span aria-hidden="true">›</span>
-                        </button>
-                    {% else %}
-                        <div class="satellite-dataset-list-empty">No datasets have been created.</div>
-                    {% endfor %}
-                </div>
-            </aside>
-            <div class="satellite-dataset-editor">
-                <form method="post" action="{{ url_for('dashboard.create_event_satellite_dataset', event_id=event['id']) }}" data-satellite-dataset-form>
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <div class="satellite-dataset-editor-heading">
-                        <div><p class="eyebrow" data-satellite-dataset-mode>New dataset</p><h3 data-satellite-dataset-form-title>Create Satellite Dataset</h3></div>
-                    </div>
-                    <div class="satellite-dataset-fields">
-                        <label>
-                            <span>Dataset Name</span>
-                            <input type="text" name="name" maxlength="160" required placeholder="e.g. GGMA" data-satellite-dataset-name>
-                        </label>
-                        <label>
-                            <span>Participant Target</span>
-                            <input type="number" name="participant_target" min="0" max="1000000000" step="1" inputmode="numeric" required placeholder="250" data-satellite-dataset-target>
-                        </label>
-                    </div>
-                    <section class="satellite-dataset-choices" aria-labelledby="satellite-dataset-choices-title">
-                        <div class="satellite-dataset-choice-heading">
-                            <div><strong id="satellite-dataset-choices-title">Satellites</strong><small>Select at least one from the active Event dataset.</small></div>
-                            {% if satellite_options %}<input type="search" placeholder="Search satellites…" aria-label="Search available satellites" data-satellite-search>{% endif %}
-                        </div>
-                        <p class="satellite-dataset-selection-note" data-satellite-selection-note hidden></p>
-                        {% if satellite_options %}
-                            <div class="satellite-dataset-checklist" data-satellite-checklist>
-                                {% for satellite in satellite_options %}
-                                    <label data-satellite-option data-search-value="{{ (satellite.name ~ ' ' ~ satellite.affiliation)|lower }}">
-                                        <input type="checkbox" name="satellite_ids" value="{{ satellite.id }}">
-                                        <span><strong>{{ satellite.name }}</strong><small>{{ satellite.affiliation }}</small></span>
-                                    </label>
-                                {% endfor %}
-                                <p data-satellite-search-empty hidden>No satellites match your search.</p>
-                            </div>
-                        {% else %}
-                            <div class="satellite-dataset-no-satellites">
-                                {{ icon('info', 18) }}
-                                <p><strong>No satellites are available.</strong><span>Import and activate Event data containing normalized satellites before creating a target.</span></p>
-                            </div>
-                        {% endif %}
-                    </section>
-                    <footer class="satellite-dataset-form-actions">
-                        <button class="button danger" type="button" data-satellite-dataset-delete-trigger hidden>Delete Dataset</button>
-                        <span></span>
-                        <button class="button secondary" type="button" data-satellite-dataset-close>Cancel</button>
-                        <button class="button primary" type="submit" {{ 'disabled' if not satellite_options else '' }}>Save Dataset</button>
-                    </footer>
-                </form>
-                <form method="post" data-satellite-dataset-delete-form hidden>
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <input type="hidden" name="confirm_delete" value="yes">
-                </form>
-            </div>
-        </div>
+{% if event_mutations_allowed %}<div class="satellite-target-modal" data-satellite-targets-modal hidden>
+    <div class="satellite-target-modal-backdrop" data-satellite-targets-close></div>
+    <section class="satellite-target-dialog" role="dialog" aria-modal="true" aria-labelledby="satellite-target-modal-title">
+        <header><div><p class="eyebrow">Event configuration</p><h2 id="satellite-target-modal-title" tabindex="-1">Set Satellite Targets</h2><p>Enter participant targets for the three fixed reporting categories.</p></div><button type="button" aria-label="Close Satellite Target settings" data-satellite-targets-close>×</button></header>
+        <form method="post" action="{{ url_for('dashboard.update_satellite_target_category_targets', event_id=event.id) }}" data-satellite-target-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="satellite-target-fields">{% for category in dashboard.satellite_target_categories %}<label><span>{{ category.name }}</span><span class="phase1-input-wrap">{{ icon('person', 18) }}<input type="number" name="target_{{ category.key }}" value="{{ category.participant_target }}" min="0" max="1000000000" step="1" inputmode="numeric" required></span><small>{{ category.satellite_count|number }} configured {{ 'Satellite' if category.satellite_count == 1 else 'Satellites' }} · 0 means not configured.</small></label>{% endfor %}</div>
+            <aside>{{ icon('info', 18) }}<p>Satellite membership is managed in Satellite Settings. Actuals count distinct participants, exclude volunteers, and do not depend on attendance or check-in.</p></aside>
+            <footer><button class="button secondary" type="button" data-satellite-targets-close>Cancel</button><button class="button primary" type="submit" data-loading-label="Saving Satellite Targets…">Save Targets</button></footer>
+        </form>
     </section>
-    <script type="application/json" data-satellite-dataset-json>{{ dashboard.satellite_datasets|tojson }}</script>
 </div>
 {% endif %}
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='satellite_datasets.js', v='20260824-1') }}" defer></script>
+<script src="{{ url_for('static', filename='dashboard_satellite_targets.js', v='20260905-phase3') }}" defer></script>
 {% endblock %}

@@ -452,6 +452,80 @@ class AuthenticationTests(unittest.TestCase):
                 data={"csrf_token": token, "event_id": event_id},
             ).status_code,
         )
+        self.assertEqual(
+            403,
+            self.client.post(
+                "/events/{}/satellite-target-categories/memberships".format(
+                    event_id
+                ),
+                data={"csrf_token": token},
+            ).status_code,
+        )
+        self.assertEqual(
+            403,
+            self.client.post(
+                "/events/{}/satellite-target-categories/targets".format(event_id),
+                data={
+                    "csrf_token": token,
+                    "target_outside_metro_manila": "10",
+                    "target_within_metro_manila": "20",
+                    "target_main": "30",
+                },
+            ).status_code,
+        )
+
+    def test_admin_target_category_membership_update_requires_csrf(self):
+        _, admin_password = self.initialize_admin()
+        with self.app.app_context():
+            event_id = get_db().execute(
+                "INSERT INTO events (name) VALUES ('Target Category Security')"
+            ).lastrowid
+            get_db().commit()
+        self.login("admin", admin_password)
+        path = "/events/{}/satellite-target-categories/memberships".format(event_id)
+        self.assertEqual(400, self.client.post(path).status_code)
+        token = self.csrf(
+            "/satellites/settings?event_id={}&view=targets".format(event_id)
+        )
+        response = self.client.post(path, data={"csrf_token": token})
+        self.assertEqual(302, response.status_code)
+        with self.app.app_context():
+            self.assertEqual(
+                3,
+                get_db().execute(
+                    """
+                    SELECT COUNT(*) FROM event_satellite_target_categories
+                    WHERE event_id = ?
+                    """,
+                    (event_id,),
+                ).fetchone()[0],
+            )
+
+        target_path = "/events/{}/satellite-target-categories/targets".format(event_id)
+        target_data = {
+            "target_outside_metro_manila": "10",
+            "target_within_metro_manila": "20",
+            "target_main": "30",
+        }
+        self.assertEqual(400, self.client.post(target_path, data=target_data).status_code)
+        target_data["csrf_token"] = self.csrf("/events/{}".format(event_id))
+        self.assertEqual(302, self.client.post(target_path, data=target_data).status_code)
+        with self.app.app_context():
+            values = {
+                row["category_key"]: row["participant_target"]
+                for row in get_db().execute(
+                    """
+                    SELECT category_key, participant_target
+                    FROM event_satellite_target_categories
+                    WHERE event_id = ?
+                    """,
+                    (event_id,),
+                ).fetchall()
+            }
+        self.assertEqual(
+            {"outside_metro_manila": 10, "within_metro_manila": 20, "main": 30},
+            values,
+        )
 
     def test_login_lockout_blocks_correct_password_until_expiry(self):
         user_id = self.create_user("lockout-operator")
@@ -937,6 +1011,27 @@ class AuthenticationTests(unittest.TestCase):
                     "csrf_token": token,
                     "name": "Denied Dataset",
                     "participant_target": "10",
+                },
+            ).status_code,
+        )
+        self.assertEqual(
+            403,
+            self.client.post(
+                "/events/{}/satellite-target-categories/memberships".format(
+                    event_id
+                ),
+                data={"csrf_token": token},
+            ).status_code,
+        )
+        self.assertEqual(
+            403,
+            self.client.post(
+                "/events/{}/satellite-target-categories/targets".format(event_id),
+                data={
+                    "csrf_token": token,
+                    "target_outside_metro_manila": "10",
+                    "target_within_metro_manila": "20",
+                    "target_main": "30",
                 },
             ).status_code,
         )

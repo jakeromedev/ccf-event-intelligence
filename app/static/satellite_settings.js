@@ -637,5 +637,90 @@
         requestAnimationFrame(() => syncDialog.querySelector("#satellite-sync-title").focus());
     }
 
+    const targetSettings = document.querySelector("[data-target-category-settings]");
+    if (targetSettings) {
+        const targetRows = [...targetSettings.querySelectorAll("[data-target-option]")];
+        const targetSearch = targetSettings.querySelector("[data-target-search]");
+        const targetGroup = targetSettings.querySelector("[data-target-group]");
+        const targetHub = targetSettings.querySelector("[data-target-hub]");
+        const targetAvailability = targetSettings.querySelector("[data-target-availability]");
+        const targetSelectVisible = targetSettings.querySelector("[data-target-select-visible]");
+        const targetBulkCategory = targetSettings.querySelector("[data-target-bulk-category]");
+        const targetVisibleCount = targetSettings.querySelector("[data-target-visible-count]");
+        const targetEmpty = targetSettings.querySelector("[data-target-empty]");
+
+        const updateTargetCounts = () => {
+            const counts = new Map();
+            targetSettings.querySelectorAll("[data-target-category-select]").forEach((select) => {
+                const category = select.value.split(":", 2)[1];
+                if (category) counts.set(category, (counts.get(category) || 0) + 1);
+            });
+            targetSettings.querySelectorAll("[data-target-selected-count]").forEach((element) => {
+                element.textContent = String(counts.get(element.dataset.targetSelectedCount) || 0);
+            });
+        };
+
+        const applyTargetFilters = () => {
+            const query = targetSearch.value.trim().toLocaleLowerCase();
+            const groupCode = targetGroup.value;
+            [...targetHub.options].forEach((option, index) => {
+                option.hidden = index > 0 && Boolean(groupCode) && option.dataset.groupCode !== groupCode;
+            });
+            if (targetHub.selectedOptions[0]?.hidden) targetHub.value = "";
+            const hubId = targetHub.value;
+            const availability = targetAvailability.value;
+            let visible = 0;
+            targetRows.forEach((row) => {
+                const matches = (
+                    (!query || row.dataset.searchText.includes(query))
+                    && (!groupCode || row.dataset.groupCode === groupCode)
+                    && (!hubId || row.dataset.hubId === hubId)
+                    && (availability === "all" || (availability === "active") === (row.dataset.active === "true"))
+                );
+                row.hidden = !matches;
+                if (!matches) row.querySelector("[data-target-row-check]").checked = false;
+                if (matches) visible += 1;
+            });
+            targetSelectVisible.checked = false;
+            targetSelectVisible.indeterminate = false;
+            targetVisibleCount.textContent = `${visible} canonical ${visible === 1 ? "Satellite" : "Satellites"} visible`;
+            if (targetEmpty) targetEmpty.hidden = visible !== 0;
+        };
+
+        targetSearch.addEventListener("input", applyTargetFilters);
+        targetGroup.addEventListener("change", applyTargetFilters);
+        targetHub.addEventListener("change", applyTargetFilters);
+        targetAvailability.addEventListener("change", applyTargetFilters);
+        targetSettings.querySelector("[data-target-clear-filters]").addEventListener("click", () => {
+            targetSearch.value = "";
+            targetGroup.value = "";
+            targetHub.value = "";
+            targetAvailability.value = "all";
+            applyTargetFilters();
+            targetSearch.focus();
+        });
+        targetSelectVisible.addEventListener("change", () => {
+            targetRows.forEach((row) => {
+                if (!row.hidden) row.querySelector("[data-target-row-check]").checked = targetSelectVisible.checked;
+            });
+        });
+        targetSettings.querySelector("[data-target-apply-bulk]").addEventListener("click", () => {
+            targetRows.forEach((row) => {
+                const checkbox = row.querySelector("[data-target-row-check]");
+                if (row.hidden || !checkbox.checked) return;
+                const select = row.querySelector("[data-target-category-select]");
+                select.value = `${select.dataset.directoryId}:${targetBulkCategory.value}`;
+                checkbox.checked = false;
+            });
+            targetSelectVisible.checked = false;
+            updateTargetCounts();
+        });
+        targetSettings.querySelectorAll("[data-target-category-select]").forEach((select) => {
+            select.addEventListener("change", updateTargetCounts);
+        });
+        applyTargetFilters();
+        updateTargetCounts();
+    }
+
     applyFilters();
 })();
