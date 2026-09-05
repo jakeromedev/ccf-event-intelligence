@@ -85,40 +85,24 @@
 </section>
 {% endif %}
 
-{% if not event or settings_view == 'directory' %}<div class="satellite-settings-directory-actions"><div class="satellite-settings-create-action"><span>Add to Directory</span><details data-add-records-menu><summary class="button primary">{{ icon('plus', 16) }} Add Records {{ icon('chevron-down', 14) }}</summary><div role="menu" aria-label="Add records"><button type="button" role="menuitem" data-settings-record-open data-mode="individual" data-kind="hub">Add Hub</button><button type="button" role="menuitem" data-settings-record-open data-mode="individual" data-kind="satellite">Add Satellite</button><hr><button type="button" role="menuitem" data-settings-record-open data-mode="bulk" data-kind="hub">Bulk Add Hubs</button><button type="button" role="menuitem" data-settings-record-open data-mode="bulk" data-kind="satellite">Bulk Add Satellites</button></div></details></div></div>{% endif %}
+{% if not event or settings_view == 'directory' %}<div class="satellite-settings-directory-actions"><div class="satellite-settings-transfer-action"><span>Directory Data</span><div><a class="button secondary" href="{{ url_for('dashboard.export_satellite_directory') }}">Export CSV</a><button class="button secondary" type="button" data-directory-import-open>Import CSV</button></div></div><div class="satellite-settings-create-action"><span>Add to Directory</span><details data-add-records-menu><summary class="button primary">{{ icon('plus', 16) }} Add Records {{ icon('chevron-down', 14) }}</summary><div role="menu" aria-label="Add records"><button type="button" role="menuitem" data-settings-record-open data-mode="individual" data-kind="hub">Add Hub</button><button type="button" role="menuitem" data-settings-record-open data-mode="individual" data-kind="satellite">Add Satellite</button><hr><button type="button" role="menuitem" data-settings-record-open data-mode="bulk" data-kind="hub">Bulk Add Hubs</button><button type="button" role="menuitem" data-settings-record-open data-mode="bulk" data-kind="satellite">Bulk Add Satellites</button></div></details></div></div>{% endif %}
 
 <div class="satellite-settings-no-results panel" data-settings-no-results {% if not event or settings_view != 'directory' or settings_search_scope == 'registrant' or not registrants.visibility.active or registrants.visibility.groups %}hidden{% endif %}>{{ icon('search', 22) }}<div><strong>No matching directory records</strong><p>Try another Hub or Satellite name, or clear the current filter.</p>{% if event %}<a class="button secondary compact" href="{{ url_for('dashboard.satellite_settings', event_id=event.id, view='directory') }}">Clear Filters</a>{% else %}<button class="button secondary compact" type="button" data-clear-search>Clear Search</button>{% endif %}</div></div>
 
 {% if event and settings_view == 'targets' %}
-<section class="satellite-target-settings panel" id="dashboard-target-satellites" aria-labelledby="dashboard-target-satellites-title" data-target-category-settings>
+<section class="satellite-target-settings panel" id="dashboard-target-satellites" aria-labelledby="dashboard-target-satellites-title">
     <header class="satellite-target-settings-header">
-        <div><p class="eyebrow">Dashboard Reporting</p><h2 id="dashboard-target-satellites-title">Dashboard Target Satellites</h2><p>Assign each canonical Satellite to at most one reporting category. Dashboard participant targets are configured separately.</p></div>
-        <dl aria-label="Selected Satellites by category">{% for category in target_settings.categories %}<div><dt>{{ category.name }}</dt><dd data-target-selected-count="{{ category.key }}">{{ category.selected_count|number }}</dd></div>{% endfor %}</dl>
+        <div><p class="eyebrow">Automatic Classification</p><h2 id="dashboard-target-satellites-title">Satellite Reporting Categories</h2><p>Reporting categories come automatically from each canonical Satellite's Hub and Hub Group. Move a Satellite in the directory to reclassify it.</p></div>
+        <dl aria-label="Automatically resolved Satellites by category">{% for category in target_settings.categories %}<div><dt>{{ category.name }}</dt><dd>{{ category.selected_count|number }}</dd></div>{% endfor %}</dl>
     </header>
-    {% if target_settings.needs_mapping_count %}<div class="satellite-target-mapping-note">{{ icon('info', 18) }}<p><strong>{{ target_settings.needs_mapping_count|number }} imported {{ 'Satellite needs' if target_settings.needs_mapping_count == 1 else 'Satellites need' }} mapping.</strong> Only canonical Satellites with a complete Hub and Hub Group can be assigned. <a href="{{ url_for('dashboard.event_satellites', event_id=event.id, link_status='needs_mapping') }}">Review Needs Mapping</a>.</p></div>{% endif %}
-    <div class="satellite-target-filters" aria-label="Filter Dashboard Target Satellites">
-        <label class="satellite-settings-search"><span>Search</span><span class="satellite-settings-search-input">{{ icon('search', 16) }}<input type="search" placeholder="Satellite, Hub, or Hub Group" autocomplete="off" data-target-search></span></label>
-        <label><span>Hub Group</span><select data-target-group><option value="">All Hub Groups</option>{% for group in target_settings.groups %}<option value="{{ group.code }}">{{ group.name }}</option>{% endfor %}</select></label>
-        <label><span>Hub</span><select data-target-hub><option value="">All Hubs</option>{% for hub in target_settings.hubs %}<option value="{{ hub.id }}" data-group-code="{{ hub.group_code }}">{{ hub.name }}</option>{% endfor %}</select></label>
-        <label><span>Availability</span><select data-target-availability><option value="all">All canonical Satellites</option><option value="active">Available in active batch</option><option value="inactive">Not in active batch</option></select></label>
-        <button class="button secondary compact" type="button" data-target-clear-filters>Clear Filters</button>
-    </div>
-    <form method="post" action="{{ url_for('dashboard.update_satellite_target_category_memberships', event_id=event.id) }}" data-settings-form data-target-category-form>
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="satellite-target-bulk-bar">
-            <label><input type="checkbox" data-target-select-visible> Select all visible</label>
-            <span data-target-visible-count>{{ target_settings.options|length|number }} canonical Satellites visible</span>
-            <label><span>Bulk assignment</span><select data-target-bulk-category><option value="">Unassigned</option>{% for category in target_settings.categories %}<option value="{{ category.key }}">{{ category.name }}</option>{% endfor %}</select></label>
-            <button class="button secondary compact" type="button" data-target-apply-bulk>Apply to checked</button>
-        </div>
-        {% if target_settings.options %}<div class="satellite-target-table-wrap" role="region" aria-label="Dashboard Target Satellite assignments" tabindex="0"><table><thead><tr><th scope="col"><span class="visually-hidden">Select</span></th><th scope="col">Canonical Satellite</th><th scope="col">Hub</th><th scope="col">Hub Group</th><th scope="col">Active Batch</th><th scope="col">Reporting Category</th></tr></thead><tbody>{% for option in target_settings.options %}<tr data-target-option data-search-text="{{ (option.name ~ ' ' ~ option.hub_name ~ ' ' ~ option.group_name)|lower }}" data-group-code="{{ option.group_code }}" data-hub-id="{{ option.hub_id }}" data-active="{{ 'true' if option.available_in_active_batch else 'false' }}"><td><input type="checkbox" aria-label="Select {{ option.name }} for bulk assignment" data-target-row-check></td><td><strong>{{ option.name }}</strong>{% if not option.represented_in_event %}<small>Not yet imported for this Event</small>{% endif %}</td><td>{{ option.hub_name }}</td><td>{{ option.group_name }}</td><td><span class="satellite-status is-{{ 'synced' if option.available_in_active_batch else 'review' }}">{{ 'Available' if option.available_in_active_batch else 'Not active' }}</span></td><td><label class="visually-hidden" for="target-category-{{ option.directory_id }}">Reporting category for {{ option.name }}</label><select id="target-category-{{ option.directory_id }}" name="category_assignments" data-target-category-select data-directory-id="{{ option.directory_id }}"><option value="{{ option.directory_id }}:" {{ 'selected' if not option.category_key else '' }}>Unassigned</option>{% for category in target_settings.categories %}<option value="{{ option.directory_id }}:{{ category.key }}" {{ 'selected' if option.category_key == category.key else '' }}>{{ category.name }}</option>{% endfor %}</select></td></tr>{% endfor %}</tbody></table></div><div class="satellite-target-empty" data-target-empty hidden>No canonical Satellites match these filters. Existing hidden assignments are preserved.</div>
-        {% else %}<div class="satellite-settings-empty"><div><strong>No fully mapped canonical Satellites are available.</strong><p>Create or map Satellites under a Hub and Hub Group before assigning Dashboard reporting categories.</p></div></div>{% endif %}
-        <footer><p>Saving replaces this Event's complete category membership. Hidden filtered rows remain included.</p><button class="button primary" type="submit" data-loading-label="Saving Dashboard Target Satellites…">Save Dashboard Target Satellites</button></footer>
-    </form>
+    {% if target_settings.needs_mapping_count %}<div class="satellite-target-mapping-note">{{ icon('info', 18) }}<p><strong>{{ target_settings.needs_mapping_count|number }} imported {{ 'Satellite needs' if target_settings.needs_mapping_count == 1 else 'Satellites need' }} mapping.</strong> Unresolved Satellites do not contribute to analytics. <a href="{{ url_for('dashboard.event_satellites', event_id=event.id, link_status='needs_mapping') }}">Review Needs Mapping</a>.</p></div>{% endif %}
+    {% if target_settings.options %}<div class="satellite-target-table-wrap" role="region" aria-label="Automatic Satellite reporting categories" tabindex="0"><table><thead><tr><th scope="col">Canonical Satellite</th><th scope="col">Hub</th><th scope="col">Hub Group</th><th scope="col">Active Batch</th><th scope="col">Reporting Category</th></tr></thead><tbody>{% for option in target_settings.options %}<tr><td><strong>{{ option.name }}</strong></td><td>{{ option.hub_name or 'Needs Mapping' }}</td><td>{{ option.group_name }}</td><td><span class="satellite-status is-{{ 'synced' if option.available_in_active_batch else 'review' }}">{{ 'Available' if option.available_in_active_batch else 'Not active' }}</span></td><td><span class="satellite-status is-{{ 'synced' if option.resolved else 'review' }}">{{ option.category_label }}</span></td></tr>{% endfor %}</tbody></table></div>
+    {% else %}<div class="satellite-settings-empty"><div><strong>No canonical Satellites are represented by this Event.</strong><p>Import or assign mapped Satellites to see their automatic Reporting Categories.</p></div></div>{% endif %}
+    <footer><p>{{ icon('info', 16) }} Main is identified by the durable canonical Main Hub; other Satellites inherit their Hub Group category.</p></footer>
 </section>
 <section class="satellite-analytics-grouping panel" id="dashboard-analytics-grouping" aria-labelledby="dashboard-analytics-grouping-title">
     <header>
-        <div><p class="eyebrow">Dashboard Reporting</p><h2 id="dashboard-analytics-grouping-title">Dashboard Analytics Grouping</h2><p>Choose how the three base Satellite categories roll up for targets and analytics. Base Satellite assignments remain unchanged.</p></div>
+        <div><p class="eyebrow">Dashboard Reporting</p><h2 id="dashboard-analytics-grouping-title">Dashboard Analytics Grouping</h2><p>Choose how the three automatically derived Satellite categories roll up for targets and analytics.</p></div>
         <span>{{ target_settings.analytics_grouping.groups|length }} {{ 'group' if target_settings.analytics_grouping.groups|length == 1 else 'groups' }} active</span>
     </header>
     <form method="post" action="{{ url_for('dashboard.update_satellite_target_grouping', event_id=event.id) }}" data-settings-form>
@@ -194,6 +178,18 @@
 </div>
 </dialog>
 
+<dialog class="satellite-record-dialog" aria-labelledby="satellite-directory-import-title" aria-describedby="satellite-directory-import-description" data-directory-import-dialog>
+<div class="satellite-record-dialog-panel">
+    <header><div><p class="eyebrow">Directory Data</p><h2 id="satellite-directory-import-title">Import Hubs and Satellites</h2></div><button type="button" class="satellite-record-dialog-close" aria-label="Close directory import" data-directory-import-close>{{ icon('close', 18) }}</button></header>
+    <form method="post" enctype="multipart/form-data" action="{{ url_for('dashboard.import_satellite_directory') }}" data-settings-form data-directory-import-form>
+        {{ request_context() }}
+        <p id="satellite-directory-import-description" class="satellite-directory-import-help">Choose a UTF-8 CSV exported from this page. New Hubs and Satellites will be added; existing records will be skipped. Nothing is deleted or overwritten.</p>
+        <label><span>Directory CSV</span><input type="file" name="directory_file" accept=".csv,text/csv" required data-directory-import-file><small>Required columns: Hub Group Code or Hub Group, Hub, and Satellite. Maximum file size: 2 MB.</small></label>
+        <footer><button class="button secondary" type="button" data-directory-import-close>Cancel</button><button class="button primary" type="submit" data-loading-label="Importing Directory…">Import Directory</button></footer>
+    </form>
+</div>
+</dialog>
+
 <dialog class="satellite-edit-drawer" aria-labelledby="satellite-edit-title" data-settings-edit-drawer>
 <div class="satellite-edit-drawer-panel">
     <header><div><p class="eyebrow" data-edit-eyebrow>Edit Record</p><h2 id="satellite-edit-title" data-edit-title>Edit Record</h2></div><button type="button" class="satellite-record-dialog-close" aria-label="Close edit drawer" data-settings-edit-close>{{ icon('close', 18) }}</button></header>
@@ -233,4 +229,4 @@
 </dialog>{% endif %}
 {% endblock %}
 
-{% block scripts %}<script src="{{ url_for('static', filename='satellite_settings.js', v='20260905-target-categories-phase2') }}" defer></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='satellite_settings.js', v='20260905-reporting-categories-directory-transfer') }}" defer></script>{% endblock %}

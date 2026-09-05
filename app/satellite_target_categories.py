@@ -1,13 +1,10 @@
-"""Fixed Event-level Satellite reporting category foundation.
-
-Category targets and membership are durable Event configuration. Membership
-uses canonical ``satellite_directory.id`` values and is deliberately
-independent from an Event's active import batch.
-"""
+"""Event analytics groups above hierarchy-derived reporting categories."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+from .satellite_reporting_categories import event_reporting_category_resolutions
 
 
 SATELLITE_TARGET_MAX = 1_000_000_000
@@ -31,11 +28,6 @@ SATELLITE_TARGET_CATEGORIES = (
 SATELLITE_TARGET_CATEGORY_KEYS = tuple(
     category.key for category in SATELLITE_TARGET_CATEGORIES
 )
-SATELLITE_TARGET_CATEGORY_BY_KEY = {
-    category.key: category for category in SATELLITE_TARGET_CATEGORIES
-}
-
-
 @dataclass(frozen=True)
 class SatelliteTargetGroupingPreset:
     key: str
@@ -137,19 +129,17 @@ def satellite_target_category_rows(db, event_id):
         for row in db.execute(
             """
             SELECT category.id, category.event_id, category.category_key,
-                   category.participant_target,
-                   COUNT(membership.id) satellite_count
+                   category.participant_target
             FROM event_satellite_target_categories category
-            LEFT JOIN event_satellite_target_satellites membership
-              ON membership.event_id = category.event_id
-             AND membership.category_key = category.category_key
             WHERE category.event_id = ?
-            GROUP BY category.id, category.event_id, category.category_key,
-                     category.participant_target
             """,
             (event_id,),
         ).fetchall()
     }
+    counts = {key: 0 for key in SATELLITE_TARGET_CATEGORY_KEYS}
+    for resolution in event_reporting_category_resolutions(db, event_id):
+        if resolution["resolved"]:
+            counts[resolution["category_key"]] += 1
     return [
         {
             "id": stored[definition.key]["id"],
@@ -157,7 +147,7 @@ def satellite_target_category_rows(db, event_id):
             "key": definition.key,
             "name": definition.name,
             "participant_target": stored[definition.key]["participant_target"],
-            "satellite_count": stored[definition.key]["satellite_count"],
+            "satellite_count": counts[definition.key],
         }
         for definition in SATELLITE_TARGET_CATEGORIES
     ]
@@ -258,19 +248,13 @@ def satellite_target_groups(db, event_id):
         raise SatelliteTargetCategoryValidationError(
             "Dashboard Analytics Grouping is not a supported configuration."
         )
-    memberships = db.execute(
-        """
-        SELECT category_key, directory_id
-        FROM event_satellite_target_satellites WHERE event_id = ?
-        ORDER BY directory_id
-        """,
-        (event_id,),
-    ).fetchall()
+    resolutions = event_reporting_category_resolutions(db, event_id)
     directories_by_category = {key: [] for key in SATELLITE_TARGET_CATEGORY_KEYS}
-    for membership in memberships:
-        directories_by_category[membership["category_key"]].append(
-            membership["directory_id"]
-        )
+    for resolution in resolutions:
+        if resolution["resolved"]:
+            directories_by_category[resolution["category_key"]].append(
+                resolution["directory_id"]
+            )
     for group in groups:
         group["directory_ids"] = sorted(
             {
@@ -358,113 +342,25 @@ def replace_satellite_target_grouping(db, event_id, preset_key):
 
 
 def satellite_target_settings(db, event_id):
-    """Return fixed categories and fully mapped canonical Satellite options."""
+    """Return automatic categories and the Event's canonical Satellite options."""
     categories = satellite_target_category_rows(db, event_id)
-    selected_rows = db.execute(
-        """
-        SELECT category_key, directory_id
-        FROM event_satellite_target_satellites
-        WHERE event_id = ?
-        """,
-        (event_id,),
-    ).fetchall()
-    selected_by_directory = {
-        row["directory_id"]: row["category_key"] for row in selected_rows
-    }
-    option_rows = db.execute(
-        """
-        SELECT directory.id directory_id, directory.name,
-               hub.id hub_id, hub.name hub_name,
-               hub_group.id group_id, hub_group.code group_code,
-               hub_group.name group_name,
-               CASE WHEN EXISTS (
-                   SELECT 1
-                   FROM satellites imported
-                   JOIN import_batches batch
-                     ON batch.id = imported.batch_id
-                    AND batch.event_id = imported.event_id
-                   WHERE imported.event_id = ?
-                     AND imported.directory_id = directory.id
-                     AND batch.status = 'active'
-               ) OR EXISTS (
-                   SELECT 1
-                   FROM event_registrant_satellites manual_assignment
-                   WHERE manual_assignment.event_id = ?
-                     AND manual_assignment.directory_id = directory.id
-                     AND manual_assignment.assignment_source = 'manual'
-               ) THEN 1 ELSE 0 END available_in_active_batch,
-               CASE WHEN EXISTS (
-                   SELECT 1
-                   FROM satellites imported
-                   WHERE imported.event_id = ?
-                     AND imported.directory_id = directory.id
-               ) OR EXISTS (
-                   SELECT 1
-                   FROM event_registrant_satellites assignment
-                   WHERE assignment.event_id = ?
-                     AND assignment.directory_id = directory.id
-               ) THEN 1 ELSE 0 END represented_in_event
-        FROM satellite_directory directory
-        JOIN satellite_hubs hub ON hub.id = directory.hub_id
-        JOIN hub_groups hub_group ON hub_group.id = hub.hub_group_id
-        WHERE EXISTS (
-            SELECT 1
-            FROM satellites imported
-            WHERE imported.event_id = ?
-              AND imported.directory_id = directory.id
-        ) OR EXISTS (
-            SELECT 1
-            FROM event_registrant_satellites assignment
-            WHERE assignment.event_id = ?
-              AND assignment.directory_id = directory.id
-        ) OR EXISTS (
-            SELECT 1
-            FROM event_satellite_target_satellites membership
-            WHERE membership.event_id = ?
-              AND membership.directory_id = directory.id
-        )
-        ORDER BY hub_group.sort_order, LOWER(hub_group.name), hub_group.id,
-                 LOWER(hub.name), hub.id, LOWER(directory.name), directory.id
-        """,
-        (event_id, event_id, event_id, event_id, event_id, event_id, event_id),
-    ).fetchall()
+    option_rows = event_reporting_category_resolutions(db, event_id)
     options = [
         {
-            **dict(row),
-            "category_key": selected_by_directory.get(row["directory_id"], ""),
+            **row,
+            "group_id": row["hub_group_id"],
+            "group_code": row["hub_group_code"],
+            "group_name": row["hub_group_name"] or "Needs Mapping",
+            "represented_in_event": True,
         }
         for row in option_rows
     ]
     selected_counts = {key: 0 for key in SATELLITE_TARGET_CATEGORY_KEYS}
     for option in options:
-        if option["category_key"]:
+        if option["resolved"]:
             selected_counts[option["category_key"]] += 1
     for category in categories:
         category["selected_count"] = selected_counts[category["key"]]
-
-    groups = []
-    hubs = []
-    seen_groups = set()
-    seen_hubs = set()
-    for option in options:
-        if option["group_id"] not in seen_groups:
-            groups.append(
-                {
-                    "id": option["group_id"],
-                    "code": option["group_code"],
-                    "name": option["group_name"],
-                }
-            )
-            seen_groups.add(option["group_id"])
-        if option["hub_id"] not in seen_hubs:
-            hubs.append(
-                {
-                    "id": option["hub_id"],
-                    "name": option["hub_name"],
-                    "group_code": option["group_code"],
-                }
-            )
-            seen_hubs.add(option["hub_id"])
 
     needs_mapping = db.execute(
         """
@@ -486,93 +382,11 @@ def satellite_target_settings(db, event_id):
     ).fetchone()[0]
     return {
         "categories": categories,
-        "groups": groups,
-        "hubs": hubs,
         "options": options,
         "selected_count": sum(selected_counts.values()),
         "needs_mapping_count": needs_mapping,
         "analytics_grouping": satellite_target_groups(db, event_id),
     }
-
-
-def validate_satellite_target_memberships(db, event_id, assignments):
-    """Validate a complete canonical category-assignment form snapshot."""
-    parsed = {}
-    malformed = False
-    for assignment in assignments:
-        directory_raw, separator, category_key = str(assignment or "").partition(":")
-        try:
-            directory_id = int(directory_raw)
-        except (TypeError, ValueError):
-            malformed = True
-            continue
-        if not separator or directory_id < 1 or directory_id in parsed:
-            malformed = True
-            continue
-        if category_key and category_key not in SATELLITE_TARGET_CATEGORY_BY_KEY:
-            malformed = True
-            continue
-        parsed[directory_id] = category_key
-    if malformed:
-        raise SatelliteTargetCategoryValidationError(
-            "One or more Dashboard Target Satellite assignments are invalid."
-        )
-
-    eligible = {
-        row["id"]
-        for row in db.execute(
-            """
-            SELECT directory.id
-            FROM satellite_directory directory
-            JOIN satellite_hubs hub ON hub.id = directory.hub_id
-            JOIN hub_groups hub_group ON hub_group.id = hub.hub_group_id
-            WHERE EXISTS (
-                SELECT 1 FROM satellites imported
-                WHERE imported.event_id = ?
-                  AND imported.directory_id = directory.id
-            ) OR EXISTS (
-                SELECT 1 FROM event_registrant_satellites assignment
-                WHERE assignment.event_id = ?
-                  AND assignment.directory_id = directory.id
-            ) OR EXISTS (
-                SELECT 1 FROM event_satellite_target_satellites membership
-                WHERE membership.event_id = ?
-                  AND membership.directory_id = directory.id
-            )
-            """,
-            (event_id, event_id, event_id),
-        ).fetchall()
-    }
-    if set(parsed) != eligible:
-        raise SatelliteTargetCategoryValidationError(
-            "The canonical Satellite directory changed while this form was open. "
-            "Reload the page and try again."
-        )
-    return [
-        (directory_id, category_key)
-        for directory_id, category_key in parsed.items()
-        if category_key
-    ]
-
-
-def replace_satellite_target_memberships(db, event_id, memberships):
-    """Atomically replace canonical membership inside the caller transaction."""
-    ensure_event_satellite_target_categories(db, event_id)
-    db.execute(
-        "DELETE FROM event_satellite_target_satellites WHERE event_id = ?",
-        (event_id,),
-    )
-    db.executemany(
-        """
-        INSERT INTO event_satellite_target_satellites (
-            event_id, category_key, directory_id
-        ) VALUES (?, ?, ?)
-        """,
-        [
-            (event_id, category_key, directory_id)
-            for directory_id, category_key in memberships
-        ],
-    )
 
 
 def validate_satellite_target_values(form, groups):

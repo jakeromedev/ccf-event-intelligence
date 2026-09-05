@@ -455,15 +455,6 @@ class AuthenticationTests(unittest.TestCase):
         self.assertEqual(
             403,
             self.client.post(
-                "/events/{}/satellite-target-categories/memberships".format(
-                    event_id
-                ),
-                data={"csrf_token": token},
-            ).status_code,
-        )
-        self.assertEqual(
-            403,
-            self.client.post(
                 "/events/{}/satellite-target-categories/targets".format(event_id),
                 data={
                     "csrf_token": token,
@@ -481,7 +472,7 @@ class AuthenticationTests(unittest.TestCase):
             ).status_code,
         )
 
-    def test_admin_target_category_membership_update_requires_csrf(self):
+    def test_admin_target_and_grouping_updates_require_csrf(self):
         _, admin_password = self.initialize_admin()
         with self.app.app_context():
             db = get_db()
@@ -493,25 +484,6 @@ class AuthenticationTests(unittest.TestCase):
             groups = satellite_target_groups(db, event_id)["groups"]
             db.commit()
         self.login("admin", admin_password)
-        path = "/events/{}/satellite-target-categories/memberships".format(event_id)
-        self.assertEqual(400, self.client.post(path).status_code)
-        token = self.csrf(
-            "/satellites/settings?event_id={}&view=targets".format(event_id)
-        )
-        response = self.client.post(path, data={"csrf_token": token})
-        self.assertEqual(302, response.status_code)
-        with self.app.app_context():
-            self.assertEqual(
-                3,
-                get_db().execute(
-                    """
-                    SELECT COUNT(*) FROM event_satellite_target_categories
-                    WHERE event_id = ?
-                    """,
-                    (event_id,),
-                ).fetchone()[0],
-            )
-
         target_path = "/events/{}/satellite-target-categories/targets".format(event_id)
         target_data = {
             "target_group_{}".format(group["id"]): str(value)
@@ -1055,15 +1027,6 @@ class AuthenticationTests(unittest.TestCase):
                     "name": "Denied Dataset",
                     "participant_target": "10",
                 },
-            ).status_code,
-        )
-        self.assertEqual(
-            403,
-            self.client.post(
-                "/events/{}/satellite-target-categories/memberships".format(
-                    event_id
-                ),
-                data={"csrf_token": token},
             ).status_code,
         )
         self.assertEqual(

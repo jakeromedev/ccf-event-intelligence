@@ -136,6 +136,18 @@ class SatelliteTargetCategoryMigrationTests(unittest.TestCase):
             )
             db.commit()
 
+        self._alembic(command.upgrade, "d6a2b8f4c105")
+        with self._connection() as db:
+            # A stale manual category must not override the canonical Outside Hub.
+            db.execute(
+                """
+                UPDATE event_satellite_target_satellites
+                SET category_key = 'within_metro_manila'
+                WHERE event_id = ? AND directory_id = ?
+                """,
+                (event_a, outside_directory),
+            )
+            db.commit()
         self._alembic(command.upgrade, "head")
         self._alembic(command.check)
         with self._connection() as db:
@@ -190,36 +202,50 @@ class SatelliteTargetCategoryMigrationTests(unittest.TestCase):
                 )
             db.rollback()
 
-            memberships = db.execute(
-                """
-                SELECT category_key, directory_id
-                FROM event_satellite_target_satellites
-                WHERE event_id = ?
-                ORDER BY category_key, directory_id
-                """,
-                (event_a,),
-            ).fetchall()
-            self.assertEqual(
-                [("main", main_directory), ("outside_metro_manila", outside_directory)],
-                [(row["category_key"], row["directory_id"]) for row in memberships],
-            )
-            self.assertNotIn(
-                overlap_directory, [row["directory_id"] for row in memberships]
-            )
-            self.assertNotIn(
-                arbitrary_directory, [row["directory_id"] for row in memberships]
-            )
-
-            # Membership is canonical and survives removal of imported evidence.
-            db.execute("DELETE FROM satellites WHERE id = ?", (outside_satellite,))
-            self.assertIsNotNone(
+            self.assertIsNone(
                 db.execute(
                     """
-                    SELECT id FROM event_satellite_target_satellites
-                    WHERE event_id = ? AND directory_id = ?
-                    """,
-                    (event_a, outside_directory),
+                    SELECT name FROM sqlite_master
+                    WHERE type = 'table'
+                      AND name = 'event_satellite_target_satellites'
+                    """
                 ).fetchone()
+            )
+            hub_identity = {
+                row["id"]: row["is_main"]
+                for row in db.execute(
+                    "SELECT id, is_main FROM satellite_hubs"
+                ).fetchall()
+            }
+            self.assertEqual(1, hub_identity[main_hub])
+            self.assertEqual(0, hub_identity[outside_hub])
+            self.assertEqual(
+                "outside_metro_manila",
+                db.execute(
+                    """
+                    SELECT hub_group.code
+                    FROM satellite_directory directory
+                    JOIN satellite_hubs hub ON hub.id = directory.hub_id
+                    JOIN hub_groups hub_group ON hub_group.id = hub.hub_group_id
+                    WHERE directory.id = ?
+                    """,
+                    (outside_directory,),
+                ).fetchone()[0],
+            )
+            # Conflicting legacy memberships no longer override hierarchy.
+            self.assertEqual(
+                main_hub,
+                db.execute(
+                    "SELECT hub_id FROM satellite_directory WHERE id = ?",
+                    (overlap_directory,),
+                ).fetchone()[0],
+            )
+            self.assertEqual(
+                main_hub,
+                db.execute(
+                    "SELECT hub_id FROM satellite_directory WHERE id = ?",
+                    (arbitrary_directory,),
+                ).fetchone()[0],
             )
 
             with self.assertRaises(sqlite3.IntegrityError):
@@ -232,37 +258,11 @@ class SatelliteTargetCategoryMigrationTests(unittest.TestCase):
                     (event_a,),
                 )
             db.rollback()
-            with self.assertRaises(sqlite3.IntegrityError):
-                db.execute(
-                    """
-                    INSERT INTO event_satellite_target_satellites (
-                        event_id, category_key, directory_id
-                    ) VALUES (?, 'within_metro_manila', ?)
-                    """,
-                    (event_a, main_directory),
-                )
-            db.rollback()
-
-            db.execute(
-                """
-                INSERT INTO event_satellite_target_satellites (
-                    event_id, category_key, directory_id
-                ) VALUES (?, 'main', ?)
-                """,
-                (event_b, main_directory),
-            )
             db.execute("DELETE FROM events WHERE id = ?", (event_b,))
             self.assertEqual(
                 0,
                 db.execute(
                     "SELECT COUNT(*) FROM event_satellite_target_categories WHERE event_id = ?",
-                    (event_b,),
-                ).fetchone()[0],
-            )
-            self.assertEqual(
-                0,
-                db.execute(
-                    "SELECT COUNT(*) FROM event_satellite_target_satellites WHERE event_id = ?",
                     (event_b,),
                 ).fetchone()[0],
             )

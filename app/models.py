@@ -682,6 +682,9 @@ class SatelliteHub(Base):
     )
     name: Mapped[str] = mapped_column(HUB_DIRECTORY_NAME_TYPE, nullable=False)
     normalized_name: Mapped[str] = mapped_column(HUB_DIRECTORY_NAME_TYPE, nullable=False)
+    is_main: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("0")
+    )
     created_at: Mapped[object] = mapped_column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
     )
@@ -757,55 +760,6 @@ class EventSatelliteTargetCategory(Base):
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
     )
     updated_at: Mapped[object] = mapped_column(
-        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
-    )
-
-
-class EventSatelliteTargetSatellite(Base):
-    """Canonical Satellite membership in one fixed Event target category."""
-
-    __tablename__ = "event_satellite_target_satellites"
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["event_id", "category_key"],
-            [
-                "event_satellite_target_categories.event_id",
-                "event_satellite_target_categories.category_key",
-            ],
-            ondelete="CASCADE",
-        ),
-        UniqueConstraint(
-            "event_id",
-            "category_key",
-            "directory_id",
-            name="uq_event_satellite_target_satellites_member",
-        ),
-        UniqueConstraint(
-            "event_id",
-            "directory_id",
-            name="uq_event_satellite_target_satellites_exclusive",
-        ),
-        Index(
-            "idx_event_satellite_target_satellites_category",
-            "event_id",
-            "category_key",
-        ),
-        Index(
-            "idx_event_satellite_target_satellites_directory",
-            "directory_id",
-        ),
-        MYSQL_TABLE_OPTIONS,
-    )
-
-    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
-    event_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
-    category_key: Mapped[str] = mapped_column(String(32), nullable=False)
-    directory_id: Mapped[int] = mapped_column(
-        ID_TYPE,
-        ForeignKey("satellite_directory.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    created_at: Mapped[object] = mapped_column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
     )
 

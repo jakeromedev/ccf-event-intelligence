@@ -299,7 +299,12 @@ class AnalyticsIntegrationTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(404, client.get(path).status_code)
         endpoints = {rule.endpoint for rule in self.app.url_map.iter_rules()}
-        self.assertFalse(any("export" in endpoint for endpoint in endpoints))
+        self.assertFalse(
+            any(
+                "analytics" in endpoint and "export" in endpoint
+                for endpoint in endpoints
+            )
+        )
         page = client.get("/events/{}/analytics".format(self.event_a))
         self.assertNotIn(b"Download", page.data)
         self.assertNotIn(b"text/csv", page.data)

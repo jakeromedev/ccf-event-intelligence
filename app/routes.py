@@ -62,11 +62,14 @@ from .satellite_datasets import (
     validate_satellite_dataset_form,
 )
 from .satellite_settings import (
+    MAX_DIRECTORY_IMPORT_BYTES,
     SatelliteSettingsValidationError,
     confirm_bulk_hubs,
     confirm_bulk_satellites,
     create_hub,
     create_satellite,
+    export_directory_csv,
+    import_directory_csv,
     review_bulk_hubs,
     review_bulk_satellites,
     satellite_settings_hierarchy,
@@ -78,12 +81,10 @@ from .satellite_target_categories import (
     SatelliteTargetCategoryValidationError,
     ensure_event_satellite_target_categories,
     ensure_event_satellite_target_groups,
-    replace_satellite_target_memberships,
     replace_satellite_target_grouping,
     satellite_target_groups,
     satellite_target_settings,
     update_satellite_target_values,
-    validate_satellite_target_memberships,
     validate_satellite_target_values,
 )
 from .satellite_sync import (
@@ -842,6 +843,70 @@ def satellite_settings():
     return _render_satellite_settings(event_id, sync_review=sync_review)
 
 
+@bp.get("/satellites/settings/directory/export.csv")
+@satellite_settings_management_required
+def export_satellite_directory():
+    response = current_app.response_class(
+        export_directory_csv(get_db()), content_type="text/csv; charset=utf-8"
+    )
+    response.headers["Content-Disposition"] = (
+        "attachment; filename=satellite-directory-{}.csv".format(
+            datetime.now().strftime("%Y-%m-%d")
+        )
+    )
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+@bp.post("/satellites/settings/directory/import")
+@satellite_settings_management_required
+def import_satellite_directory():
+    db = get_db()
+    upload = request.files.get("directory_file")
+    try:
+        if upload is None or not upload.filename:
+            raise SatelliteSettingsValidationError("Choose a CSV file to import.")
+        result = import_directory_csv(
+            db, upload.stream.read(MAX_DIRECTORY_IMPORT_BYTES + 1)
+        )
+        db.commit()
+    except SatelliteSettingsValidationError as exc:
+        db.rollback()
+        flash(str(exc), "error")
+        return _satellite_settings_redirect("#hub-groups")
+    except IntegrityError:
+        db.rollback()
+        flash(
+            "The directory changed during import. Export it again and retry.",
+            "error",
+        )
+        return _satellite_settings_redirect("#hub-groups")
+    flash(
+        (
+            "Imported {rows} rows: created {created_hubs} {hub_label} and "
+            "{created_satellites} {satellite_label}. Skipped {existing_hubs} "
+            "existing {existing_hub_label} and {existing_satellites} existing "
+            "{existing_satellite_label}."
+        ).format(
+            **result,
+            hub_label="Hub" if result["created_hubs"] == 1 else "Hubs",
+            satellite_label=(
+                "Satellite" if result["created_satellites"] == 1 else "Satellites"
+            ),
+            existing_hub_label=(
+                "Hub" if result["existing_hubs"] == 1 else "Hubs"
+            ),
+            existing_satellite_label=(
+                "Satellite"
+                if result["existing_satellites"] == 1
+                else "Satellites"
+            ),
+        ),
+        "success",
+    )
+    return _satellite_settings_redirect("#hub-groups")
+
+
 @bp.get("/satellites/settings/registrants")
 @satellite_settings_management_required
 def satellite_settings_registrants():
@@ -862,55 +927,6 @@ def satellite_settings_registrants():
     ):
         abort(404)
     return jsonify(payload)
-
-
-@bp.post("/events/<int:event_id>/satellite-target-categories/memberships")
-@satellite_settings_management_required
-@event_mutation_required
-def update_satellite_target_category_memberships(event_id):
-    get_event_or_404(event_id)
-    db = get_db()
-    try:
-        memberships = validate_satellite_target_memberships(
-            db, event_id, request.form.getlist("category_assignments")
-        )
-        replace_satellite_target_memberships(db, event_id, memberships)
-        db.commit()
-    except SatelliteTargetCategoryValidationError as exc:
-        db.rollback()
-        flash("{} No changes were made.".format(exc), "error")
-        return redirect(
-            url_for("dashboard.satellite_settings", event_id=event_id, view="targets")
-            + "#dashboard-target-satellites"
-        )
-    except (IntegrityError, SQLAlchemyError):
-        db.rollback()
-        current_app.logger.exception(
-            "Dashboard Target Satellite membership update failed."
-        )
-        flash(
-            "Dashboard Target Satellites could not be saved. No changes were made.",
-            "error",
-        )
-        return redirect(
-            url_for("dashboard.satellite_settings", event_id=event_id, view="targets")
-            + "#dashboard-target-satellites"
-        )
-
-    current_app.logger.info(
-        "satellite_target_category_memberships_updated",
-        extra={
-            "event": "satellite_target_category_memberships_updated",
-            "event_id": event_id,
-            "membership_count": len(memberships),
-            "user_id": getattr(current_user, "id", None),
-        },
-    )
-    flash("Dashboard Target Satellites saved.", "success")
-    return redirect(
-        url_for("dashboard.satellite_settings", event_id=event_id, view="targets")
-        + "#dashboard-target-satellites"
-    )
 
 
 @bp.post("/events/<int:event_id>/satellite-target-categories/targets")

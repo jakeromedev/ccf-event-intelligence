@@ -1,4 +1,5 @@
 import csv
+import io
 import json
 import os
 import tempfile
@@ -808,8 +809,9 @@ class EventIntegrationTests(unittest.TestCase):
             ).lastrowid
             main_hub = db.execute(
                 """
-                INSERT INTO satellite_hubs (hub_group_id, name, normalized_name)
-                VALUES (?, 'Main Hub', 'main hub')
+                INSERT INTO satellite_hubs (
+                    hub_group_id, name, normalized_name, is_main
+                ) VALUES (?, 'Main Hub', 'main hub', 1)
                 """,
                 (within_group,),
             ).lastrowid
@@ -842,27 +844,6 @@ class EventIntegrationTests(unittest.TestCase):
                     (outside_hub, directories["ccf singapore"]),
                 ],
             )
-            db.executemany(
-                """
-                INSERT INTO event_satellite_target_satellites (
-                    event_id, category_key, directory_id
-                ) VALUES (?, ?, ?)
-                """,
-                [
-                    (self.event_a, "main", directories["ccf main"]),
-                    (
-                        self.event_a,
-                        "outside_metro_manila",
-                        directories["ccf eastwood"],
-                    ),
-                    (
-                        self.event_a,
-                        "outside_metro_manila",
-                        directories["ccf singapore"],
-                    ),
-                ],
-            )
-
             # The duplicate has the same complete identity as R-2 but another
             # Satellite association. It remains one person within the category.
             db.execute(
@@ -969,6 +950,45 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertEqual(1, before_satellites["needs_mapping"])
         self.assertEqual(1, before_satellites["needs_mapping_associations"])
 
+        # Moving a canonical Satellite reclassifies both Dashboard Actuals and
+        # the Satellites distribution without a second category update.
+        with self.app.app_context():
+            db = get_db()
+            db.execute(
+                "UPDATE satellite_directory SET hub_id = ? WHERE id = ?",
+                (main_hub, directories["ccf eastwood"]),
+            )
+            db.commit()
+            hierarchy_dashboard = event_dashboard_metrics(db, self.event_a)
+            hierarchy_satellites = canonical_satellite_metrics(db, batch_id)
+            db.execute(
+                "UPDATE satellite_directory SET hub_id = ? WHERE id = ?",
+                (outside_hub, directories["ccf eastwood"]),
+            )
+            db.commit()
+        hierarchy_categories = {
+            item["key"]: item
+            for item in hierarchy_dashboard["satellite_target_categories"]
+        }
+        hierarchy_distribution = {
+            item["key"]: item
+            for item in hierarchy_satellites["target_category_distribution"][
+                "categories"
+            ]
+        }
+        self.assertGreater(
+            hierarchy_categories["main"]["actual_participants"],
+            categories["main"]["actual_participants"],
+        )
+        self.assertLess(
+            hierarchy_distribution["outside_metro_manila"]["associations"],
+            distribution_categories["outside_metro_manila"]["associations"],
+        )
+        self.assertGreater(
+            hierarchy_distribution["main"]["associations"],
+            distribution_categories["main"]["associations"],
+        )
+
         with self.app.app_context():
             db = get_db()
             participant_id = db.execute(
@@ -1026,8 +1046,8 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertIn(b"conic-gradient", satellite_page.data)
         self.assertNotIn(b"No categorized associations yet", satellite_page.data)
 
-        # A replacement batch reuses durable membership, targets, and the
-        # manual override, while inactive associations stop contributing.
+        # A replacement batch reuses hierarchy-derived categories, targets,
+        # and the manual override, while inactive associations stop contributing.
         replacement_batch = self._process(self.event_a)
         with self.app.app_context():
             replacement_dashboard = event_dashboard_metrics(get_db(), self.event_a)
@@ -1055,10 +1075,10 @@ class EventIntegrationTests(unittest.TestCase):
             other_distribution = canonical_satellite_metrics(
                 get_db(), other_batch
             )["target_category_distribution"]
-        self.assertEqual(0, other_distribution["association_count"])
+        self.assertEqual(3, other_distribution["association_count"])
         self.assertEqual(
-            [0, 0, 0],
-            [item["associations"] for item in other_distribution["categories"]],
+            3,
+            sum(item["associations"] for item in other_distribution["categories"]),
         )
 
         reactivated = client.post(
@@ -1157,7 +1177,7 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertIn(b"Dashboard Analytics Grouping", settings_page.data)
         self.assertEqual(5, settings_page.data.count(b'name="grouping_preset"'))
         self.assertLess(
-            settings_page.data.index(b"Dashboard Target Satellites"),
+            settings_page.data.index(b"Satellite Reporting Categories"),
             settings_page.data.index(b"Dashboard Analytics Grouping"),
         )
 
@@ -2098,6 +2118,149 @@ class EventIntegrationTests(unittest.TestCase):
                     "SELECT COUNT(*) FROM satellite_directory WHERE hub_id = ?",
                     (east_hub,),
                 ).fetchone()[0],
+            )
+
+    def test_satellite_settings_directory_csv_export_and_import_round_trip(self):
+        with self.app.app_context():
+            db = get_db()
+            db.executemany(
+                """
+                INSERT INTO hub_groups (id, code, name, sort_order)
+                VALUES (?, ?, ?, ?)
+                """,
+                [
+                    (1, "within_metro_manila", "Within Metro Manila Hubs", 1),
+                    (2, "outside_metro_manila", "Outside Metro Manila Hubs", 2),
+                ],
+            )
+            hub_id = db.execute(
+                """
+                INSERT INTO satellite_hubs
+                    (hub_group_id, name, normalized_name)
+                VALUES (1, 'Metro East', 'metro east')
+                """
+            ).lastrowid
+            db.execute(
+                """
+                INSERT INTO satellite_directory (hub_id, name, normalized_name)
+                VALUES (?, 'B1G Eastwood', 'b1g eastwood')
+                """,
+                (hub_id,),
+            )
+            db.execute(
+                """
+                INSERT INTO satellite_hubs
+                    (hub_group_id, name, normalized_name)
+                VALUES (2, 'Empty Hub', 'empty hub')
+                """
+            )
+            db.commit()
+
+        client = self.app.test_client()
+        page = client.get("/satellites/settings")
+        self.assertIn(b"Export CSV", page.data)
+        self.assertIn(b"Import CSV", page.data)
+        self.assertIn(b'data-directory-import-dialog', page.data)
+
+        exported = client.get("/satellites/settings/directory/export.csv")
+        self.assertEqual(200, exported.status_code)
+        self.assertEqual("text/csv; charset=utf-8", exported.content_type)
+        self.assertIn(
+            "attachment; filename=satellite-directory-",
+            exported.headers["Content-Disposition"],
+        )
+        csv_rows = list(
+            csv.DictReader(io.StringIO(exported.data.decode("utf-8-sig")))
+        )
+        self.assertEqual(
+            ["Hub Group Code", "Hub Group", "Hub", "Satellite"],
+            list(csv_rows[0]),
+        )
+        self.assertIn(
+            {
+                "Hub Group Code": "within_metro_manila",
+                "Hub Group": "Within Metro Manila Hubs",
+                "Hub": "Metro East",
+                "Satellite": "B1G Eastwood",
+            },
+            csv_rows,
+        )
+        self.assertTrue(
+            any(row["Hub"] == "Empty Hub" and not row["Satellite"] for row in csv_rows)
+        )
+
+        imported_csv = (
+            "Hub Group,Hub,Satellite\n"
+            "Within Metro Manila Hubs,Metro East,B1G Eastwood\n"
+            "Outside Metro Manila Hubs,North Luzon,B1G Baguio\n"
+            "Outside Metro Manila Hubs,North Luzon,B1G La Trinidad\n"
+            "Outside Metro Manila Hubs,Hub Without Satellite,\n"
+        ).encode()
+        imported = client.post(
+            "/satellites/settings/directory/import",
+            data={
+                "event_id": str(self.event_a),
+                "directory_file": (io.BytesIO(imported_csv), "directory.csv"),
+            },
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+        self.assertEqual(200, imported.status_code)
+        self.assertIn(b"created 2 Hubs and 2 Satellites", imported.data)
+        self.assertIn(b"Skipped 1 existing Hub and 1 existing Satellite", imported.data)
+        with self.app.app_context():
+            db = get_db()
+            self.assertEqual(
+                4, db.execute("SELECT COUNT(*) FROM satellite_hubs").fetchone()[0]
+            )
+            self.assertEqual(
+                3,
+                db.execute("SELECT COUNT(*) FROM satellite_directory").fetchone()[0],
+            )
+
+        repeated = client.post(
+            "/satellites/settings/directory/import",
+            data={"directory_file": (io.BytesIO(imported_csv), "directory.csv")},
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+        self.assertIn(b"created 0 Hubs and 0 Satellites", repeated.data)
+
+    def test_satellite_settings_directory_csv_import_is_atomic_on_invalid_row(self):
+        with self.app.app_context():
+            db = get_db()
+            db.executemany(
+                """
+                INSERT INTO hub_groups (id, code, name, sort_order)
+                VALUES (?, ?, ?, ?)
+                """,
+                [
+                    (1, "within_metro_manila", "Within Metro Manila Hubs", 1),
+                    (2, "outside_metro_manila", "Outside Metro Manila Hubs", 2),
+                ],
+            )
+            db.commit()
+
+        response = self.app.test_client().post(
+            "/satellites/settings/directory/import",
+            data={
+                "directory_file": (
+                    io.BytesIO(
+                        b"Hub Group Code,Hub,Satellite\n"
+                        b"within_metro_manila,Valid Hub,Valid Satellite\n"
+                        b"unknown_group,Invalid Hub,Invalid Satellite\n"
+                    ),
+                    "directory.csv",
+                )
+            },
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+        self.assertIn(b"Row 3 has an unknown Hub Group", response.data)
+        with self.app.app_context():
+            self.assertEqual(
+                0,
+                get_db().execute("SELECT COUNT(*) FROM satellite_hubs").fetchone()[0],
             )
 
     def test_satellite_settings_bulk_review_and_confirm_creates_individual_rows(self):

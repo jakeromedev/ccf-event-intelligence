@@ -5,6 +5,7 @@ from __future__ import annotations
 from .satellite_target_categories import (
     satellite_target_groups,
 )
+from .satellite_reporting_categories import REPORTING_CATEGORY_SQL
 
 
 def _percentage(value, total):
@@ -80,27 +81,24 @@ def satellite_target_category_analytics(db, event_id, batch_id):
                    ) actual_participants,
                    COUNT(association.id) associations
             FROM event_satellite_target_groups report
-            JOIN event_satellite_target_group_categories group_category
-              ON group_category.target_group_id = report.id
-             AND group_category.event_id = report.event_id
-            JOIN event_satellite_target_satellites membership
-              ON membership.event_id = group_category.event_id
-             AND membership.category_key = group_category.category_key
             JOIN effective_associations association
-              ON association.event_id = membership.event_id
+              ON association.event_id = report.event_id
              AND association.batch_id = ?
-             AND association.directory_id = membership.directory_id
             JOIN satellite_directory directory
               ON directory.id = association.directory_id
             JOIN satellite_hubs hub ON hub.id = directory.hub_id
             JOIN hub_groups hub_group ON hub_group.id = hub.hub_group_id
+            JOIN event_satellite_target_group_categories group_category
+              ON group_category.target_group_id = report.id
+             AND group_category.event_id = report.event_id
+             AND group_category.category_key = {category_sql}
             JOIN curated_registrants curated
               ON curated.id = association.curated_registrant_id
              AND curated.event_id = association.event_id
              AND curated.batch_id = association.batch_id
             WHERE report.event_id = ?
             GROUP BY report.id
-            """,
+            """.format(category_sql=REPORTING_CATEGORY_SQL),
             (batch_id, event_id),
         ).fetchall()
         counts.update(

@@ -1,4 +1,3 @@
-import inspect
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +9,10 @@ from app import create_app
 from app.aggregation import event_dashboard_metrics
 from app.db import get_db, get_engine
 from app.models import Base
+from app.satellite_reporting_categories import (
+    resolve_reporting_categories,
+    resolve_reporting_category,
+)
 from app.satellite_target_categories import (
     SATELLITE_TARGET_CATEGORY_KEYS,
     SatelliteTargetCategoryValidationError,
@@ -17,7 +20,6 @@ from app.satellite_target_categories import (
     replace_satellite_target_grouping,
     satellite_target_category_rows,
     satellite_target_groups,
-    satellite_target_settings,
 )
 
 
@@ -55,12 +57,6 @@ class SatelliteTargetCategoryFoundationTests(unittest.TestCase):
             "target_group_{}".format(group["id"]): str(value)
             for group, value in zip(groups, values)
         }
-
-    def test_target_settings_query_avoids_mysql_reserved_manual_alias(self):
-        source = inspect.getsource(satellite_target_settings)
-
-        self.assertNotIn("event_registrant_satellites manual\n", source)
-        self.assertIn("event_registrant_satellites manual_assignment", source)
 
     def test_event_creation_seeds_exactly_three_fixed_categories(self):
         response = self.app.test_client().post(
@@ -266,114 +262,11 @@ class SatelliteTargetCategoryFoundationTests(unittest.TestCase):
             )
             self.assertEqual("separate", grouping_b["preset_key"])
 
-    def test_database_enforces_targets_membership_exclusivity_and_cascades(self):
-        with self.app.app_context():
-            db = get_db()
-            event_id = db.execute(
-                "INSERT INTO events (name) VALUES ('Constraint Event')"
-            ).lastrowid
-            ensure_event_satellite_target_categories(db, event_id)
-            db.execute(
-                """
-                INSERT INTO hub_groups (code, name, sort_order)
-                VALUES ('within_metro_manila', 'Within Metro Manila Hubs', 1)
-                """
-            )
-            hub_id = db.execute(
-                """
-                INSERT INTO satellite_hubs (hub_group_id, name, normalized_name)
-                VALUES (1, 'Main Hub', 'main hub')
-                """
-            ).lastrowid
-            directory_id = db.execute(
-                """
-                INSERT INTO satellite_directory (hub_id, name, normalized_name)
-                VALUES (?, 'B1G Main', 'b1g main')
-                """,
-                (hub_id,),
-            ).lastrowid
-            db.execute(
-                """
-                INSERT INTO event_satellite_target_satellites (
-                    event_id, category_key, directory_id
-                ) VALUES (?, 'main', ?)
-                """,
-                (event_id, directory_id),
-            )
-            db.commit()
-
-            with self.assertRaises(IntegrityError):
-                db.execute(
-                    """
-                    INSERT INTO event_satellite_target_satellites (
-                        event_id, category_key, directory_id
-                    ) VALUES (?, 'within_metro_manila', ?)
-                    """,
-                    (event_id, directory_id),
-                )
-                db.commit()
-            db.rollback()
-
-            with self.assertRaises(IntegrityError):
-                db.execute(
-                    """
-                    INSERT INTO event_satellite_target_categories (
-                        event_id, category_key, participant_target
-                    ) VALUES (?, 'main', 1)
-                    """,
-                    (event_id,),
-                )
-                db.commit()
-            db.rollback()
-
-            with self.assertRaises(IntegrityError):
-                db.execute(
-                    """
-                    INSERT INTO event_satellite_target_satellites (
-                        event_id, category_key, directory_id
-                    ) VALUES (?, 'main', ?)
-                    """,
-                    (event_id + 1, directory_id),
-                )
-                db.commit()
-            db.rollback()
-
-            with self.assertRaises(IntegrityError):
-                db.execute(
-                    """
-                    UPDATE event_satellite_target_categories
-                    SET participant_target = 1000000001
-                    WHERE event_id = ? AND category_key = 'main'
-                    """,
-                    (event_id,),
-                )
-                db.commit()
-            db.rollback()
-
-            db.execute("DELETE FROM events WHERE id = ?", (event_id,))
-            db.commit()
-            self.assertEqual(
-                0,
-                db.execute(
-                    "SELECT COUNT(*) FROM event_satellite_target_categories WHERE event_id = ?",
-                    (event_id,),
-                ).fetchone()[0],
-            )
-            self.assertEqual(
-                0,
-                db.execute(
-                    "SELECT COUNT(*) FROM event_satellite_target_satellites WHERE event_id = ?",
-                    (event_id,),
-                ).fetchone()[0],
-            )
-
-    def test_settings_page_saves_complete_canonical_membership_atomically(self):
+    def test_reporting_category_resolver_uses_hierarchy_and_stable_main_identity(self):
         with self.app.app_context():
             db = get_db()
             event_a = db.execute("INSERT INTO events (name) VALUES ('Event A')").lastrowid
-            event_b = db.execute("INSERT INTO events (name) VALUES ('Event B')").lastrowid
             ensure_event_satellite_target_categories(db, event_a)
-            ensure_event_satellite_target_categories(db, event_b)
             within_group = db.execute(
                 """
                 INSERT INTO hub_groups (code, name, sort_order)
@@ -400,12 +293,20 @@ class SatelliteTargetCategoryFoundationTests(unittest.TestCase):
                 """,
                 (outside_group,),
             ).lastrowid
+            main_hub = db.execute(
+                """
+                INSERT INTO satellite_hubs (
+                    hub_group_id, name, normalized_name, is_main
+                ) VALUES (?, 'Main Hub', 'main hub', 1)
+                """,
+                (within_group,),
+            ).lastrowid
             main_directory = db.execute(
                 """
                 INSERT INTO satellite_directory (hub_id, name, normalized_name)
                 VALUES (?, 'B1G Main', 'b1g main')
                 """,
-                (within_hub,),
+                (main_hub,),
             ).lastrowid
             icp_directory = db.execute(
                 """
@@ -420,6 +321,118 @@ class SatelliteTargetCategoryFoundationTests(unittest.TestCase):
                 VALUES (?, 'B1G Antipolo', 'b1g antipolo')
                 """,
                 (within_hub,),
+            ).lastrowid
+            unmapped_directory = db.execute(
+                """
+                INSERT INTO satellite_directory (name, normalized_name)
+                VALUES ('Unmapped', 'unmapped')
+                """
+            ).lastrowid
+            resolutions = {
+                row["directory_id"]: row
+                for row in resolve_reporting_categories(
+                    db,
+                    [
+                        main_directory,
+                        icp_directory,
+                        east_directory,
+                        unmapped_directory,
+                    ],
+                )
+            }
+            self.assertEqual("main", resolutions[main_directory]["category_key"])
+            self.assertEqual(
+                "outside_metro_manila", resolutions[icp_directory]["category_key"]
+            )
+            self.assertEqual(
+                "within_metro_manila", resolutions[east_directory]["category_key"]
+            )
+            self.assertFalse(resolutions[unmapped_directory]["resolved"])
+            self.assertEqual(
+                "Needs Mapping", resolutions[unmapped_directory]["category_label"]
+            )
+
+            db.execute(
+                "UPDATE satellite_directory SET hub_id = ? WHERE id = ?",
+                (outside_hub, east_directory),
+            )
+            self.assertEqual(
+                "outside_metro_manila",
+                resolve_reporting_category(db, east_directory)["category_key"],
+            )
+            db.execute(
+                """
+                UPDATE satellite_hubs
+                SET hub_group_id = ?, name = 'Renamed Canonical Hub',
+                    normalized_name = 'renamed canonical hub'
+                WHERE id = ?
+                """,
+                (outside_group, main_hub),
+            )
+            self.assertEqual(
+                "main", resolve_reporting_category(db, main_directory)["category_key"]
+            )
+            missing = resolve_reporting_category(db, 999999)
+            self.assertFalse(missing["resolved"])
+            self.assertIsNone(missing["category_key"])
+
+            with self.assertRaises(IntegrityError):
+                db.execute(
+                    """
+                    INSERT INTO event_satellite_target_categories (
+                        event_id, category_key, participant_target
+                    ) VALUES (?, 'main', 1)
+                    """,
+                    (event_a,),
+                )
+
+    def test_settings_page_displays_automatic_categories_without_manual_writes(self):
+        with self.app.app_context():
+            db = get_db()
+            event_a = db.execute("INSERT INTO events (name) VALUES ('Event A')").lastrowid
+            event_b = db.execute("INSERT INTO events (name) VALUES ('Event B')").lastrowid
+            ensure_event_satellite_target_categories(db, event_a)
+            ensure_event_satellite_target_categories(db, event_b)
+            within_group = db.execute(
+                """
+                INSERT INTO hub_groups (code, name, sort_order)
+                VALUES ('within_metro_manila', 'Within Metro Manila Hubs', 1)
+                """
+            ).lastrowid
+            outside_group = db.execute(
+                """
+                INSERT INTO hub_groups (code, name, sort_order)
+                VALUES ('outside_metro_manila', 'Outside Metro Manila Hubs', 2)
+                """
+            ).lastrowid
+            main_hub = db.execute(
+                """
+                INSERT INTO satellite_hubs (
+                    hub_group_id, name, normalized_name, is_main
+                ) VALUES (?, 'Main Hub', 'main hub', 1)
+                """,
+                (within_group,),
+            ).lastrowid
+            outside_hub = db.execute(
+                """
+                INSERT INTO satellite_hubs (hub_group_id, name, normalized_name)
+                VALUES (?, 'ICP', 'icp')
+                """,
+                (outside_group,),
+            ).lastrowid
+            main_directory = db.execute(
+                """
+                INSERT INTO satellite_directory (hub_id, name, normalized_name)
+                VALUES (?, 'B1G Main', 'b1g main')
+                """,
+                (main_hub,),
+            ).lastrowid
+            icp_directory = db.execute(
+                """
+                INSERT INTO satellite_directory (hub_id, name, normalized_name)
+                VALUES (?, 'B1G Singapore', 'b1g singapore')
+                """,
+                (outside_hub,),
             ).lastrowid
             unmapped_directory = db.execute(
                 """
@@ -447,14 +460,7 @@ class SatelliteTargetCategoryFoundationTests(unittest.TestCase):
                         "B1G Singapore",
                         "b1g singapore",
                     ),
-                    (
-                        event_a,
-                        batch_id,
-                        east_directory,
-                        "B1G Antipolo",
-                        "b1g antipolo",
-                    ),
-                    (event_a, batch_id, None, "Unmapped", "unmapped import"),
+                    (event_a, batch_id, unmapped_directory, "Unmapped", "unmapped"),
                 ],
             )
             db.commit()
@@ -465,109 +471,44 @@ class SatelliteTargetCategoryFoundationTests(unittest.TestCase):
             query_string={"event_id": event_a, "view": "targets"},
         )
         self.assertEqual(200, page.status_code)
-        self.assertIn(b"Dashboard Target Satellites", page.data)
+        self.assertIn(b"Satellite Reporting Categories", page.data)
         self.assertIn(b"B1G Singapore", page.data)
-        self.assertIn(b"data-target-category-settings", page.data)
-        self.assertNotIn(
-            'target-category-{}'.format(unmapped_directory).encode(), page.data
+        self.assertIn(b"Main", page.data)
+        self.assertIn(b"Outside Metro Manila Hubs", page.data)
+        self.assertIn(b"Needs Mapping", page.data)
+        self.assertNotIn(b"category_assignments", page.data)
+        self.assertNotIn(b"Bulk assignment", page.data)
+        self.assertEqual(
+            404,
+            client.post(
+                "/events/{}/satellite-target-categories/memberships".format(event_a)
+            ).status_code,
         )
 
-        assignments = [
-            "{}:main".format(main_directory),
-            "{}:outside_metro_manila".format(icp_directory),
-            "{}:within_metro_manila".format(east_directory),
-        ]
-        saved = client.post(
-            "/events/{}/satellite-target-categories/memberships".format(event_a),
-            data={"category_assignments": assignments},
-            follow_redirects=True,
-        )
-        self.assertEqual(200, saved.status_code)
-        self.assertIn(b"Dashboard Target Satellites saved", saved.data)
         with self.app.app_context():
             db = get_db()
-            rows = db.execute(
-                """
-                SELECT category_key, directory_id
-                FROM event_satellite_target_satellites
-                WHERE event_id = ? ORDER BY directory_id
-                """,
-                (event_a,),
-            ).fetchall()
-            self.assertEqual(
-                sorted(
-                    [
-                        ("main", main_directory),
-                        ("outside_metro_manila", icp_directory),
-                        ("within_metro_manila", east_directory),
-                    ],
-                    key=lambda row: row[1],
-                ),
-                [(row["category_key"], row["directory_id"]) for row in rows],
-            )
-            self.assertEqual(
-                0,
-                db.execute(
-                    "SELECT COUNT(*) FROM event_satellite_target_satellites WHERE event_id = ?",
-                    (event_b,),
-                ).fetchone()[0],
-            )
-            db.execute("DELETE FROM satellites WHERE event_id = ?", (event_a,))
             db.execute(
                 """
-                UPDATE satellite_directory
-                SET hub_id = ?, name = 'B1G Main Renamed',
-                    normalized_name = 'b1g main renamed'
+                UPDATE satellite_hubs
+                SET hub_group_id = ?, name = 'Main Hub Renamed',
+                    normalized_name = 'main hub renamed'
                 WHERE id = ?
                 """,
-                (outside_hub, main_directory),
+                (outside_group, main_hub),
             )
             db.commit()
 
-        persisted = client.get(
+        updated = client.get(
             "/satellites/settings",
             query_string={"event_id": event_a, "view": "targets"},
         )
-        self.assertIn(b"B1G Main Renamed", persisted.data)
-        self.assertIn(
-            'value="{}:main" selected'.format(main_directory).encode(),
-            persisted.data,
+        self.assertIn(b"Main Hub Renamed", updated.data)
+        self.assertIn(b"Main", updated.data)
+        other_event = client.get(
+            "/satellites/settings",
+            query_string={"event_id": event_b, "view": "targets"},
         )
-
-        # A stale/incomplete snapshot fails before deletion and keeps every row.
-        rejected = client.post(
-            "/events/{}/satellite-target-categories/memberships".format(event_a),
-            data={"category_assignments": assignments[:-1]},
-            follow_redirects=True,
-        )
-        self.assertEqual(200, rejected.status_code)
-        self.assertIn(b"directory changed while this form was open", rejected.data)
-        cross_event = client.post(
-            "/events/{}/satellite-target-categories/memberships".format(event_b),
-            data={"category_assignments": assignments},
-            follow_redirects=True,
-        )
-        self.assertEqual(200, cross_event.status_code)
-        self.assertIn(b"directory changed while this form was open", cross_event.data)
-        with self.app.app_context():
-            self.assertEqual(
-                3,
-                get_db().execute(
-                    "SELECT COUNT(*) FROM event_satellite_target_satellites WHERE event_id = ?",
-                    (event_a,),
-                ).fetchone()[0],
-            )
-            self.assertEqual(
-                0,
-                get_db().execute(
-                    "SELECT COUNT(*) FROM event_satellite_target_satellites WHERE event_id = ?",
-                    (event_b,),
-                ).fetchone()[0],
-            )
-
-        script = (Path(__file__).parents[1] / "app/static/satellite_settings.js").read_text()
-        self.assertIn("if (!matches) row.querySelector", script)
-        self.assertNotIn("select.disabled", script)
+        self.assertIn(b"No canonical Satellites are represented by this Event", other_event.data)
 
 
 if __name__ == "__main__":
