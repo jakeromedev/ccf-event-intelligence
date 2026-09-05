@@ -1,3 +1,4 @@
+import inspect
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,6 +17,7 @@ from app.satellite_target_categories import (
     replace_satellite_target_grouping,
     satellite_target_category_rows,
     satellite_target_groups,
+    satellite_target_settings,
 )
 
 
@@ -53,6 +55,12 @@ class SatelliteTargetCategoryFoundationTests(unittest.TestCase):
             "target_group_{}".format(group["id"]): str(value)
             for group, value in zip(groups, values)
         }
+
+    def test_target_settings_query_avoids_mysql_reserved_manual_alias(self):
+        source = inspect.getsource(satellite_target_settings)
+
+        self.assertNotIn("event_registrant_satellites manual\n", source)
+        self.assertIn("event_registrant_satellites manual_assignment", source)
 
     def test_event_creation_seeds_exactly_three_fixed_categories(self):
         response = self.app.test_client().post(

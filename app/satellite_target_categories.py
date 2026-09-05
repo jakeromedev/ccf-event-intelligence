@@ -388,10 +388,10 @@ def satellite_target_settings(db, event_id):
                      AND batch.status = 'active'
                ) OR EXISTS (
                    SELECT 1
-                   FROM event_registrant_satellites manual
-                   WHERE manual.event_id = ?
-                     AND manual.directory_id = directory.id
-                     AND manual.assignment_source = 'manual'
+                   FROM event_registrant_satellites manual_assignment
+                   WHERE manual_assignment.event_id = ?
+                     AND manual_assignment.directory_id = directory.id
+                     AND manual_assignment.assignment_source = 'manual'
                ) THEN 1 ELSE 0 END available_in_active_batch,
                CASE WHEN EXISTS (
                    SELECT 1
