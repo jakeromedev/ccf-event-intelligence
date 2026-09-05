@@ -685,6 +685,7 @@ def init_app(app) -> None:
             "auth.register",
             "operations.liveness",
             "operations.readiness",
+            "public_dashboard.event_dashboard",
         }:
             return None
         if current_user.is_authenticated:

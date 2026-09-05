@@ -1,0 +1,20 @@
+{% extends "public_base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Dashboard Access · {{ event['name'] }}{% endblock %}
+{% block content %}
+<section class="public-dashboard-access" aria-labelledby="public-dashboard-access-title">
+    <div class="public-dashboard-access-card">
+        <span class="public-dashboard-access-logo"><img src="{{ url_for('static', filename='b1g-logo-circle.png') }}" alt="" aria-hidden="true"></span>
+        <p class="eyebrow">Presentation View</p>
+        <h1 id="public-dashboard-access-title">{{ event['name'] }}</h1>
+        <p>Enter the dashboard password to continue. This browser will remember access for seven days.</p>
+        <form method="post" class="public-dashboard-access-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label for="dashboard-password">Dashboard password</label>
+            <span class="public-dashboard-password-input">{{ icon('lock', 19) }}<input id="dashboard-password" name="password" type="password" maxlength="128" autocomplete="current-password" required autofocus></span>
+            {% if password_error %}<p class="form-error" role="alert">{{ password_error }}</p>{% endif %}
+            <button class="button primary" type="submit">View Dashboard</button>
+        </form>
+    </div>
+</section>
+{% endblock %}

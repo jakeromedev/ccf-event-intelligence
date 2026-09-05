@@ -16,6 +16,7 @@ from app.aggregation import (
     curated_registrant_detail,
     curation_quality,
     data_quality,
+    dashboard_satellite_metrics,
     event_dashboard_metrics,
     event_summaries,
     overview_metrics,
@@ -785,9 +786,111 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertNotIn("Mobile Number", str(payload))
         page = client.get("/events/{}".format(self.event_a))
         self.assertIn(b"Target vs Actual Participants", page.data)
+        self.assertNotIn(b"Grouped bar chart comparing participant Target", page.data)
+        self.assertNotIn(b"Actuals use distinct curated participants", page.data)
         self.assertIn(b"Manage Satellite Targets", page.data)
         self.assertNotIn(b"satellite-target-modal", page.data)
         self.assertNotIn(b"satellite-dataset-modal", page.data)
+
+    def test_dashboard_dgroup_leadership_years_and_shirt_size_sections(self):
+        self._process(self.event_a)
+        answers = {
+            "R-1": {
+                "Dgroup Status": "DGroup Leader",
+                "Years Leading A Dgroup": "< 1 year",
+                "Shirt Size": "M (W: 19inch L: 26inch)",
+                "Transportation To MMRC": "Carpool",
+                "Transportation From MMRC": "Carpool",
+            },
+            "R-2": {
+                "Dgroup Status": "D12 Leader",
+                "Years Leading A Dgroup": "3-5 years",
+                "Shirt Size": "XL (W: 21inch L: 28inch)",
+                "Transportation From Ccf To Mmrc": "Bus to MMRC",
+                "Transportation From Mmrc To Ccf": "Bus to CCF",
+            },
+            "R-3": {
+                "Dgroup Status": "D12 Leader",
+                "Years Leading A Dgroup": "3-5 years",
+                "Shirt Size": "S (W: 18inch L: 25inch)",
+                "Transportation From Ccf To Mmrc": "Public Transportation",
+                "Transportation From Mmrc To Ccf": "Public Transportation",
+            },
+            "R-4": {
+                "Years Leading A Dgroup": "1-2 years",
+                "Shirt Size": "M (W: 19inch L: 26inch)",
+                "Transportation From Ccf To Mmrc": "Bus to MMRC",
+                "Transportation From Mmrc To Ccf": "Carpool",
+            },
+        }
+        with self.app.app_context():
+            db = get_db()
+            rows = db.execute(
+                """
+                SELECT id, registration_code, source_data_json
+                FROM registrants WHERE batch_id = (
+                    SELECT id FROM import_batches
+                    WHERE event_id = ? AND status = 'active'
+                )
+                """,
+                (self.event_a,),
+            ).fetchall()
+            for row in rows:
+                if row["registration_code"] not in answers:
+                    continue
+                source = json.loads(row["source_data_json"])
+                source.update(answers[row["registration_code"]])
+                db.execute(
+                    "UPDATE registrants SET source_data_json = ? WHERE id = ?",
+                    (json.dumps(source), row["id"]),
+                )
+            db.commit()
+            dashboard = event_dashboard_metrics(db, self.event_a)
+
+        leadership = {
+            item["key"]: item["count"] for item in dashboard["leadership"]["items"]
+        }
+        years = {
+            item["key"]: item["count"] for item in dashboard["years_leading"]["items"]
+        }
+        shirts = {
+            item["key"]: item["count"] for item in dashboard["shirt_sizes"]["items"]
+        }
+        self.assertEqual({"dgroup_leader": 1, "d12_leader": 2}, leadership)
+        self.assertEqual(1, years["under_1"])
+        self.assertEqual(1, years["1_2"])
+        self.assertEqual(2, years["3_5"])
+        self.assertEqual(4, dashboard["years_leading"]["total"])
+        self.assertEqual(2, shirts["m"])
+        self.assertEqual(1, shirts["s"])
+        self.assertEqual(1, shirts["xl"])
+        self.assertEqual(4, dashboard["shirt_sizes"]["total"])
+        self.assertEqual(0, dashboard["shirt_sizes"]["unreported"])
+        transportation = {
+            direction["key"]: {
+                item["key"]: item["count"] for item in direction["items"]
+            }
+            for direction in dashboard["transportation"]["directions"]
+        }
+        self.assertEqual(
+            {"carpool": 1, "bus": 2, "public_transportation": 1},
+            transportation["to_mmrc"],
+        )
+        self.assertEqual(
+            {"carpool": 2, "bus": 1, "public_transportation": 1},
+            transportation["from_mmrc"],
+        )
+
+        page = self.app.test_client().get("/events/{}".format(self.event_a))
+        self.assertIn(b"Dgroup Leadership", page.data)
+        self.assertIn(b"Years Leading", page.data)
+        self.assertIn(b"T-shirt Size Distribution", page.data)
+        self.assertIn(b"D12 Leaders", page.data)
+        self.assertIn(b"Transportation Plan", page.data)
+        self.assertIn(b"CCF to MMRC", page.data)
+        self.assertIn(b"MMRC to CCF", page.data)
+        self.assertIn(b"Bus to MMRC", page.data)
+        self.assertIn(b"Bus to CCF", page.data)
 
     def test_fixed_satellite_targets_use_effective_distinct_participants(self):
         batch_id = self._process(self.event_a)
@@ -932,6 +1035,28 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertEqual(1, categories["main"]["actual_participants"])
         self.assertFalse(categories["within_metro_manila"]["target_configured"])
         self.assertIsNone(categories["within_metro_manila"]["progress_percentage"])
+        reporting_categories = {
+            item["key"]: item for item in payload["satellites"]["categories"]
+        }
+        self.assertEqual(2, reporting_categories["outside_metro_manila"]["participants"])
+        self.assertEqual(0, reporting_categories["within_metro_manila"]["participants"])
+        self.assertEqual(1, reporting_categories["main"]["participants"])
+        self.assertEqual(
+            ["CCF Singapore", "CCF Eastwood", "CCF Main"],
+            [item["name"] for item in payload["satellites"]["rows"]],
+        )
+        self.assertEqual(
+            [2, 1, 1],
+            [item["participants"] for item in payload["satellites"]["rows"]],
+        )
+
+        searched_payload = client.get(
+            "/events/{}/dashboard?satellite_q=singapore".format(self.event_a)
+        ).get_json()
+        self.assertEqual(
+            ["CCF Singapore"],
+            [item["name"] for item in searched_payload["satellites"]["rows"]],
+        )
 
         with self.app.app_context():
             before_satellites = canonical_satellite_metrics(get_db(), batch_id)
@@ -1423,7 +1548,11 @@ class EventIntegrationTests(unittest.TestCase):
         client = self.app.test_client()
         first = client.post(
             "/events/{}/settings".format(self.event_a),
-            data={"event_date": "2026-09-12", "participant_target": "700"},
+            data={
+                "event_name": "Renamed Event A",
+                "event_date": "2026-09-12",
+                "participant_target": "700",
+            },
         )
         self.assertEqual(302, first.status_code)
         update = client.post(
@@ -1434,11 +1563,33 @@ class EventIntegrationTests(unittest.TestCase):
         with self.app.app_context():
             event_a = get_db().execute("SELECT * FROM events WHERE id = ?", (self.event_a,)).fetchone()
             event_b = get_db().execute("SELECT * FROM events WHERE id = ?", (self.event_b,)).fetchone()
+            self.assertEqual("Renamed Event A", event_a["name"])
+            self.assertEqual("Event B", event_b["name"])
             self.assertEqual("2026-09-13", event_a["event_date"])
             self.assertEqual(0, event_a["participant_target"])
             self.assertIsNone(event_b["event_date"])
             self.assertIsNone(event_b["participant_target"])
             self.assertFalse(event_dashboard_metrics(get_db(), self.event_a)["overview"]["target_configured"])
+
+        page = client.get("/events/{}".format(self.event_a))
+        self.assertIn(b'name="event_name"', page.data)
+        self.assertIn(b'value="Renamed Event A"', page.data)
+
+        for invalid_name in ("", "x" * 161):
+            response = client.post(
+                "/events/{}/settings".format(self.event_a),
+                data={
+                    "event_name": invalid_name,
+                    "event_date": "2026-09-13",
+                    "participant_target": "0",
+                },
+            )
+            self.assertEqual(302, response.status_code)
+        with self.app.app_context():
+            event_name = get_db().execute(
+                "SELECT name FROM events WHERE id = ?", (self.event_a,)
+            ).fetchone()["name"]
+            self.assertEqual("Renamed Event A", event_name)
 
         for invalid_target in ("-1", "1.5", "abc"):
             response = client.post(
@@ -2547,6 +2698,23 @@ class EventIntegrationTests(unittest.TestCase):
             # Page filters never change the five overall summary totals.
             self.assertEqual(default["registrants"], international["registrants"])
 
+            dashboard_first = dashboard_satellite_metrics(
+                get_db(), self.event_a, batch_id
+            )
+            dashboard_second = dashboard_satellite_metrics(
+                get_db(), self.event_a, batch_id, page=2
+            )
+            dashboard_search = dashboard_satellite_metrics(
+                get_db(), self.event_a, batch_id, query="site", page=2
+            )
+            # Includes represented canonical Satellites with zero participants.
+            self.assertEqual(17, dashboard_first["pagination"]["total"])
+            self.assertEqual(10, dashboard_first["pagination"]["per_page"])
+            self.assertEqual(10, len(dashboard_first["rows"]))
+            self.assertEqual(7, len(dashboard_second["rows"]))
+            self.assertEqual(12, dashboard_search["pagination"]["total"])
+            self.assertEqual(2, len(dashboard_search["rows"]))
+
             attendance = satellite_metrics(
                 get_db(), batch_id, sort="attendance_rate", direction="asc",
             )
@@ -2578,6 +2746,33 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertNotIn(b"Attendance Rate", ranking.data)
         self.assertNotIn(b"Local Satellites", ranking.data)
         self.assertNotIn(b"Test Registrant", ranking.data)
+        dashboard_page = client.get("/events/{}".format(self.event_a))
+        self.assertNotIn(b"data-public-dashboard-nav", dashboard_page.data)
+        self.assertNotIn(b"/static/public_dashboard.js", dashboard_page.data)
+        self.assertLess(
+            dashboard_page.data.index(b'id="participant-profile"'),
+            dashboard_page.data.index(b'id="satellite-targets"'),
+        )
+        self.assertIn(b'id="dashboard-satellite-reporting"', dashboard_page.data)
+        self.assertIn(b"Participants by Reporting Category", dashboard_page.data)
+        self.assertIn(b"International Satellites are included", dashboard_page.data)
+        self.assertIn(b"Satellite Participant Ranking", dashboard_page.data)
+        self.assertIn(b"satellite_page=2", dashboard_page.data)
+        self.assertEqual(10, dashboard_page.data.count(b"<td><strong>CCF "))
+        searched_dashboard_page = client.get(
+            "/events/{}?satellite_q=site&satellite_page=2".format(self.event_a)
+        )
+        self.assertIn(b'value="site"', searched_dashboard_page.data)
+        self.assertIn(b"Showing 11", searched_dashboard_page.data)
+        styles = (ROOT / "app/static/app.css").read_text()
+        self.assertIn(
+            ".dashboard-satellite-reporting { margin-bottom: 20px; overflow: hidden; }",
+            styles,
+        )
+        self.assertIn(
+            "padding: 22px 24px 17px; border-bottom: 1px solid var(--b1g-border);",
+            styles,
+        )
         participant_page = client.get(
             "/events/{}/satellites/registrants".format(self.event_a),
             query_string={"name": "CCF Eastwood", "scope": "local"},

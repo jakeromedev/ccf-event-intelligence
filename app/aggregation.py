@@ -1,3 +1,6 @@
+import re
+from collections import defaultdict
+
 from .classifier import AFFILIATIONS
 from .normalization import (
     AGE_BUCKETS,
@@ -12,6 +15,11 @@ from .satellite_analytics import (
     EFFECTIVE_ASSOCIATIONS_CTE,
     canonical_satellite_metrics,
     satellite_target_category_analytics,
+)
+from .satellite_reporting_categories import (
+    REPORTING_CATEGORY_KEYS,
+    REPORTING_CATEGORY_LABELS,
+    REPORTING_CATEGORY_SQL,
 )
 
 
@@ -254,6 +262,391 @@ def curated_participant_profile_metrics(db, batch_id, event_date=None):
     }
 
 
+LEADERSHIP_CATEGORIES = (
+    ("dgroup_leader", "Dgroup Leaders"),
+    ("d12_leader", "D12 Leaders"),
+)
+LEADERSHIP_YEARS = (
+    ("under_1", "< 1 year"),
+    ("1_2", "1–2 years"),
+    ("3_5", "3–5 years"),
+    ("6_10", "6–10 years"),
+    ("over_10", "More than 10 years"),
+)
+SHIRT_SIZES = (
+    ("xs", "XS", 'W: 17" · L: 24"'),
+    ("s", "S", 'W: 18" · L: 25"'),
+    ("m", "M", 'W: 19" · L: 26"'),
+    ("l", "L", 'W: 20" · L: 27"'),
+    ("xl", "XL", 'W: 21" · L: 28"'),
+    ("2xl", "2XL", 'W: 22" · L: 29"'),
+    ("3xl", "3XL", 'W: 23" · L: 30"'),
+)
+TRANSPORTATION_MODES = (
+    ("carpool", "Carpool", "car"),
+    ("bus", "Bus", "bus"),
+    ("public_transportation", "Public Transportation", "train"),
+)
+
+
+def _source_answer_expression(db, alias, header):
+    path = '$."{}"'.format(header.replace('"', '\\"')).replace("'", "''")
+    expression = "JSON_EXTRACT({}.source_data_json, '{}')".format(alias, path)
+    return "JSON_UNQUOTE({})".format(expression) if db.is_mysql else expression
+
+
+def _source_answers_expression(db, alias, headers):
+    expressions = [_source_answer_expression(db, alias, header) for header in headers]
+    return expressions[0] if len(expressions) == 1 else "COALESCE({})".format(
+        ", ".join(expressions)
+    )
+
+
+def _clean_answer(value):
+    return " ".join(str(value or "").strip().split())
+
+
+def _leadership_role(value):
+    value = _clean_answer(value).casefold()
+    if "d12" in value and "leader" in value:
+        return "d12_leader"
+    if ("dgroup" in value or "discipleship group" in value) and "leader" in value:
+        return "dgroup_leader"
+    return None
+
+
+def _years_leading_bucket(value):
+    value = _clean_answer(value).casefold().replace("–", "-")
+    if not value:
+        return None
+    if value.startswith("<") or "less than 1" in value or "under 1" in value:
+        return "under_1"
+    if "more than 10" in value or "over 10" in value or value.startswith("> 10"):
+        return "over_10"
+    numbers = tuple(int(number) for number in re.findall(r"\d+", value))
+    if numbers and max(numbers) <= 2:
+        return "1_2"
+    if numbers and max(numbers) <= 5:
+        return "3_5"
+    if numbers and max(numbers) <= 10:
+        return "6_10"
+    if numbers and max(numbers) > 10:
+        return "over_10"
+    return "other"
+
+
+def _shirt_size(value):
+    value = _clean_answer(value).upper().replace(" ", "")
+    if not value:
+        return None
+    aliases = {"SMALL": "s", "MEDIUM": "m", "LARGE": "l", "XXL": "2xl", "XXXL": "3xl"}
+    if value in aliases:
+        return aliases[value]
+    match = re.match(r"^(3XL|2XL|XL|XS|S|M|L)(?:\b|\()", value)
+    return match.group(1).casefold() if match else "other"
+
+
+def _transportation_mode(value):
+    value = _clean_answer(value).casefold()
+    if not value:
+        return None
+    if "carpool" in value:
+        return "carpool"
+    if "bus" in value:
+        return "bus"
+    if "public transportation" in value or "public transport" in value:
+        return "public_transportation"
+    return "other"
+
+
+def participant_ministry_and_shirt_metrics(db, batch_id):
+    """Aggregate leadership and shirt answers once per curated registrant."""
+    if batch_id is None:
+        return participant_ministry_and_shirt_metrics_empty()
+    status = _source_answer_expression(db, "r", "Dgroup Status")
+    legacy_leader = _source_answer_expression(
+        db, "r", "Are You Leading A Discipleship Group"
+    )
+    years = _source_answer_expression(db, "r", "Years Leading A Dgroup")
+    shirt = _source_answer_expression(db, "r", "Shirt Size")
+    rows = db.execute(
+        """
+        SELECT cr.id curated_id, {status} leadership_status,
+               {legacy_leader} legacy_leader, {years} years_leading,
+               {shirt} shirt_size
+        FROM curated_registrants cr
+        JOIN curated_registrant_sources source
+          ON source.event_id = cr.event_id AND source.batch_id = cr.batch_id
+         AND source.curated_registrant_id = cr.id
+        JOIN registrants r
+          ON r.batch_id = source.batch_id AND r.id = source.registrant_id
+        WHERE cr.batch_id = ?
+        ORDER BY cr.id, source.id
+        """.format(
+            status=status,
+            legacy_leader=legacy_leader,
+            years=years,
+            shirt=shirt,
+        ),
+        (batch_id,),
+    ).fetchall()
+    people = defaultdict(lambda: {"roles": set(), "years": set(), "shirts": set()})
+    for row in rows:
+        role = _leadership_role(row["leadership_status"])
+        if role is None and _clean_answer(row["legacy_leader"]).casefold() in {
+            "yes", "y", "true", "1"
+        }:
+            role = "dgroup_leader"
+        years_bucket = _years_leading_bucket(row["years_leading"])
+        shirt_size = _shirt_size(row["shirt_size"])
+        if role:
+            people[row["curated_id"]]["roles"].add(role)
+        if years_bucket:
+            people[row["curated_id"]]["years"].add(years_bucket)
+        if shirt_size:
+            people[row["curated_id"]]["shirts"].add(shirt_size)
+
+    role_counts = {key: 0 for key, _label in LEADERSHIP_CATEGORIES}
+    years_counts = {key: 0 for key, _label in LEADERSHIP_YEARS}
+    years_counts["other"] = 0
+    shirt_counts = {key: 0 for key, _label, _detail in SHIRT_SIZES}
+    shirt_counts["other"] = 0
+    leadership_conflicts = 0
+    years_conflicts = 0
+    shirt_conflicts = 0
+    for person in people.values():
+        if len(person["roles"]) == 1:
+            role_counts[next(iter(person["roles"]))] += 1
+        elif len(person["roles"]) > 1:
+            leadership_conflicts += 1
+        if len(person["years"]) == 1:
+            years_counts[next(iter(person["years"]))] += 1
+        elif len(person["years"]) > 1:
+            years_conflicts += 1
+        if len(person["shirts"]) == 1:
+            shirt_counts[next(iter(person["shirts"]))] += 1
+        elif len(person["shirts"]) > 1:
+            shirt_conflicts += 1
+
+    leadership_total = sum(role_counts.values())
+    years_total = sum(years_counts.values())
+    shirt_total = sum(shirt_counts.values())
+    leadership = _distribution(
+        LEADERSHIP_CATEGORIES, role_counts, leadership_total, include_segments=True
+    )
+    leadership.update(
+        {
+            "unreported": len(people) - leadership_total - leadership_conflicts,
+            "conflicts": leadership_conflicts,
+        }
+    )
+    years_items = [
+        {
+            "key": key,
+            "label": label,
+            "count": years_counts[key],
+            "percentage": years_counts[key] / years_total * 100 if years_total else 0,
+        }
+        for key, label in LEADERSHIP_YEARS
+    ]
+    if years_counts["other"]:
+        years_items.append(
+            {
+                "key": "other",
+                "label": "Other",
+                "count": years_counts["other"],
+                "percentage": years_counts["other"] / years_total * 100,
+            }
+        )
+    shirt_items = [
+        {
+            "key": key,
+            "label": label,
+            "detail": detail,
+            "count": shirt_counts[key],
+            "percentage": shirt_counts[key] / shirt_total * 100 if shirt_total else 0,
+        }
+        for key, label, detail in SHIRT_SIZES
+    ]
+    if shirt_counts["other"]:
+        shirt_items.append(
+            {
+                "key": "other",
+                "label": "Other",
+                "detail": "Review source response",
+                "count": shirt_counts["other"],
+                "percentage": shirt_counts["other"] / shirt_total * 100,
+            }
+        )
+    return {
+        "leadership": leadership,
+        "years_leading": {
+            "total": years_total,
+            "items": years_items,
+            "unreported": len(people) - years_total - years_conflicts,
+            "conflicts": years_conflicts,
+        },
+        "shirt_sizes": {
+            "total": shirt_total,
+            "items": shirt_items,
+            "unreported": len(people) - shirt_total - shirt_conflicts,
+            "conflicts": shirt_conflicts,
+        },
+    }
+
+
+def participant_ministry_and_shirt_metrics_empty():
+    return {
+        "leadership": {
+            **_distribution(
+                LEADERSHIP_CATEGORIES,
+                {key: 0 for key, _label in LEADERSHIP_CATEGORIES},
+                0,
+                include_segments=True,
+            ),
+            "unreported": 0,
+            "conflicts": 0,
+        },
+        "years_leading": {
+            "total": 0,
+            "items": [
+                {"key": key, "label": label, "count": 0, "percentage": 0}
+                for key, label in LEADERSHIP_YEARS
+            ],
+            "unreported": 0,
+            "conflicts": 0,
+        },
+        "shirt_sizes": {
+            "total": 0,
+            "items": [
+                {
+                    "key": key,
+                    "label": label,
+                    "detail": detail,
+                    "count": 0,
+                    "percentage": 0,
+                }
+                for key, label, detail in SHIRT_SIZES
+            ],
+            "unreported": 0,
+            "conflicts": 0,
+        },
+    }
+
+
+def participant_transportation_metrics(db, batch_id):
+    """Aggregate each travel direction once per curated registrant."""
+    if batch_id is None:
+        return participant_transportation_metrics_empty()
+    to_mmrc = _source_answers_expression(
+        db,
+        "r",
+        ("Transportation From Ccf To Mmrc", "Transportation To MMRC"),
+    )
+    from_mmrc = _source_answers_expression(
+        db,
+        "r",
+        ("Transportation From Mmrc To Ccf", "Transportation From MMRC"),
+    )
+    rows = db.execute(
+        """
+        SELECT cr.id curated_id, {to_mmrc} to_mmrc, {from_mmrc} from_mmrc
+        FROM curated_registrants cr
+        JOIN curated_registrant_sources source
+          ON source.event_id = cr.event_id AND source.batch_id = cr.batch_id
+         AND source.curated_registrant_id = cr.id
+        JOIN registrants r
+          ON r.batch_id = source.batch_id AND r.id = source.registrant_id
+        WHERE cr.batch_id = ?
+        ORDER BY cr.id, source.id
+        """.format(to_mmrc=to_mmrc, from_mmrc=from_mmrc),
+        (batch_id,),
+    ).fetchall()
+    people = defaultdict(lambda: {"to_mmrc": set(), "from_mmrc": set()})
+    for row in rows:
+        for direction in ("to_mmrc", "from_mmrc"):
+            mode = _transportation_mode(row[direction])
+            if mode:
+                people[row["curated_id"]][direction].add(mode)
+
+    direction_definitions = (
+        ("to_mmrc", "CCF to MMRC", "Outbound trip", "Bus to MMRC"),
+        ("from_mmrc", "MMRC to CCF", "Return trip", "Bus to CCF"),
+    )
+    directions = []
+    for key, label, trip_label, bus_label in direction_definitions:
+        counts = {mode: 0 for mode, _label, _icon in TRANSPORTATION_MODES}
+        other = 0
+        conflicts = 0
+        unreported = 0
+        for person in people.values():
+            answers = person[key]
+            if not answers:
+                unreported += 1
+            elif len(answers) > 1:
+                conflicts += 1
+            else:
+                mode = next(iter(answers))
+                if mode in counts:
+                    counts[mode] += 1
+                else:
+                    other += 1
+        total = sum(counts.values())
+        directions.append(
+            {
+                "key": key,
+                "label": label,
+                "trip_label": trip_label,
+                "total": total,
+                "items": [
+                    {
+                        "key": mode,
+                        "label": bus_label if mode == "bus" else mode_label,
+                        "icon": icon,
+                        "count": counts[mode],
+                        "percentage": counts[mode] / total * 100 if total else 0,
+                    }
+                    for mode, mode_label, icon in TRANSPORTATION_MODES
+                ],
+                "unreported": unreported,
+                "other": other,
+                "conflicts": conflicts,
+            }
+        )
+    return {"registrants": len(people), "directions": directions}
+
+
+def participant_transportation_metrics_empty():
+    return {
+        "registrants": 0,
+        "directions": [
+            {
+                "key": key,
+                "label": label,
+                "trip_label": trip_label,
+                "total": 0,
+                "items": [
+                    {
+                        "key": mode,
+                        "label": bus_label if mode == "bus" else mode_label,
+                        "icon": icon,
+                        "count": 0,
+                        "percentage": 0,
+                    }
+                    for mode, mode_label, icon in TRANSPORTATION_MODES
+                ],
+                "unreported": 0,
+                "other": 0,
+                "conflicts": 0,
+            }
+            for key, label, trip_label, bus_label in (
+                ("to_mmrc", "CCF to MMRC", "Outbound trip", "Bus to MMRC"),
+                ("from_mmrc", "MMRC to CCF", "Return trip", "Bus to CCF"),
+            )
+        ],
+    }
+
+
 def registration_progress(participants, participant_target):
     """Calculate participant-only progress with an explicit unconfigured state."""
     configured = participant_target is not None and participant_target > 0
@@ -404,7 +797,175 @@ def satellite_target_category_metrics(db, event_id, batch_id):
     return result
 
 
-def event_dashboard_metrics(db, event_id):
+DASHBOARD_SATELLITE_COLORS = {
+    "outside_metro_manila": "#2563eb",
+    "within_metro_manila": "#f59e0b",
+    "main": "#dc2626",
+}
+
+
+def dashboard_satellite_metrics(db, event_id, batch_id, query="", page=1):
+    """Return the fixed participant-only Satellite dashboard read model."""
+    query = " ".join(str(query or "").strip().split())[:100]
+    try:
+        page = max(int(page or 1), 1)
+    except (TypeError, ValueError):
+        page = 1
+
+    empty_categories = [
+        {
+            "key": key,
+            "label": REPORTING_CATEGORY_LABELS[key],
+            "participants": 0,
+            "percentage": 0,
+            "start": 0,
+            "end": 0,
+            "color": DASHBOARD_SATELLITE_COLORS[key],
+        }
+        for key in REPORTING_CATEGORY_KEYS
+    ]
+    if batch_id is None:
+        return {
+            "query": query,
+            "participant_assignments": 0,
+            "categorized_participants": 0,
+            "categories": empty_categories,
+            "rows": [],
+            "pagination": _pagination_metadata(0, page, 10),
+        }
+
+    represented_directories_cte = """
+    , represented_directories AS (
+        SELECT DISTINCT association.directory_id
+        FROM effective_associations association
+        WHERE association.event_id = ? AND association.batch_id = ?
+          AND association.directory_id IS NOT NULL
+        UNION
+        SELECT DISTINCT imported.directory_id
+        FROM satellites imported
+        WHERE imported.event_id = ? AND imported.batch_id = ?
+          AND imported.directory_id IS NOT NULL
+    )
+    """
+    params = (event_id, batch_id, event_id, batch_id, event_id, batch_id)
+    rows = db.execute(
+        EFFECTIVE_ASSOCIATIONS_CTE
+        + represented_directories_cte
+        + """
+        SELECT directory.id, directory.name,
+               hub.name hub_name, hub.is_main,
+               hub_group.code group_code, hub_group.name group_name,
+               COUNT(DISTINCT participant.id) participants
+        FROM represented_directories represented
+        JOIN satellite_directory directory
+          ON directory.id = represented.directory_id
+        LEFT JOIN satellite_hubs hub ON hub.id = directory.hub_id
+        LEFT JOIN hub_groups hub_group ON hub_group.id = hub.hub_group_id
+        LEFT JOIN effective_associations association
+          ON association.directory_id = directory.id
+         AND association.event_id = ? AND association.batch_id = ?
+        LEFT JOIN curated_registrants participant
+          ON participant.id = association.curated_registrant_id
+         AND participant.event_id = association.event_id
+         AND participant.batch_id = association.batch_id
+         AND participant.registration_type = 'participant'
+        GROUP BY directory.id, directory.name, hub.name, hub.is_main,
+                 hub_group.code, hub_group.name
+        """,
+        params,
+    ).fetchall()
+    participant_assignments = sum(row["participants"] for row in rows)
+    satellite_rows = [
+        {
+            "id": row["id"],
+            "name": row["name"],
+            "participants": row["participants"],
+            "percentage": (
+                row["participants"] / participant_assignments * 100
+                if participant_assignments
+                else 0
+            ),
+            "hub_name": row["hub_name"] or "Needs Mapping",
+            "group_name": row["group_name"] or "Needs Mapping",
+        }
+        for row in rows
+    ]
+    satellite_rows.sort(
+        key=lambda item: (-item["participants"], item["name"].casefold(), item["id"])
+    )
+    if query:
+        needle = query.casefold()
+        satellite_rows = [
+            row
+            for row in satellite_rows
+            if needle
+            in " ".join(
+                (row["name"], row["hub_name"], row["group_name"])
+            ).casefold()
+        ]
+
+    pagination = _pagination_metadata(len(satellite_rows), page, 10)
+    visible_rows = satellite_rows[
+        pagination["offset"] : pagination["offset"] + pagination["per_page"]
+    ]
+
+    category_rows = db.execute(
+        EFFECTIVE_ASSOCIATIONS_CTE
+        + """
+        SELECT {category_sql} category_key,
+               COUNT(DISTINCT participant.id) participants
+        FROM effective_associations association
+        JOIN satellite_directory directory
+          ON directory.id = association.directory_id
+        JOIN satellite_hubs hub ON hub.id = directory.hub_id
+        JOIN hub_groups hub_group ON hub_group.id = hub.hub_group_id
+        JOIN curated_registrants participant
+          ON participant.id = association.curated_registrant_id
+         AND participant.event_id = association.event_id
+         AND participant.batch_id = association.batch_id
+         AND participant.registration_type = 'participant'
+        WHERE association.event_id = ? AND association.batch_id = ?
+        GROUP BY {category_sql}
+        """.format(category_sql=REPORTING_CATEGORY_SQL),
+        (event_id, batch_id),
+    ).fetchall()
+    counts = {key: 0 for key in REPORTING_CATEGORY_KEYS}
+    counts.update(
+        {
+            row["category_key"]: row["participants"]
+            for row in category_rows
+            if row["category_key"] in counts
+        }
+    )
+    category_total = sum(counts.values())
+    cursor = 0.0
+    categories = []
+    for key in REPORTING_CATEGORY_KEYS:
+        percentage = counts[key] / category_total * 100 if category_total else 0
+        categories.append(
+            {
+                "key": key,
+                "label": REPORTING_CATEGORY_LABELS[key],
+                "participants": counts[key],
+                "percentage": percentage,
+                "start": cursor,
+                "end": cursor + percentage,
+                "color": DASHBOARD_SATELLITE_COLORS[key],
+            }
+        )
+        cursor += percentage
+
+    return {
+        "query": query,
+        "participant_assignments": participant_assignments,
+        "categorized_participants": category_total,
+        "categories": categories,
+        "rows": visible_rows,
+        "pagination": pagination,
+    }
+
+
+def event_dashboard_metrics(db, event_id, satellite_query="", satellite_page=1):
     """Return the authoritative, event-scoped Phase 1 dashboard response."""
     event = db.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
     if event is None:
@@ -445,6 +1006,12 @@ def event_dashboard_metrics(db, event_id):
         if batch
         else participant_profile_metrics_empty(event["event_date"])
     )
+    participant_details = participant_ministry_and_shirt_metrics(
+        db, batch["id"] if batch else None
+    )
+    transportation = participant_transportation_metrics(
+        db, batch["id"] if batch else None
+    )
     total_registrations = participants + volunteers
     target_groups = satellite_target_category_metrics(
         db, event_id, batch["id"] if batch else None
@@ -468,11 +1035,20 @@ def event_dashboard_metrics(db, event_id):
             **progress,
         },
         "participant_profile": profile,
+        **participant_details,
+        "transportation": transportation,
         "satellite_target_groups": target_groups,
         # Temporary response alias for consumers of the fixed-category release.
         "satellite_target_categories": target_groups,
         "satellite_datasets": satellite_dataset_metrics(
             db, event_id, batch["id"] if batch else None
+        ),
+        "satellites": dashboard_satellite_metrics(
+            db,
+            event_id,
+            batch["id"] if batch else None,
+            query=satellite_query,
+            page=satellite_page,
         ),
         "reconciliation": {
             "registrations_reconcile": total_registrations == participants + volunteers,

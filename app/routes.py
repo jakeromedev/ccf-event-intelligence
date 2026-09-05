@@ -16,6 +16,7 @@ from .auth import (
     can_view_admin_tables,
     can_view_registrations,
     event_mutation_required,
+    password_policy_error,
     satellite_settings_management_required,
 )
 from .analytics import AnalyticsFilterError, compare_events, event_analytics, historical_trends
@@ -43,6 +44,7 @@ from .admin_tables import (
 from .db import get_db
 from .import_history import IMPORT_HISTORY_STATUSES, import_history
 from .importer import activate_batch, process_batch, stage_upload_set, store_validation, validate_batch
+from .models import hash_password
 from .registrations import (
     create_registrant_remark,
     list_registrant_remarks,
@@ -239,7 +241,12 @@ def event_overview(event_id):
     db = get_db()
     event = get_event_or_404(event_id)
     batch = active_batch(db, event_id)
-    dashboard = event_dashboard_metrics(db, event_id)
+    dashboard = event_dashboard_metrics(
+        db,
+        event_id,
+        satellite_query=request.args.get("satellite_q", ""),
+        satellite_page=request.args.get("satellite_page", 1),
+    )
     return render_template(
         "overview.html",
         event=event,
@@ -252,7 +259,12 @@ def event_overview(event_id):
 
 @bp.get("/events/<int:event_id>/dashboard")
 def event_dashboard_api(event_id):
-    dashboard = event_dashboard_metrics(get_db(), event_id)
+    dashboard = event_dashboard_metrics(
+        get_db(),
+        event_id,
+        satellite_query=request.args.get("satellite_q", ""),
+        satellite_page=request.args.get("satellite_page", 1),
+    )
     if dashboard is None:
         abort(404)
     return jsonify(dashboard)
@@ -381,8 +393,22 @@ def analytics_compare_api():
 @event_mutation_required
 def update_event_settings(event_id):
     event = get_event_or_404(event_id)
+    submitted_name = request.form.get("event_name")
+    event_name = event["name"] if submitted_name is None else submitted_name.strip()
     event_date = (request.form.get("event_date") or "").strip()
     target_raw = (request.form.get("participant_target") or "").strip()
+    public_password = request.form.get("public_dashboard_password") or ""
+    public_password_confirmation = (
+        request.form.get("public_dashboard_password_confirmation") or ""
+    )
+    disable_public_dashboard = request.form.get("disable_public_dashboard") == "1"
+
+    if not event_name:
+        flash("Event Name is required.", "error")
+        return redirect(url_for("dashboard.event_overview", event_id=event_id) + "#event-settings")
+    if len(event_name) > 160:
+        flash("Event Name must be 160 characters or fewer.", "error")
+        return redirect(url_for("dashboard.event_overview", event_id=event_id) + "#event-settings")
 
     if event_date:
         try:
@@ -406,17 +432,60 @@ def update_event_settings(event_id):
             flash("Participant Target must be 1,000,000,000 or fewer.", "error")
             return redirect(url_for("dashboard.event_overview", event_id=event_id) + "#event-settings")
 
+    if disable_public_dashboard and public_password:
+        flash("Disable the public dashboard or set a new password, but not both.", "error")
+        return redirect(url_for("dashboard.event_overview", event_id=event_id) + "#event-settings")
+    if public_password:
+        password_error = password_policy_error(public_password)
+        if password_error:
+            flash("Public Dashboard Password: {}".format(password_error), "error")
+            return redirect(url_for("dashboard.event_overview", event_id=event_id) + "#event-settings")
+        if public_password != public_password_confirmation:
+            flash("Public Dashboard Passwords must match.", "error")
+            return redirect(url_for("dashboard.event_overview", event_id=event_id) + "#event-settings")
+
+    public_password_hash = event["public_dashboard_password_hash"]
+    public_access_version = event["public_dashboard_access_version"]
+    public_access_changed = False
+    if disable_public_dashboard and public_password_hash:
+        public_password_hash = None
+        public_access_version += 1
+        public_access_changed = True
+    elif public_password:
+        public_password_hash = hash_password(public_password)
+        public_access_version += 1
+        public_access_changed = True
+
     db = get_db()
     db.execute(
         """
         UPDATE events
-        SET event_date = ?, participant_target = ?, updated_at = CURRENT_TIMESTAMP
+        SET name = ?, event_date = ?, participant_target = ?,
+            public_dashboard_password_hash = ?,
+            public_dashboard_access_version = ?,
+            updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """,
-        (parsed_date if event_date else None, participant_target, event["id"]),
+        (
+            event_name,
+            parsed_date if event_date else None,
+            participant_target,
+            public_password_hash,
+            public_access_version,
+            event["id"],
+        ),
     )
     db.commit()
-    flash("Event settings saved. Dashboard metrics have been refreshed.", "success")
+    if public_access_changed:
+        public_status = "disabled" if public_password_hash is None else "updated"
+        flash(
+            "Event settings saved. Public dashboard access was {} and previous viewer access was revoked.".format(
+                public_status
+            ),
+            "success",
+        )
+    else:
+        flash("Event settings saved. Dashboard metrics have been refreshed.", "success")
     return redirect(url_for("dashboard.event_overview", event_id=event_id) + "#event-settings")
 
 

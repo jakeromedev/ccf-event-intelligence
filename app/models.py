@@ -147,6 +147,10 @@ class Event(Base):
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     event_date: Mapped[Optional[object]] = mapped_column(Date)
     participant_target: Mapped[Optional[int]] = mapped_column(Integer)
+    public_dashboard_password_hash: Mapped[Optional[str]] = mapped_column(String(512))
+    public_dashboard_access_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("1")
+    )
     created_at: Mapped[object] = mapped_column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
     )

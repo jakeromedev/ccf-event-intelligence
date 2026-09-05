@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "public_base.html" if public_dashboard|default(false) else "base.html" %}
 {% from "_icons.html" import icon %}
 {% from "_page_header.html" import render_application_header %}
 
@@ -48,12 +48,35 @@
 </section>
 {%- endmacro %}
 
-{% block title %}Event Dashboard · {{ app_name }}{% endblock %}
+{% macro dashboard_satellite_url(page=1, query=dashboard.satellites.query) -%}
+{{ url_for('public_dashboard.event_dashboard' if public_dashboard|default(false) else 'dashboard.event_overview', event_id=event['id'], satellite_q=query or none, satellite_page=page if page != 1 else none) }}#dashboard-satellite-reporting
+{%- endmacro %}
+
+{% block title %}{{ event['name'] }} Dashboard · {{ app_name }}{% endblock %}
 
 {% block application_header_page %}{{ render_application_header('Dashboard', 'Review registration progress, participant profiles, and event targets.') }}{% endblock %}
 {% block page_header %}{% endblock %}
 
 {% block content %}
+{% if public_dashboard|default(false) %}
+<header class="public-dashboard-heading">
+    <div>
+        <p class="eyebrow">Event Dashboard</p>
+        <h1>{{ event['name'] }}</h1>
+    </div>
+    <span>Last updated {{ dashboard.last_updated|datetime_short }}</span>
+</header>
+<nav class="public-dashboard-section-nav" aria-label="Dashboard sections" data-public-dashboard-nav>
+    <a href="#event-overview" data-dashboard-nav-link>Overview</a>
+    <a href="#registration-progress" data-dashboard-nav-link>Progress</a>
+    <a href="#participant-profile" data-dashboard-nav-link>Profile</a>
+    <a href="#satellite-targets" data-dashboard-nav-link>Targets</a>
+    <a href="#dashboard-satellite-reporting" data-dashboard-nav-link>Satellites</a>
+    <a href="#dashboard-leadership" data-dashboard-nav-link>Leadership</a>
+    <a href="#dashboard-transportation" data-dashboard-nav-link>Transportation</a>
+    <a href="#dashboard-shirt-sizes" data-dashboard-nav-link>T-shirts</a>
+</nav>
+{% else %}
 <section class="admin-table-panel page-module-panel">
     <header class="admin-table-heading">
         <div>
@@ -64,7 +87,8 @@
         {% if event_mutations_allowed and event_settings_visible %}<button class="button primary" type="submit" form="event-settings-form" aria-label="Save Changes">{{ icon('save', 17) }} <span>Save Changes</span></button>{% endif %}
     </header>
 </section>
-{% if event_settings_visible %}<section class="phase1-settings panel" id="event-settings" aria-labelledby="event-settings-title">
+{% endif %}
+{% if event_settings_visible and not public_dashboard|default(false) %}<section class="phase1-settings panel" id="event-settings" aria-labelledby="event-settings-title">
     <form id="event-settings-form" method="post" action="{{ url_for('dashboard.update_event_settings', event_id=event['id']) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <header class="phase1-section-heading settings-heading">
@@ -76,6 +100,11 @@
         </header>
         <div class="phase1-settings-grid">
             <label class="phase1-field">
+                <span>Event Name</span>
+                <span class="phase1-input-wrap">{{ icon('events', 19) }}<input type="text" name="event_name" value="{{ event['name'] }}" maxlength="160" autocomplete="organization" required {{ 'disabled' if not event_mutations_allowed else '' }}></span>
+                <small>Shown in event navigation, dashboards, and reports.</small>
+            </label>
+            <label class="phase1-field">
                 <span>Event Date</span>
                 <span class="phase1-input-wrap">{{ icon('events', 19) }}<input type="date" name="event_date" value="{{ event['event_date'] or '' }}" {{ 'disabled' if not event_mutations_allowed else '' }}></span>
                 <small>Used for age calculation and time-based metrics.</small>
@@ -85,6 +114,32 @@
                 <span class="phase1-input-wrap">{{ icon('person', 19) }}<input type="number" min="0" max="1000000000" step="1" inputmode="numeric" name="participant_target" value="{{ event['participant_target'] if event['participant_target'] is not none else '' }}" placeholder="Not configured" {{ 'disabled' if not event_mutations_allowed else '' }}></span>
                 <small>Set the target number of participant registrations.</small>
             </label>
+            <div class="phase1-field public-dashboard-setting">
+                <span>Public Dashboard</span>
+                {% if event['public_dashboard_password_hash'] %}
+                    <strong class="public-dashboard-status enabled">Password protected · Enabled</strong>
+                    <a class="text-link" href="{{ url_for('public_dashboard.event_dashboard', event_id=event['id'], _external=true) }}" target="_blank" rel="noopener">Open presentation view</a>
+                {% else %}
+                    <strong class="public-dashboard-status">Not configured</strong>
+                    <small>Set a password below to enable the presentation-only link.</small>
+                {% endif %}
+            </div>
+            <label class="phase1-field">
+                <span>{{ 'Change' if event['public_dashboard_password_hash'] else 'Set' }} Public Dashboard Password</span>
+                <span class="phase1-input-wrap">{{ icon('lock', 19) }}<input type="password" name="public_dashboard_password" minlength="12" maxlength="128" autocomplete="new-password" placeholder="{{ 'Leave blank to keep current password' if event['public_dashboard_password_hash'] else '12–128 characters' }}" {{ 'disabled' if not event_mutations_allowed else '' }}></span>
+                <small>Use at least three of: uppercase, lowercase, numbers, and symbols.</small>
+            </label>
+            <label class="phase1-field">
+                <span>Confirm Public Dashboard Password</span>
+                <span class="phase1-input-wrap">{{ icon('lock', 19) }}<input type="password" name="public_dashboard_password_confirmation" maxlength="128" autocomplete="new-password" placeholder="Repeat the new password" {{ 'disabled' if not event_mutations_allowed else '' }}></span>
+                <small>Viewers stay authorized on that browser for seven days.</small>
+            </label>
+            {% if event['public_dashboard_password_hash'] and event_mutations_allowed %}
+            <label class="public-dashboard-disable">
+                <input type="checkbox" name="disable_public_dashboard" value="1">
+                <span><strong>Disable public dashboard</strong><small>Immediately revokes all existing viewer access.</small></span>
+            </label>
+            {% endif %}
             <aside class="phase1-target-note">
                 <span class="phase1-target-icon">{{ icon('chart', 34) }}</span>
                 <p>The participant target measures registration progress. It does not affect registration data.</p>
@@ -97,12 +152,12 @@
 <aside class="phase1-import-empty">
     {{ icon('imports', 20) }}
     <div><strong>No active dataset for this event</strong><span>Metrics remain at zero until the three required exports are imported.</span></div>
-    {% if imports_allowed %}<a class="button secondary" href="{{ url_for('dashboard.event_imports', event_id=event['id']) }}">Open Imports</a>{% endif %}
+    {% if imports_allowed and not public_dashboard|default(false) %}<a class="button secondary" href="{{ url_for('dashboard.event_imports', event_id=event['id']) }}">Open Imports</a>{% endif %}
 </aside>
 {% endif %}
 
 <div class="phase1-overview-row">
-    <section class="phase1-overview panel" aria-labelledby="event-overview-title">
+    <section class="phase1-overview panel" id="event-overview" aria-labelledby="event-overview-title">
         <header class="phase1-section-heading">
             <span class="phase1-section-icon">{{ icon('chart', 20) }}</span>
             <div><p class="eyebrow" id="event-overview-title">Event Overview</p><h2>Registration snapshot</h2></div>
@@ -116,7 +171,7 @@
         </div>
     </section>
 
-    <section class="phase1-progress panel" aria-labelledby="registration-progress-title">
+    <section class="phase1-progress panel" id="registration-progress" aria-labelledby="registration-progress-title">
         <header class="phase1-section-heading phase1-progress-heading">
             <span class="phase1-section-icon">{{ icon('chart', 20) }}</span>
             <div><p class="eyebrow">Registration</p><h2 id="registration-progress-title">Registration Progress</h2></div>
@@ -143,40 +198,7 @@
     </section>
 </div>
 
-<section class="satellite-targets panel" id="satellite-targets" aria-labelledby="satellite-targets-title">
-    <header class="satellite-targets-heading">
-        <div class="phase1-section-heading">
-            <span class="phase1-section-icon">{{ icon('location', 20) }}</span>
-            <div>
-                <p class="eyebrow">Satellite Targets</p>
-                <h2 id="satellite-targets-title">Target vs Actual Participants</h2>
-            </div>
-        </div>
-        {% if satellite_settings_management_allowed %}<div class="satellite-target-actions"><a class="button primary" href="{{ url_for('dashboard.satellite_settings', event_id=event.id, view='targets') }}#dashboard-satellite-target-values">{{ icon('settings', 17) }} Manage Satellite Targets</a></div>{% endif %}
-    </header>
-    <div class="satellite-target-comparison">
-        <div class="satellite-target-chart" role="img" aria-label="Grouped bar chart comparing participant Target and Actual across the active Dashboard Analytics Groups">
-            <div class="satellite-target-chart-legend"><span class="is-target">Target</span><span class="is-actual">Actual</span></div>
-            <div class="satellite-target-chart-plot" style="grid-template-columns: repeat({{ dashboard.satellite_target_groups|length }}, minmax(0, 1fr))">
-                {% for group in dashboard.satellite_target_groups %}<div class="satellite-target-chart-group">
-                    <div class="satellite-target-chart-bars"><i class="is-target" style="height: {{ group.target_bar_percentage }}%"><span>{{ group.participant_target|number }}</span></i><i class="is-actual" style="height: {{ group.actual_bar_percentage }}%"><span>{{ group.actual_participants|number }}</span></i></div>
-                    <strong>{{ group.name }}</strong>
-                </div>{% endfor %}
-            </div>
-            <p>Participants · Actuals use distinct curated participants from the active Event batch.</p>
-        </div>
-        <div class="satellite-target-grid">
-            {% for group in dashboard.satellite_target_groups %}<article class="satellite-target-card {{ 'exceeded' if group.target_exceeded else '' }}">
-                <header><div><h3>{{ group.name }}</h3><small>{{ group.satellite_count|number }} configured {{ 'Satellite' if group.satellite_count == 1 else 'Satellites' }}</small></div>{% if group.target_exceeded %}<span class="satellite-target-status">Exceeded by {{ group.exceeded_amount|number }}</span>{% endif %}</header>
-                <p class="satellite-target-total"><strong>{{ group.actual_participants|number }}</strong><span> Actual / {{ group.participant_target|number }} Target</span></p>
-                {% if group.target_configured %}{% set visual_progress = 100 if group.progress_percentage > 100 else group.progress_percentage %}<div class="satellite-target-progress" role="progressbar" aria-label="{{ group.name }} participant progress" aria-valuenow="{{ visual_progress }}" aria-valuemin="0" aria-valuemax="100"><i style="width: {{ visual_progress }}%"></i></div><footer><strong>{{ group.progress_percentage|percent }}</strong><span>{% if group.target_exceeded %}Exceeded by {{ group.exceeded_amount|number }}{% else %}{{ group.remaining_slots|number }} Remaining{% endif %}</span></footer>
-                {% else %}<div class="satellite-target-progress unconfigured"><i></i></div><footer><strong>—</strong><span>Target is zero · progress unconfigured</span></footer>{% endif %}
-            </article>{% endfor %}
-        </div>
-    </div>
-</section>
-
-<section class="phase1-profile panel" aria-labelledby="participant-profile-title">
+<section class="phase1-profile panel" id="participant-profile" aria-labelledby="participant-profile-title">
     <header class="phase1-section-heading profile-heading">
         <span class="phase1-section-icon">{{ icon('users', 20) }}</span>
         <div><p class="eyebrow" id="participant-profile-title">Participant Profile</p><h2>Demographic breakdown</h2></div>
@@ -215,6 +237,127 @@
     </div>
 </section>
 
+<section class="satellite-targets panel" id="satellite-targets" aria-labelledby="satellite-targets-title">
+    <header class="satellite-targets-heading">
+        <div class="phase1-section-heading">
+            <span class="phase1-section-icon">{{ icon('location', 20) }}</span>
+            <div>
+                <p class="eyebrow">Satellite Targets</p>
+                <h2 id="satellite-targets-title">Target vs Actual Participants</h2>
+            </div>
+        </div>
+        {% if satellite_settings_management_allowed and not public_dashboard|default(false) %}<div class="satellite-target-actions"><a class="button primary" href="{{ url_for('dashboard.satellite_settings', event_id=event.id, view='targets') }}#dashboard-satellite-target-values">{{ icon('settings', 17) }} Manage Satellite Targets</a></div>{% endif %}
+    </header>
+    <div class="satellite-target-comparison">
+        <div class="satellite-target-grid">
+            {% for group in dashboard.satellite_target_groups %}<article class="satellite-target-card {{ 'exceeded' if group.target_exceeded else '' }}">
+                <header><div><h3>{{ group.name }}</h3><small>{{ group.satellite_count|number }} configured {{ 'Satellite' if group.satellite_count == 1 else 'Satellites' }}</small></div>{% if group.target_exceeded %}<span class="satellite-target-status">Exceeded by {{ group.exceeded_amount|number }}</span>{% endif %}</header>
+                <p class="satellite-target-total"><strong>{{ group.actual_participants|number }}</strong><span> Actual / {{ group.participant_target|number }} Target</span></p>
+                {% if group.target_configured %}{% set visual_progress = 100 if group.progress_percentage > 100 else group.progress_percentage %}<div class="satellite-target-progress" role="progressbar" aria-label="{{ group.name }} participant progress" aria-valuenow="{{ visual_progress }}" aria-valuemin="0" aria-valuemax="100"><i style="width: {{ visual_progress }}%"></i></div><footer><strong>{{ group.progress_percentage|percent }}</strong><span>{% if group.target_exceeded %}Exceeded by {{ group.exceeded_amount|number }}{% else %}{{ group.remaining_slots|number }} Remaining{% endif %}</span></footer>
+                {% else %}<div class="satellite-target-progress unconfigured"><i></i></div><footer><strong>—</strong><span>Target is zero · progress unconfigured</span></footer>{% endif %}
+            </article>{% endfor %}
+        </div>
+    </div>
+</section>
+
+<section class="dashboard-satellite-reporting panel" id="dashboard-satellite-reporting" aria-labelledby="dashboard-satellite-reporting-title">
+    <header class="dashboard-insight-heading dashboard-satellite-reporting-heading">
+        <div class="phase1-section-heading">
+            <span class="phase1-section-icon">{{ icon('location', 20) }}</span>
+            <div><p class="eyebrow">Satellite Distribution</p><h2 id="dashboard-satellite-reporting-title">Participants by Satellite</h2></div>
+        </div>
+        <span>{{ dashboard.satellites.participant_assignments|number }} participant-Satellite assignments</span>
+    </header>
+    <div class="dashboard-satellite-reporting-grid">
+        <article class="dashboard-satellite-category-chart" aria-labelledby="dashboard-satellite-category-title">
+            <header><h3 id="dashboard-satellite-category-title">Participants by Reporting Category</h3><p>International Satellites are included under Outside Metro Manila.</p></header>
+            {% if dashboard.satellites.categorized_participants %}
+            <div class="dashboard-satellite-category-body">
+                <div class="dashboard-satellite-category-donut" role="img" aria-label="Participant distribution across Outside Metro Manila, Within Metro Manila, and Main" style="background: conic-gradient({% for item in dashboard.satellites.categories %}{{ item.color }} {{ item.start }}% {{ item.end }}%{% if not loop.last %}, {% endif %}{% endfor %})">
+                    <span><strong>{{ dashboard.satellites.categorized_participants|number }}</strong><small>Categorized</small></span>
+                </div>
+                <ul class="dashboard-satellite-category-legend">
+                    {% for item in dashboard.satellites.categories %}<li><i style="background: {{ item.color }}"></i><span>{{ item.label }}{% if item.key == 'outside_metro_manila' %}<small>Includes international</small>{% endif %}</span><strong>{{ item.participants|number }}</strong><small>{{ item.percentage|percent }}</small></li>{% endfor %}
+                </ul>
+            </div>
+            {% else %}<div class="dashboard-insight-empty">No categorized participant Satellite assignments are available.</div>{% endif %}
+        </article>
+        <article class="dashboard-satellite-table-card">
+            <header class="dashboard-satellite-table-heading">
+                <div><h3>Satellite Participant Ranking</h3><p>Sorted by participant count, highest first.</p></div>
+                <form method="get" action="{{ request.path }}#dashboard-satellite-reporting" role="search">
+                    <label for="dashboard-satellite-search" class="visually-hidden">Search Satellites</label>
+                    {{ icon('search', 16) }}
+                    <input id="dashboard-satellite-search" type="search" name="satellite_q" value="{{ dashboard.satellites.query }}" maxlength="100" placeholder="Search Satellite, Hub, or Hub Group">
+                    <button class="button secondary compact" type="submit">Search</button>
+                    {% if dashboard.satellites.query %}<a class="text-link" href="{{ dashboard_satellite_url(query='') }}">Clear</a>{% endif %}
+                </form>
+            </header>
+            <div class="table-wrap">
+                <table class="dashboard-satellite-table">
+                    <thead><tr><th>Satellite Name</th><th class="numeric"># of Participants</th><th class="numeric">%</th><th>Hub</th><th>Hub Group</th></tr></thead>
+                    <tbody>
+                        {% for satellite in dashboard.satellites.rows %}<tr><td><strong>{{ satellite.name }}</strong></td><td class="numeric">{{ satellite.participants|number }}</td><td class="numeric">{{ satellite.percentage|percent }}</td><td>{{ satellite.hub_name }}</td><td>{{ satellite.group_name }}</td></tr>
+                        {% else %}<tr><td class="empty-table" colspan="5"><strong>No Satellites match this search.</strong>{% if dashboard.satellites.query %}<a class="text-link" href="{{ dashboard_satellite_url(query='') }}">Clear search</a>{% endif %}</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <footer class="satellite-pagination">
+                <p>Showing {{ dashboard.satellites.pagination.start|number }}–{{ dashboard.satellites.pagination.end|number }} of {{ dashboard.satellites.pagination.total|number }} Satellites</p>
+                {% if dashboard.satellites.pagination.pages > 1 %}<nav aria-label="Dashboard Satellite pages">
+                    {% if dashboard.satellites.pagination.has_previous %}<a href="{{ dashboard_satellite_url(page=dashboard.satellites.pagination.page - 1) }}">Previous</a>{% else %}<span class="disabled">Previous</span>{% endif %}
+                    {% for page_number in dashboard.satellites.pagination.page_numbers %}{% if page_number %}<a class="{{ 'selected' if page_number == dashboard.satellites.pagination.page else '' }}" href="{{ dashboard_satellite_url(page=page_number) }}" {% if page_number == dashboard.satellites.pagination.page %}aria-current="page"{% endif %}>{{ page_number }}</a>{% else %}<span class="disabled" aria-hidden="true">…</span>{% endif %}{% endfor %}
+                    {% if dashboard.satellites.pagination.has_next %}<a href="{{ dashboard_satellite_url(page=dashboard.satellites.pagination.page + 1) }}">Next</a>{% else %}<span class="disabled">Next</span>{% endif %}
+                </nav>{% endif %}
+            </footer>
+        </article>
+    </div>
+</section>
+
+<section class="dashboard-leadership panel" id="dashboard-leadership" aria-labelledby="dashboard-leadership-title">
+    <header class="dashboard-insight-heading">
+        <div class="phase1-section-heading"><span class="phase1-section-icon">{{ icon('users', 20) }}</span><div><p class="eyebrow">Dgroup Information</p><h2 id="dashboard-leadership-title">Dgroup Leadership</h2></div></div>
+        <span>{{ dashboard.leadership.total|number }} reported leaders</span>
+    </header>
+    {% if dashboard.leadership.total or dashboard.years_leading.total %}<div class="dashboard-leadership-grid">
+        <div class="dashboard-leadership-roles">
+            <div class="dashboard-leadership-donut" role="img" aria-label="{{ dashboard.leadership['items'][0].count|number }} Dgroup Leaders and {{ dashboard.leadership['items'][1].count|number }} D12 Leaders" style="background: conic-gradient({% for item in dashboard.leadership['items'] %}var(--leadership-{{ item.key|replace('_', '-') }}) {{ item.start }}% {{ item.end }}%{% if not loop.last %}, {% endif %}{% endfor %})"><span><strong>{{ dashboard.leadership.total|number }}</strong><small>Leaders</small></span></div>
+            <div class="dashboard-leadership-legend">{% for item in dashboard.leadership['items'] %}<div><i class="is-{{ item.key }}"></i><span>{{ item.label }}</span><strong>{{ item.count|number }}</strong><small>{{ item.percentage|percent }}</small></div>{% endfor %}</div>
+        </div>
+        <div class="dashboard-years-chart"><header><div><h3>Years Leading</h3><p>All reported leaders, whether Dgroup or D12.</p></div><strong>{{ dashboard.years_leading.total|number }} responses</strong></header><div>{% for item in dashboard.years_leading['items'] %}<div class="dashboard-horizontal-bar"><span>{{ item.label }}</span><div><i style="width: {{ item.percentage }}%"></i></div><strong>{{ item.count|number }}</strong><small>{{ item.percentage|percent }}</small></div>{% endfor %}</div>{% if dashboard.years_leading.unreported %}<footer>{{ dashboard.years_leading.unreported|number }} {{ 'registrant has' if dashboard.years_leading.unreported == 1 else 'registrants have' }} no years-leading response.</footer>{% endif %}</div>
+    </div>{% else %}<div class="dashboard-insight-empty">No Dgroup leadership information was reported in the active registration batch.</div>{% endif %}
+</section>
+
+<section class="dashboard-transportation panel" id="dashboard-transportation" aria-labelledby="dashboard-transportation-title">
+    <header class="dashboard-insight-heading">
+        <div class="phase1-section-heading"><span class="phase1-section-icon">{{ icon('bus', 20) }}</span><div><p class="eyebrow">Travel Logistics</p><h2 id="dashboard-transportation-title">Transportation Plan</h2></div></div>
+        <span>{{ dashboard.transportation.registrants|number }} unique registrants</span>
+    </header>
+    {% if dashboard.transportation.registrants %}<div class="dashboard-transportation-grid">
+        {% for direction in dashboard.transportation.directions %}<article class="dashboard-transport-direction is-{{ direction.key }}">
+            <header><div><small>{{ direction.trip_label }}</small><h3>{{ direction.label }}</h3></div><strong>{{ direction.total|number }}<small>categorized</small></strong></header>
+            <div class="dashboard-transport-route" aria-hidden="true"><i></i><span>{{ icon('arrow', 17) }}</span><i></i></div>
+            <div class="dashboard-transport-modes">
+                {% for item in direction['items'] %}<div class="dashboard-transport-mode is-{{ item.key }}">
+                    <span class="dashboard-transport-icon">{{ icon(item.icon, 18) }}</span>
+                    <div><span>{{ item.label }}</span><div role="progressbar" aria-label="{{ item.label }} for {{ direction.label }}" aria-valuenow="{{ item.percentage }}" aria-valuemin="0" aria-valuemax="100"><i style="width: {{ item.percentage }}%"></i></div><small>{{ item.percentage|percent }} of categorized</small></div>
+                    <strong>{{ item.count|number }}</strong>
+                </div>{% endfor %}
+            </div>
+            {% if direction.unreported or direction.other or direction.conflicts %}<footer>{% if direction.unreported %}<span>{{ direction.unreported|number }} without a response</span>{% endif %}{% if direction.other %}<span>{{ direction.other|number }} other {{ 'response' if direction.other == 1 else 'responses' }}</span>{% endif %}{% if direction.conflicts %}<span>{{ direction.conflicts|number }} conflicting duplicate {{ 'response' if direction.conflicts == 1 else 'responses' }}</span>{% endif %}</footer>{% endif %}
+        </article>{% endfor %}
+    </div>{% else %}<div class="dashboard-insight-empty">No transportation information was reported in the active registration batch.</div>{% endif %}
+</section>
+
+<section class="dashboard-shirt-sizes panel" id="dashboard-shirt-sizes" aria-labelledby="dashboard-shirt-sizes-title">
+    <header class="dashboard-insight-heading">
+        <div class="phase1-section-heading"><span class="phase1-section-icon">{{ icon('shirt', 20) }}</span><div><p class="eyebrow">Event Logistics</p><h2 id="dashboard-shirt-sizes-title">T-shirt Size Distribution</h2></div></div>
+        <span>{{ dashboard.shirt_sizes.total|number }} size responses</span>
+    </header>
+    {% if dashboard.shirt_sizes.total %}<div class="dashboard-shirt-grid">{% for item in dashboard.shirt_sizes['items'] %}<article class="dashboard-shirt-card"><header><div><strong>{{ item.label }}</strong><small>{{ item.detail }}</small></div><b>{{ item.count|number }}</b></header><div class="dashboard-shirt-bar"><i style="width: {{ item.percentage }}%"></i></div><footer><span>{{ item.percentage|percent }} of reported sizes</span></footer></article>{% endfor %}</div>{% else %}<div class="dashboard-insight-empty">No T-shirt sizes were reported in the active registration batch.</div>{% endif %}
+    {% if dashboard.shirt_sizes.unreported or dashboard.shirt_sizes.conflicts %}<footer class="dashboard-insight-note">{{ dashboard.shirt_sizes.unreported|number }} without a size{% if dashboard.shirt_sizes.conflicts %} · {{ dashboard.shirt_sizes.conflicts|number }} conflicting duplicate {{ 'response' if dashboard.shirt_sizes.conflicts == 1 else 'responses' }}{% endif %}</footer>{% endif %}
+</section>
+
 <aside class="phase1-scope-note">
     {{ icon('info', 18) }}
     <span>All metrics are scoped to <strong>{{ event['name'] }}</strong>. Unique-person metrics use the curated layer for the latest active import; raw registrations remain separately visible.</span>
@@ -222,3 +365,5 @@
 </aside>
 
 {% endblock %}
+
+{% block scripts %}{% if public_dashboard|default(false) %}<script src="{{ url_for('static', filename='public_dashboard.js', v='20260905-section-navigation') }}" defer></script>{% endif %}{% endblock %}

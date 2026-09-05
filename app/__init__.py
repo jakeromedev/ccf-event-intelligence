@@ -12,6 +12,7 @@ from .extensions import csrf
 from .observability import configure_logging
 from .operations import bp as operations_bp
 from .operations import init_app as init_operations_app
+from .public_dashboard import bp as public_dashboard_bp
 from .routes import bp
 
 
@@ -33,6 +34,7 @@ def create_app(test_config=None):
     app.register_blueprint(operations_bp)
     init_operations_app(app)
     app.register_blueprint(auth_bp)
+    app.register_blueprint(public_dashboard_bp)
     # Register the authentication guard before global CSRF validation so an
     # unauthenticated POST is redirected to login instead of leaking a CSRF error.
     init_auth_app(app)
