@@ -2161,6 +2161,14 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertIn(b"Export CSV", page.data)
         self.assertIn(b"Import CSV", page.data)
         self.assertIn(b'data-directory-import-dialog', page.data)
+        for settings_view in ("directory", "registrants", "targets"):
+            with self.subTest(settings_view=settings_view):
+                event_page = client.get(
+                    "/satellites/settings",
+                    query_string={"event_id": self.event_a, "view": settings_view},
+                )
+                self.assertIn(b"Export CSV", event_page.data)
+                self.assertIn(b"Import CSV", event_page.data)
 
         exported = client.get("/satellites/settings/directory/export.csv")
         self.assertEqual(200, exported.status_code)

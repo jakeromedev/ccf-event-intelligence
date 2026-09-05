@@ -3714,6 +3714,7 @@ form[data-settings-form][aria-busy="true"] { opacity: .72; pointer-events: none;
 /* Satellite Settings — registration Satellite sync review */
 .satellite-settings-summary-actions { display: grid; justify-items: end; gap: 10px; }
 .satellite-settings-summary-actions form { margin: 0; }
+.satellite-settings-summary-actions .satellite-settings-transfer-action > span { text-align: right; }
 .satellite-sync-actions { display: flex; align-items: center; gap: 7px; }
 .satellite-settings-summary-actions .button { min-height: 36px; gap: 7px; white-space: nowrap; }
 .satellite-sync-dialog { width: min(1080px, calc(100vw - 28px)); max-height: min(860px, calc(100vh - 28px)); padding: 0; overflow: hidden; color: var(--b1g-text); border: 0; border-radius: 12px; background: transparent; box-shadow: 0 24px 70px rgba(50, 16, 16, .28); }
@@ -3784,6 +3785,7 @@ form[data-settings-form][aria-busy="true"] { opacity: .72; pointer-events: none;
 
 @media (max-width: 900px) {
     .satellite-settings-summary-actions { justify-items: stretch; }
+    .satellite-settings-summary-actions .satellite-settings-transfer-action > span { text-align: left; }
     .satellite-sync-counts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .satellite-sync-counts div:nth-child(3) { border-right: 0; }
     .satellite-sync-counts div:nth-child(-n+3) { border-bottom: 1px solid var(--b1g-border); }
@@ -3928,7 +3930,7 @@ form[data-settings-form][aria-busy="true"] { opacity: .72; pointer-events: none;
 .satellite-mobile-filter-panel select { width: 100%; min-height: 42px; padding: 8px 10px; color: var(--b1g-text); border: 1px solid var(--b1g-border); border-radius: 7px; background: var(--b1g-white); font: inherit; font-size: 10px; }
 .satellite-mobile-filter-panel footer { margin: 5px -18px 0; padding: 12px 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; border-top: 1px solid var(--b1g-border); background: var(--b1g-off-white); }
 .satellite-mobile-filter-panel footer .button { width: 100%; justify-content: center; }
-.satellite-settings-directory-actions { margin-top: 10px; display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; }
+.satellite-settings-directory-actions { margin-top: 10px; display: flex; align-items: flex-end; justify-content: flex-end; gap: 10px; }
 .satellite-settings-directory-actions > div:last-child { display: flex; gap: 6px; }
 .satellite-row-actions { display: flex; align-items: center; gap: 6px; }
 .satellite-record-view { min-height: 28px; padding: 5px 8px; color: #176b5c; border: 1px solid #bcd8d0; border-radius: 6px; background: #f2faf7; cursor: pointer; font: inherit; font-size: 8px; font-weight: 800; }
