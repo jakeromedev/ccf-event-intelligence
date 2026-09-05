@@ -156,6 +156,40 @@ class SatelliteTargetCategoryMigrationTests(unittest.TestCase):
             self.assertEqual(0, targets[(event_a, "within_metro_manila")])
             self.assertEqual(0, targets[(event_b, "main")])
 
+            groups = db.execute(
+                """
+                SELECT report.event_id, report.id target_group_id,
+                       report.participant_target,
+                       report.sort_order, member.category_key
+                FROM event_satellite_target_groups report
+                JOIN event_satellite_target_group_categories member
+                  ON member.target_group_id = report.id
+                 AND member.event_id = report.event_id
+                ORDER BY report.event_id, report.sort_order
+                """
+            ).fetchall()
+            self.assertEqual(6, len(groups))
+            event_a_groups = [row for row in groups if row["event_id"] == event_a]
+            self.assertEqual(
+                ["outside_metro_manila", "within_metro_manila", "main"],
+                [row["category_key"] for row in event_a_groups],
+            )
+            self.assertEqual(
+                [500, 0, 1_000],
+                [row["participant_target"] for row in event_a_groups],
+            )
+
+            with self.assertRaises(sqlite3.IntegrityError):
+                db.execute(
+                    """
+                    INSERT INTO event_satellite_target_group_categories (
+                        event_id, target_group_id, category_key
+                    ) VALUES (?, ?, 'outside_metro_manila')
+                    """,
+                    (event_a, event_a_groups[1]["target_group_id"]),
+                )
+            db.rollback()
+
             memberships = db.execute(
                 """
                 SELECT category_key, directory_id
@@ -235,6 +269,15 @@ class SatelliteTargetCategoryMigrationTests(unittest.TestCase):
 
         self._alembic(command.downgrade, PREVIOUS_REVISION)
         with self._connection() as db:
+            self.assertIsNone(
+                db.execute(
+                    """
+                    SELECT name FROM sqlite_master
+                    WHERE type = 'table'
+                      AND name = 'event_satellite_target_groups'
+                    """
+                ).fetchone()
+            )
             self.assertIsNone(
                 db.execute(
                     """

@@ -473,14 +473,25 @@ class AuthenticationTests(unittest.TestCase):
                 },
             ).status_code,
         )
+        self.assertEqual(
+            403,
+            self.client.post(
+                "/events/{}/satellite-target-groups/grouping".format(event_id),
+                data={"csrf_token": token, "grouping_preset": "all"},
+            ).status_code,
+        )
 
     def test_admin_target_category_membership_update_requires_csrf(self):
         _, admin_password = self.initialize_admin()
         with self.app.app_context():
-            event_id = get_db().execute(
+            db = get_db()
+            event_id = db.execute(
                 "INSERT INTO events (name) VALUES ('Target Category Security')"
             ).lastrowid
-            get_db().commit()
+            from app.satellite_target_categories import satellite_target_groups
+
+            groups = satellite_target_groups(db, event_id)["groups"]
+            db.commit()
         self.login("admin", admin_password)
         path = "/events/{}/satellite-target-categories/memberships".format(event_id)
         self.assertEqual(400, self.client.post(path).status_code)
@@ -503,9 +514,8 @@ class AuthenticationTests(unittest.TestCase):
 
         target_path = "/events/{}/satellite-target-categories/targets".format(event_id)
         target_data = {
-            "target_outside_metro_manila": "10",
-            "target_within_metro_manila": "20",
-            "target_main": "30",
+            "target_group_{}".format(group["id"]): str(value)
+            for group, value in zip(groups, (10, 20, 30))
         }
         self.assertEqual(400, self.client.post(target_path, data=target_data).status_code)
         target_data["csrf_token"] = self.csrf("/events/{}".format(event_id))
@@ -515,9 +525,12 @@ class AuthenticationTests(unittest.TestCase):
                 row["category_key"]: row["participant_target"]
                 for row in get_db().execute(
                     """
-                    SELECT category_key, participant_target
-                    FROM event_satellite_target_categories
-                    WHERE event_id = ?
+                    SELECT member.category_key, report.participant_target
+                    FROM event_satellite_target_group_categories member
+                    JOIN event_satellite_target_groups report
+                      ON report.id = member.target_group_id
+                     AND report.event_id = member.event_id
+                    WHERE member.event_id = ?
                     """,
                     (event_id,),
                 ).fetchall()
@@ -526,6 +539,36 @@ class AuthenticationTests(unittest.TestCase):
             {"outside_metro_manila": 10, "within_metro_manila": 20, "main": 30},
             values,
         )
+
+        grouping_path = "/events/{}/satellite-target-groups/grouping".format(event_id)
+        self.assertEqual(
+            400,
+            self.client.post(
+                grouping_path, data={"grouping_preset": "outside_within"}
+            ).status_code,
+        )
+        grouping_token = self.csrf(
+            "/satellites/settings?event_id={}&view=targets".format(event_id)
+        )
+        self.assertEqual(
+            302,
+            self.client.post(
+                grouping_path,
+                data={
+                    "csrf_token": grouping_token,
+                    "grouping_preset": "outside_within",
+                },
+            ).status_code,
+        )
+        with self.app.app_context():
+            rows = get_db().execute(
+                """
+                SELECT participant_target FROM event_satellite_target_groups
+                WHERE event_id = ? ORDER BY sort_order
+                """,
+                (event_id,),
+            ).fetchall()
+        self.assertEqual([30, 30], [row["participant_target"] for row in rows])
 
     def test_login_lockout_blocks_correct_password_until_expiry(self):
         user_id = self.create_user("lockout-operator")

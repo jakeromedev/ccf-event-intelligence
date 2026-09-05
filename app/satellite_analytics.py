@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from .satellite_target_categories import (
-    SATELLITE_TARGET_CATEGORIES,
-    satellite_target_category_rows,
+    satellite_target_groups,
 )
 
 
@@ -54,16 +53,16 @@ WITH manual_curated AS (
 
 
 def satellite_target_category_analytics(db, event_id, batch_id):
-    """Return shared Dashboard and Satellite Overview category analytics.
+    """Return shared Dashboard and Satellite Overview group analytics.
 
     Dashboard Actuals use distinct participants. The Satellite Overview
     distribution uses additive effective association rows so its pie has a
     mathematically valid denominator when one person has multiple Satellites.
     """
-    categories = satellite_target_category_rows(db, event_id)
+    grouping = satellite_target_groups(db, event_id)
     counts = {
-        category.key: {"actual_participants": 0, "associations": 0}
-        for category in SATELLITE_TARGET_CATEGORIES
+        group["id"]: {"actual_participants": 0, "associations": 0}
+        for group in grouping["groups"]
     }
     if batch_id is not None:
         batch = db.execute(
@@ -74,13 +73,19 @@ def satellite_target_category_analytics(db, event_id, batch_id):
         rows = db.execute(
             EFFECTIVE_ASSOCIATIONS_CTE
             + """
-            SELECT membership.category_key,
+            SELECT report.id target_group_id,
                    COUNT(DISTINCT CASE
                        WHEN curated.registration_type = 'participant'
                        THEN curated.id END
                    ) actual_participants,
                    COUNT(association.id) associations
-            FROM event_satellite_target_satellites membership
+            FROM event_satellite_target_groups report
+            JOIN event_satellite_target_group_categories group_category
+              ON group_category.target_group_id = report.id
+             AND group_category.event_id = report.event_id
+            JOIN event_satellite_target_satellites membership
+              ON membership.event_id = group_category.event_id
+             AND membership.category_key = group_category.category_key
             JOIN effective_associations association
               ON association.event_id = membership.event_id
              AND association.batch_id = ?
@@ -93,14 +98,14 @@ def satellite_target_category_analytics(db, event_id, batch_id):
               ON curated.id = association.curated_registrant_id
              AND curated.event_id = association.event_id
              AND curated.batch_id = association.batch_id
-            WHERE membership.event_id = ?
-            GROUP BY membership.category_key
+            WHERE report.event_id = ?
+            GROUP BY report.id
             """,
             (batch_id, event_id),
         ).fetchall()
         counts.update(
             {
-                row["category_key"]: {
+                row["target_group_id"]: {
                     "actual_participants": row["actual_participants"],
                     "associations": row["associations"],
                 }
@@ -111,20 +116,14 @@ def satellite_target_category_analytics(db, event_id, batch_id):
     association_total = sum(item["associations"] for item in counts.values())
     cursor = 0.0
     result = []
-    for index, (definition, stored) in enumerate(
-        zip(SATELLITE_TARGET_CATEGORIES, categories)
-    ):
-        associations = counts[definition.key]["associations"]
+    for index, group in enumerate(grouping["groups"]):
+        associations = counts[group["id"]]["associations"]
         percentage = _percentage(associations, association_total)
         result.append(
             {
-                "key": definition.key,
-                "name": definition.name,
-                "participant_target": stored["participant_target"],
-                "satellite_count": stored["satellite_count"],
-                "actual_participants": counts[definition.key][
-                    "actual_participants"
-                ],
+                **group,
+                "name": group["label"],
+                "actual_participants": counts[group["id"]]["actual_participants"],
                 "associations": associations,
                 "percentage": percentage,
                 "start": cursor,
@@ -136,7 +135,9 @@ def satellite_target_category_analytics(db, event_id, batch_id):
     return {
         "event_id": event_id,
         "batch_id": batch_id,
+        "preset_key": grouping["preset_key"],
         "association_count": association_total,
+        "groups": result,
         "categories": result,
     }
 

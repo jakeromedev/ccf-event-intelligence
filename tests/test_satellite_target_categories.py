@@ -11,8 +11,11 @@ from app.db import get_db, get_engine
 from app.models import Base
 from app.satellite_target_categories import (
     SATELLITE_TARGET_CATEGORY_KEYS,
+    SatelliteTargetCategoryValidationError,
     ensure_event_satellite_target_categories,
+    replace_satellite_target_grouping,
     satellite_target_category_rows,
+    satellite_target_groups,
 )
 
 
@@ -41,6 +44,15 @@ class SatelliteTargetCategoryFoundationTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def target_form(self, event_id, values):
+        with self.app.app_context():
+            groups = satellite_target_groups(get_db(), event_id)["groups"]
+            get_db().commit()
+        return {
+            "target_group_{}".format(group["id"]): str(value)
+            for group, value in zip(groups, values)
+        }
 
     def test_event_creation_seeds_exactly_three_fixed_categories(self):
         response = self.app.test_client().post(
@@ -83,11 +95,7 @@ class SatelliteTargetCategoryFoundationTests(unittest.TestCase):
 
         valid = client.post(
             "/events/{}/satellite-target-categories/targets".format(event_id),
-            data={
-                "target_outside_metro_manila": "500",
-                "target_within_metro_manila": "0",
-                "target_main": "1000",
-            },
+            data=self.target_form(event_id, (500, 0, 1000)),
             follow_redirects=True,
         )
         self.assertEqual(200, valid.status_code)
@@ -102,27 +110,17 @@ class SatelliteTargetCategoryFoundationTests(unittest.TestCase):
         self.assertFalse(categories[1]["target_configured"])
         self.assertIsNone(categories[1]["progress_percentage"])
 
-        invalid_submissions = (
-            {
-                "target_outside_metro_manila": "501",
-                "target_within_metro_manila": "1.5",
-                "target_main": "1001",
-            },
-            {
-                "target_outside_metro_manila": "501",
-                "target_within_metro_manila": "-1",
-                "target_main": "1001",
-            },
-            {
-                "target_outside_metro_manila": "501",
-                "target_within_metro_manila": "1",
-                "target_main": "1000000001",
-            },
-            {
-                "target_outside_metro_manila": "501",
-                "target_within_metro_manila": "1",
-            },
-        )
+        invalid_submissions = [
+            self.target_form(event_id, values)
+            for values in (
+                (501, "1.5", 1001),
+                (501, -1, 1001),
+                (501, 1, 1000000001),
+            )
+        ]
+        incomplete = self.target_form(event_id, (501, 1, 1001))
+        incomplete.pop(next(reversed(incomplete)))
+        invalid_submissions.append(incomplete)
         for submission in invalid_submissions:
             response = client.post(
                 "/events/{}/satellite-target-categories/targets".format(event_id),
@@ -132,17 +130,133 @@ class SatelliteTargetCategoryFoundationTests(unittest.TestCase):
             self.assertEqual(200, response.status_code)
             self.assertIn(b"No changes were made", response.data)
             with self.app.app_context():
-                rows = satellite_target_category_rows(get_db(), event_id)
+                rows = satellite_target_groups(get_db(), event_id)["groups"]
                 self.assertEqual(
                     [500, 0, 1000],
                     [row["participant_target"] for row in rows],
                 )
 
-        page = client.get("/events/{}".format(event_id))
-        self.assertEqual(1, page.data.count(b'name="target_outside_metro_manila"'))
-        self.assertEqual(1, page.data.count(b'name="target_within_metro_manila"'))
-        self.assertEqual(1, page.data.count(b'name="target_main"'))
-        self.assertNotIn(b"satellite-dataset-modal", page.data)
+        page = client.get(
+            "/satellites/settings?event_id={}&view=targets".format(event_id)
+        )
+        self.assertEqual(3, page.data.count(b'name="target_group_'))
+        dashboard_page = client.get("/events/{}".format(event_id))
+        self.assertNotIn(b'name="target_group_', dashboard_page.data)
+        self.assertIn(b"Manage Satellite Targets", dashboard_page.data)
+
+    def test_all_supported_groupings_and_deterministic_target_migration(self):
+        client = self.app.test_client()
+        client.post("/events", data={"name": "Grouping Event"})
+        with self.app.app_context():
+            db = get_db()
+            event_id = db.execute(
+                "SELECT id FROM events WHERE name = 'Grouping Event'"
+            ).fetchone()["id"]
+
+        client.post(
+            "/events/{}/satellite-target-categories/targets".format(event_id),
+            data=self.target_form(event_id, (500, 700, 1000)),
+        )
+        expected = {
+            "separate": 3,
+            "outside_within": 2,
+            "outside_main": 2,
+            "within_main": 2,
+            "all": 1,
+        }
+        for preset, count in expected.items():
+            with self.app.app_context():
+                db = get_db()
+                # Reset from a known separate state so every supported
+                # partition is tested independently.
+                replace_satellite_target_grouping(db, event_id, "separate")
+                result = replace_satellite_target_grouping(db, event_id, preset)
+                db.commit()
+                self.assertEqual(count, len(result["groups"]))
+                represented = [
+                    key for group in result["groups"] for key in group["category_keys"]
+                ]
+                self.assertCountEqual(SATELLITE_TARGET_CATEGORY_KEYS, represented)
+
+        with self.app.app_context():
+            db = get_db()
+            replace_satellite_target_grouping(db, event_id, "separate")
+            groups = satellite_target_groups(db, event_id)["groups"]
+            for group, target in zip(groups, (500, 700, 1000)):
+                db.execute(
+                    "UPDATE event_satellite_target_groups SET participant_target = ? WHERE id = ?",
+                    (target, group["id"]),
+                )
+            merged = replace_satellite_target_grouping(db, event_id, "outside_within")
+            self.assertEqual([1200, 1000], [g["participant_target"] for g in merged["groups"]])
+            split = replace_satellite_target_grouping(db, event_id, "separate")
+            db.commit()
+            self.assertTrue(split["split_targets_reset"])
+            self.assertEqual([0, 0, 1000], [g["participant_target"] for g in split["groups"]])
+
+    def test_grouping_route_rejects_invalid_preset_without_changes(self):
+        client = self.app.test_client()
+        client.post("/events", data={"name": "Atomic Grouping Event"})
+        with self.app.app_context():
+            db = get_db()
+            event_id = db.execute(
+                "SELECT id FROM events WHERE name = 'Atomic Grouping Event'"
+            ).fetchone()["id"]
+        response = client.post(
+            "/events/{}/satellite-target-groups/grouping".format(event_id),
+            data={"grouping_preset": "overlapping-invalid"},
+            follow_redirects=True,
+        )
+        self.assertIn(b"No changes were made", response.data)
+        with self.app.app_context():
+            grouping = satellite_target_groups(get_db(), event_id)
+            self.assertEqual("separate", grouping["preset_key"])
+            self.assertEqual(3, len(grouping["groups"]))
+
+    def test_group_partition_constraints_and_event_isolation(self):
+        client = self.app.test_client()
+        client.post("/events", data={"name": "Partition Event A"})
+        client.post("/events", data={"name": "Partition Event B"})
+        with self.app.app_context():
+            db = get_db()
+            events = {
+                row["name"]: row["id"]
+                for row in db.execute(
+                    "SELECT id, name FROM events WHERE name LIKE 'Partition Event %'"
+                ).fetchall()
+            }
+            grouping_a = satellite_target_groups(db, events["Partition Event A"])
+            grouping_b = satellite_target_groups(db, events["Partition Event B"])
+            db.commit()
+
+            with self.assertRaises(IntegrityError):
+                db.execute(
+                    """
+                    INSERT INTO event_satellite_target_group_categories (
+                        event_id, target_group_id, category_key
+                    ) VALUES (?, ?, 'outside_metro_manila')
+                    """,
+                    (events["Partition Event A"], grouping_a["groups"][1]["id"]),
+                )
+            db.rollback()
+
+            db.execute(
+                """
+                DELETE FROM event_satellite_target_group_categories
+                WHERE event_id = ? AND category_key = 'main'
+                """,
+                (events["Partition Event A"],),
+            )
+            with self.assertRaises(SatelliteTargetCategoryValidationError):
+                satellite_target_groups(db, events["Partition Event A"])
+            db.rollback()
+
+            replace_satellite_target_grouping(db, events["Partition Event A"], "all")
+            db.commit()
+            self.assertEqual(
+                "all", satellite_target_groups(db, events["Partition Event A"])["preset_key"]
+            )
+            self.assertEqual("separate", grouping_b["preset_key"])
 
     def test_database_enforces_targets_membership_exclusivity_and_cascades(self):
         with self.app.app_context():

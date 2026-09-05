@@ -810,6 +810,99 @@ class EventSatelliteTargetSatellite(Base):
     )
 
 
+class EventSatelliteTargetGroup(Base):
+    """One configurable reporting group above the fixed base categories."""
+
+    __tablename__ = "event_satellite_target_groups"
+    __table_args__ = (
+        CheckConstraint(
+            "participant_target >= 0 AND participant_target <= 1000000000",
+            name="ck_event_satellite_target_groups_target",
+        ),
+        CheckConstraint(
+            "sort_order >= 1 AND sort_order <= 3",
+            name="ck_event_satellite_target_groups_sort",
+        ),
+        UniqueConstraint(
+            "id", "event_id", name="uq_event_satellite_target_groups_id_event"
+        ),
+        UniqueConstraint(
+            "event_id",
+            "sort_order",
+            name="uq_event_satellite_target_groups_event_sort",
+        ),
+        Index("idx_event_satellite_target_groups_event", "event_id", "sort_order"),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(
+        ID_TYPE, ForeignKey("events.id", ondelete="CASCADE"), nullable=False
+    )
+    display_label: Mapped[str] = mapped_column(
+        SATELLITE_DATASET_NAME_TYPE, nullable=False
+    )
+    participant_target: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+    updated_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+
+class EventSatelliteTargetGroupCategory(Base):
+    """One fixed base category assigned to one Event analytics target group."""
+
+    __tablename__ = "event_satellite_target_group_categories"
+    __table_args__ = (
+        CheckConstraint(
+            "category_key IN "
+            "('outside_metro_manila','within_metro_manila','main')",
+            name="ck_event_satellite_target_group_categories_key",
+        ),
+        ForeignKeyConstraint(
+            ["target_group_id", "event_id"],
+            ["event_satellite_target_groups.id", "event_satellite_target_groups.event_id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["event_id", "category_key"],
+            [
+                "event_satellite_target_categories.event_id",
+                "event_satellite_target_categories.category_key",
+            ],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "target_group_id",
+            "category_key",
+            name="uq_event_satellite_target_group_categories_member",
+        ),
+        UniqueConstraint(
+            "event_id",
+            "category_key",
+            name="uq_event_satellite_target_group_categories_partition",
+        ),
+        Index(
+            "idx_event_satellite_target_group_categories_group",
+            "target_group_id",
+        ),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    target_group_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    category_key: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+
 class EventRegistrantSatellite(Base):
     """Effective canonical Satellite ownership for one durable registrant."""
 

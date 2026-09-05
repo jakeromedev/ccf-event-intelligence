@@ -373,20 +373,22 @@ def satellite_dataset_metrics(db, event_id, batch_id):
 
 
 def satellite_target_category_metrics(db, event_id, batch_id):
-    """Calculate the three fixed Dashboard Target vs Actual categories."""
+    """Calculate dynamic Dashboard Analytics Target Group metrics."""
     analytics = satellite_target_category_analytics(db, event_id, batch_id)
     result = []
-    for category in analytics["categories"]:
-        actual = category["actual_participants"]
-        target = category["participant_target"]
+    for group in analytics["groups"]:
+        actual = group["actual_participants"]
+        target = group["participant_target"]
         progress = registration_progress(actual, target)
         result.append(
             {
-                "key": category["key"],
-                "name": category["name"],
+                "id": group["id"],
+                "key": group["key"],
+                "category_keys": group["category_keys"],
+                "name": group["name"],
                 "participant_target": target,
                 "actual_participants": actual,
-                "satellite_count": category["satellite_count"],
+                "satellite_count": group["satellite_count"],
                 "exceeded_amount": max(actual - target, 0),
                 **progress,
             }
@@ -444,6 +446,9 @@ def event_dashboard_metrics(db, event_id):
         else participant_profile_metrics_empty(event["event_date"])
     )
     total_registrations = participants + volunteers
+    target_groups = satellite_target_category_metrics(
+        db, event_id, batch["id"] if batch else None
+    )
     return {
         "event": {
             "id": event["id"],
@@ -463,9 +468,9 @@ def event_dashboard_metrics(db, event_id):
             **progress,
         },
         "participant_profile": profile,
-        "satellite_target_categories": satellite_target_category_metrics(
-            db, event_id, batch["id"] if batch else None
-        ),
+        "satellite_target_groups": target_groups,
+        # Temporary response alias for consumers of the fixed-category release.
+        "satellite_target_categories": target_groups,
         "satellite_datasets": satellite_dataset_metrics(
             db, event_id, batch["id"] if batch else None
         ),

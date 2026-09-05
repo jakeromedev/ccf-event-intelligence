@@ -116,6 +116,32 @@
         <footer><p>Saving replaces this Event's complete category membership. Hidden filtered rows remain included.</p><button class="button primary" type="submit" data-loading-label="Saving Dashboard Target Satellites…">Save Dashboard Target Satellites</button></footer>
     </form>
 </section>
+<section class="satellite-analytics-grouping panel" id="dashboard-analytics-grouping" aria-labelledby="dashboard-analytics-grouping-title">
+    <header>
+        <div><p class="eyebrow">Dashboard Reporting</p><h2 id="dashboard-analytics-grouping-title">Dashboard Analytics Grouping</h2><p>Choose how the three base Satellite categories roll up for targets and analytics. Base Satellite assignments remain unchanged.</p></div>
+        <span>{{ target_settings.analytics_grouping.groups|length }} {{ 'group' if target_settings.analytics_grouping.groups|length == 1 else 'groups' }} active</span>
+    </header>
+    <form method="post" action="{{ url_for('dashboard.update_satellite_target_grouping', event_id=event.id) }}" data-settings-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <fieldset><legend>Grouping preset</legend><div class="satellite-grouping-presets">
+            {% for preset in target_settings.analytics_grouping.presets %}<label class="satellite-grouping-preset"><input type="radio" name="grouping_preset" value="{{ preset.key }}" {{ 'checked' if preset.key == target_settings.analytics_grouping.preset_key else '' }} required><span><strong>{{ preset.name }}</strong><small>{{ preset.description }}</small><em>{% for label in preset.labels %}<i>{{ label }}</i>{% endfor %}</em></span></label>{% endfor %}
+        </div></fieldset>
+        <aside>{{ icon('info', 18) }}<p>Merging groups adds their current Targets. Splitting a combined group resets each newly split Target to 0 so the system never guesses how to divide it.</p></aside>
+        <footer><p>This grouping controls Dashboard target cards and charts, plus the Satellite Overview distribution.</p><button class="button primary" type="submit" data-loading-label="Saving Analytics Grouping…">Save Analytics Grouping</button></footer>
+    </form>
+</section>
+<section class="satellite-analytics-grouping satellite-target-value-settings panel" id="dashboard-satellite-target-values" aria-labelledby="dashboard-satellite-target-values-title">
+    <header>
+        <div><p class="eyebrow">Dashboard Reporting</p><h2 id="dashboard-satellite-target-values-title">Set Satellite Targets</h2><p>Set the participant Target for each active analytics group. Change the grouping above first if categories need to be combined.</p></div>
+        <span>{{ target_settings.analytics_grouping.groups|length }} {{ 'Target' if target_settings.analytics_grouping.groups|length == 1 else 'Targets' }}</span>
+    </header>
+    <form method="post" action="{{ url_for('dashboard.update_satellite_target_category_targets', event_id=event.id) }}" data-settings-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="satellite-target-fields">{% for group in target_settings.analytics_grouping.groups %}<label><span>{{ group.label }}</span><span class="phase1-input-wrap">{{ icon('person', 18) }}<input type="number" name="target_group_{{ group.id }}" value="{{ group.participant_target }}" min="0" max="1000000000" step="1" inputmode="numeric" required></span><small>{{ group.satellite_count|number }} configured {{ 'Satellite' if group.satellite_count == 1 else 'Satellites' }} · 0 means not configured.</small></label>{% endfor %}</div>
+        <aside>{{ icon('info', 18) }}<p>Actuals count distinct participants from effective Satellite assignments, exclude volunteers, and do not depend on attendance or check-in.</p></aside>
+        <footer><p>Saved Targets appear immediately in the Dashboard chart and progress cards.</p><button class="button primary" type="submit" data-loading-label="Saving Satellite Targets…">Save Satellite Targets</button></footer>
+    </form>
+</section>
 {% endif %}
 
 {% if event and settings_view == 'directory' and settings_search_scope == 'registrant' and settings_filters.query %}

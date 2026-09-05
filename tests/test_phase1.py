@@ -48,7 +48,10 @@ from app.normalization import (
 from app.models import Base
 from app.registrant_satellite_assignments import set_manual_satellite_assignment
 from app.satellite_datasets import satellite_dataset_options
-from app.satellite_target_categories import ensure_event_satellite_target_categories
+from app.satellite_target_categories import (
+    ensure_event_satellite_target_categories,
+    satellite_target_groups,
+)
 from scripts.migrate_sqlite_to_mysql import MigrationError, migrate
 
 
@@ -781,10 +784,9 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertNotIn("Mobile Number", str(payload))
         page = client.get("/events/{}".format(self.event_a))
         self.assertIn(b"Target vs Actual Participants", page.data)
-        self.assertIn(b"Set Satellite Targets", page.data)
-        self.assertIn(b"satellite-target-modal", page.data)
+        self.assertIn(b"Manage Satellite Targets", page.data)
+        self.assertNotIn(b"satellite-target-modal", page.data)
         self.assertNotIn(b"satellite-dataset-modal", page.data)
-        self.assertNotIn(b"Manage Satellite Targets", page.data)
 
     def test_fixed_satellite_targets_use_effective_distinct_participants(self):
         batch_id = self._process(self.event_a)
@@ -925,12 +927,14 @@ class EventIntegrationTests(unittest.TestCase):
             )
             db.commit()
 
+        with self.app.app_context():
+            target_groups = satellite_target_groups(get_db(), self.event_a)["groups"]
+            get_db().commit()
         saved = client.post(
             "/events/{}/satellite-target-categories/targets".format(self.event_a),
             data={
-                "target_outside_metro_manila": "1",
-                "target_within_metro_manila": "0",
-                "target_main": "5",
+                "target_group_{}".format(group["id"]): str(value)
+                for group, value in zip(target_groups, (1, 0, 5))
             },
         )
         self.assertEqual(302, saved.status_code)
@@ -1008,13 +1012,15 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertEqual(0, moved_satellites["needs_mapping"])
 
         page = client.get("/events/{}".format(self.event_a))
-        self.assertEqual(1, page.data.count(b'name="target_outside_metro_manila"'))
-        self.assertEqual(1, page.data.count(b'name="target_within_metro_manila"'))
-        self.assertEqual(1, page.data.count(b'name="target_main"'))
+        self.assertNotIn(b'name="target_group_', page.data)
+        target_settings_page = client.get(
+            "/satellites/settings?event_id={}&view=targets".format(self.event_a)
+        )
+        self.assertEqual(3, target_settings_page.data.count(b'name="target_group_'))
         self.assertNotIn(b"satellite-dataset-modal", page.data)
 
         satellite_page = client.get("/events/{}/satellites".format(self.event_a))
-        self.assertIn(b"Registration Distribution by Target Category", satellite_page.data)
+        self.assertIn(b"Registration Distribution by Analytics Group", satellite_page.data)
         self.assertIn(b"Based on effective Satellite associations", satellite_page.data)
         self.assertIn(b"Shares use additive effective associations", satellite_page.data)
         self.assertIn(b"conic-gradient", satellite_page.data)
@@ -1071,6 +1077,88 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertEqual(
             6,
             historical_satellites["target_category_distribution"]["association_count"],
+        )
+
+        # One participant now has associations in two base categories. A
+        # combined group must calculate the distinct union, not add the two
+        # separate group actuals.
+        with self.app.app_context():
+            db = get_db()
+            db.execute(
+                "DELETE FROM event_registrant_satellites WHERE event_id = ?",
+                (self.event_a,),
+            )
+            main_satellite = db.execute(
+                """
+                SELECT id FROM satellites
+                WHERE batch_id = ? AND normalized_name = 'ccf main'
+                """,
+                (batch_id,),
+            ).fetchone()[0]
+            db.execute(
+                """
+                INSERT OR IGNORE INTO curated_registrant_satellites (
+                    event_id, batch_id, curated_registrant_id, satellite_id
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (self.event_a, batch_id, eastwood_person, main_satellite),
+            )
+            db.commit()
+            separate = event_dashboard_metrics(db, self.event_a)[
+                "satellite_target_groups"
+            ]
+        separate_by_key = {item["key"]: item for item in separate}
+        separate_sum = (
+            separate_by_key["outside_metro_manila"]["actual_participants"]
+            + separate_by_key["main"]["actual_participants"]
+        )
+
+        combined = client.post(
+            "/events/{}/satellite-target-groups/grouping".format(self.event_a),
+            data={"grouping_preset": "outside_main"},
+        )
+        self.assertEqual(302, combined.status_code)
+        combined_payload = client.get(
+            "/events/{}/dashboard".format(self.event_a)
+        ).get_json()
+        self.assertEqual(2, len(combined_payload["satellite_target_groups"]))
+        outside_main = next(
+            item
+            for item in combined_payload["satellite_target_groups"]
+            if set(item["category_keys"]) == {"outside_metro_manila", "main"}
+        )
+        self.assertEqual(3, outside_main["actual_participants"])
+        self.assertLess(outside_main["actual_participants"], separate_sum)
+
+        two_group_page = client.get("/events/{}/satellites".format(self.event_a))
+        self.assertIn(b'class="satellite-target-category-donut"', two_group_page.data)
+        self.assertIn(b"Outside Metro Manila + Main", two_group_page.data)
+
+        client.post(
+            "/events/{}/satellite-target-groups/grouping".format(self.event_a),
+            data={"grouping_preset": "all"},
+        )
+        one_group_dashboard = client.get("/events/{}".format(self.event_a))
+        self.assertNotIn(b'name="target_group_', one_group_dashboard.data)
+        one_group_settings = client.get(
+            "/satellites/settings?event_id={}&view=targets".format(self.event_a)
+        )
+        self.assertEqual(1, one_group_settings.data.count(b'name="target_group_'))
+        one_group_page = client.get("/events/{}/satellites".format(self.event_a))
+        self.assertNotIn(
+            b'class="satellite-target-category-donut"', one_group_page.data
+        )
+        self.assertIn(b"satellite-target-category-summary", one_group_page.data)
+        self.assertIn(b"All Satellite Categories", one_group_page.data)
+
+        settings_page = client.get(
+            "/satellites/settings?event_id={}&view=targets".format(self.event_a)
+        )
+        self.assertIn(b"Dashboard Analytics Grouping", settings_page.data)
+        self.assertEqual(5, settings_page.data.count(b'name="grouping_preset"'))
+        self.assertLess(
+            settings_page.data.index(b"Dashboard Target Satellites"),
+            settings_page.data.index(b"Dashboard Analytics Grouping"),
         )
 
     def test_satellite_dataset_survives_active_batch_replacement_and_recalculates(self):

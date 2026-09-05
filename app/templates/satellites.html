@@ -111,20 +111,22 @@
 
 <section class="panel satellite-target-category-panel" id="target-category-distribution" aria-labelledby="target-category-distribution-title">
     <header class="satellite-chart-heading">
-        <div><h2 id="target-category-distribution-title">Registration Distribution by Target Category</h2><p>Based on effective Satellite associations in the active Event batch.</p></div>
+        <div><h2 id="target-category-distribution-title">Registration Distribution by Analytics Group</h2><p>Based on effective Satellite associations.</p></div>
         <span>Event-wide</span>
     </header>
     <div class="satellite-target-category-body">
-        {% if metrics.target_category_distribution.association_count %}
-        <div class="satellite-target-category-donut" role="img" aria-label="{{ metrics.target_category_distribution.association_count|number }} effective Satellite associations across the three Dashboard Target categories" style="background: conic-gradient({% for category in metrics.target_category_distribution.categories %}{{ category.color }} {{ category.start }}% {{ category.end }}%{{ ', ' if not loop.last else '' }}{% endfor %})">
+        {% if metrics.target_category_distribution.association_count and metrics.target_category_distribution.groups|length > 1 %}
+        <div class="satellite-target-category-donut" role="img" aria-label="{{ metrics.target_category_distribution.association_count|number }} effective Satellite associations across {{ metrics.target_category_distribution.groups|length }} analytics groups" style="background: conic-gradient({% for group in metrics.target_category_distribution.groups %}{{ group.color }} {{ group.start }}% {{ group.end }}%{{ ', ' if not loop.last else '' }}{% endfor %})">
             <div><strong>{{ metrics.target_category_distribution.association_count|number }}</strong><span>Associations</span></div>
         </div>
+        {% elif metrics.target_category_distribution.association_count %}
+        <div class="satellite-target-category-summary" role="img" aria-label="{{ metrics.target_category_distribution.association_count|number }} effective Satellite associations in one analytics group">{{ icon('satellites', 30) }}<b>{{ metrics.target_category_distribution.groups[0].name }}</b><strong>{{ metrics.target_category_distribution.association_count|number }}</strong><span>Effective associations · 100%</span></div>
         {% else %}
-        <div class="satellite-target-category-empty">{{ icon('chart', 30) }}<strong>No categorized associations yet</strong><span>Assign canonical Satellites to Dashboard Target categories to populate this distribution.</span></div>
+        <div class="satellite-target-category-empty">{{ icon('chart', 30) }}<strong>No categorized associations yet</strong><span>Assign canonical Satellites to the base reporting categories to populate this distribution.</span></div>
         {% endif %}
-        <ul class="satellite-target-category-legend" aria-label="Target category association distribution data">
-            {% for category in metrics.target_category_distribution.categories %}
-            <li><i style="background: {{ category.color }}"></i><span><strong>{{ category.name }}</strong><small>{{ category.satellite_count|number }} configured {{ 'Satellite' if category.satellite_count == 1 else 'Satellites' }}</small></span><b>{{ category.associations|number }}</b><em>{{ category.percentage|percent }}</em></li>
+        <ul class="satellite-target-category-legend" aria-label="Analytics group association distribution data">
+            {% for group in metrics.target_category_distribution.groups %}
+            <li><i style="background: {{ group.color }}"></i><span><strong>{{ group.name }}</strong><small>{{ group.satellite_count|number }} configured {{ 'Satellite' if group.satellite_count == 1 else 'Satellites' }}</small></span><b>{{ group.associations|number }}</b><em>{{ group.percentage|percent }}</em></li>
             {% endfor %}
         </ul>
     </div>

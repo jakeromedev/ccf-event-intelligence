@@ -77,7 +77,10 @@ from .satellite_settings_registrants import event_settings_registrants
 from .satellite_target_categories import (
     SatelliteTargetCategoryValidationError,
     ensure_event_satellite_target_categories,
+    ensure_event_satellite_target_groups,
     replace_satellite_target_memberships,
+    replace_satellite_target_grouping,
+    satellite_target_groups,
     satellite_target_settings,
     update_satellite_target_values,
     validate_satellite_target_memberships,
@@ -224,6 +227,7 @@ def create_event():
     db = get_db()
     cursor = db.execute("INSERT INTO events (name) VALUES (?)", (name,))
     ensure_event_satellite_target_categories(db, cursor.lastrowid)
+    ensure_event_satellite_target_groups(db, cursor.lastrowid)
     db.commit()
     flash("Event created. Upload the three required exports to build its dashboard.", "success")
     return redirect(url_for("dashboard.event_overview", event_id=cursor.lastrowid))
@@ -910,20 +914,23 @@ def update_satellite_target_category_memberships(event_id):
 
 
 @bp.post("/events/<int:event_id>/satellite-target-categories/targets")
+@satellite_settings_management_required
 @event_mutation_required
 def update_satellite_target_category_targets(event_id):
     get_event_or_404(event_id)
     db = get_db()
     try:
-        values = validate_satellite_target_values(request.form)
+        db.lock_event(event_id)
+        groups = satellite_target_groups(db, event_id)["groups"]
+        values = validate_satellite_target_values(request.form, groups)
         update_satellite_target_values(db, event_id, values)
         db.commit()
     except SatelliteTargetCategoryValidationError as exc:
         db.rollback()
         flash("{} No changes were made.".format(exc), "error")
         return redirect(
-            url_for("dashboard.event_overview", event_id=event_id)
-            + "#satellite-targets"
+            url_for("dashboard.satellite_settings", event_id=event_id, view="targets")
+            + "#dashboard-satellite-target-values"
         )
     except SQLAlchemyError:
         db.rollback()
@@ -933,8 +940,8 @@ def update_satellite_target_category_targets(event_id):
             "error",
         )
         return redirect(
-            url_for("dashboard.event_overview", event_id=event_id)
-            + "#satellite-targets"
+            url_for("dashboard.satellite_settings", event_id=event_id, view="targets")
+            + "#dashboard-satellite-target-values"
         )
 
     current_app.logger.info(
@@ -947,8 +954,65 @@ def update_satellite_target_category_targets(event_id):
     )
     flash("Dashboard Satellite Targets saved.", "success")
     return redirect(
-        url_for("dashboard.event_overview", event_id=event_id)
-        + "#satellite-targets"
+        url_for("dashboard.satellite_settings", event_id=event_id, view="targets")
+        + "#dashboard-satellite-target-values"
+    )
+
+
+@bp.post("/events/<int:event_id>/satellite-target-groups/grouping")
+@satellite_settings_management_required
+@event_mutation_required
+def update_satellite_target_grouping(event_id):
+    get_event_or_404(event_id)
+    db = get_db()
+    try:
+        result = replace_satellite_target_grouping(
+            db, event_id, request.form.get("grouping_preset")
+        )
+        db.commit()
+    except SatelliteTargetCategoryValidationError as exc:
+        db.rollback()
+        flash("{} No changes were made.".format(exc), "error")
+        return redirect(
+            url_for("dashboard.satellite_settings", event_id=event_id, view="targets")
+            + "#dashboard-analytics-grouping"
+        )
+    except SQLAlchemyError:
+        db.rollback()
+        current_app.logger.exception("Dashboard Analytics Grouping update failed.")
+        flash(
+            "Dashboard Analytics Grouping could not be saved. No changes were made.",
+            "error",
+        )
+        return redirect(
+            url_for("dashboard.satellite_settings", event_id=event_id, view="targets")
+            + "#dashboard-analytics-grouping"
+        )
+
+    if result["split_targets_reset"]:
+        flash(
+            "Dashboard Analytics Grouping saved. Targets for newly split groups "
+            "were reset to zero and must be re-entered.",
+            "warning",
+        )
+    else:
+        flash(
+            "Dashboard Analytics Grouping saved. Combined Targets were added together.",
+            "success",
+        )
+    current_app.logger.info(
+        "satellite_target_grouping_updated",
+        extra={
+            "event": "satellite_target_grouping_updated",
+            "event_id": event_id,
+            "preset": result["preset_key"],
+            "group_count": len(result["groups"]),
+            "user_id": getattr(current_user, "id", None),
+        },
+    )
+    return redirect(
+        url_for("dashboard.satellite_settings", event_id=event_id, view="targets")
+        + "#dashboard-analytics-grouping"
     )
 
 

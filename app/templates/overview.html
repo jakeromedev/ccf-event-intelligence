@@ -152,24 +152,24 @@
                 <h2 id="satellite-targets-title">Target vs Actual Participants</h2>
             </div>
         </div>
-        <div class="satellite-target-actions">{% if satellite_settings_management_allowed %}<a class="button secondary" href="{{ url_for('dashboard.satellite_settings', event_id=event.id, view='targets') }}">{{ icon('settings', 17) }} Assign Satellites</a>{% endif %}{% if event_mutations_allowed %}<button class="button primary" type="button" data-satellite-targets-open>{{ icon('chart', 17) }} Set Satellite Targets</button>{% endif %}</div>
+        {% if satellite_settings_management_allowed %}<div class="satellite-target-actions"><a class="button primary" href="{{ url_for('dashboard.satellite_settings', event_id=event.id, view='targets') }}#dashboard-satellite-target-values">{{ icon('settings', 17) }} Manage Satellite Targets</a></div>{% endif %}
     </header>
     <div class="satellite-target-comparison">
-        <div class="satellite-target-chart" role="img" aria-label="Grouped bar chart comparing participant Target and Actual across Outside Metro Manila Hubs, Within Metro Manila Hubs, and Main">
+        <div class="satellite-target-chart" role="img" aria-label="Grouped bar chart comparing participant Target and Actual across the active Dashboard Analytics Groups">
             <div class="satellite-target-chart-legend"><span class="is-target">Target</span><span class="is-actual">Actual</span></div>
-            <div class="satellite-target-chart-plot">
-                {% for category in dashboard.satellite_target_categories %}<div class="satellite-target-chart-group">
-                    <div class="satellite-target-chart-bars"><i class="is-target" style="height: {{ category.target_bar_percentage }}%"><span>{{ category.participant_target|number }}</span></i><i class="is-actual" style="height: {{ category.actual_bar_percentage }}%"><span>{{ category.actual_participants|number }}</span></i></div>
-                    <strong>{{ category.name }}</strong>
+            <div class="satellite-target-chart-plot" style="grid-template-columns: repeat({{ dashboard.satellite_target_groups|length }}, minmax(0, 1fr))">
+                {% for group in dashboard.satellite_target_groups %}<div class="satellite-target-chart-group">
+                    <div class="satellite-target-chart-bars"><i class="is-target" style="height: {{ group.target_bar_percentage }}%"><span>{{ group.participant_target|number }}</span></i><i class="is-actual" style="height: {{ group.actual_bar_percentage }}%"><span>{{ group.actual_participants|number }}</span></i></div>
+                    <strong>{{ group.name }}</strong>
                 </div>{% endfor %}
             </div>
             <p>Participants · Actuals use distinct curated participants from the active Event batch.</p>
         </div>
         <div class="satellite-target-grid">
-            {% for category in dashboard.satellite_target_categories %}<article class="satellite-target-card {{ 'exceeded' if category.target_exceeded else '' }}">
-                <header><div><h3>{{ category.name }}</h3><small>{{ category.satellite_count|number }} configured {{ 'Satellite' if category.satellite_count == 1 else 'Satellites' }}</small></div>{% if category.target_exceeded %}<span class="satellite-target-status">Exceeded by {{ category.exceeded_amount|number }}</span>{% endif %}</header>
-                <p class="satellite-target-total"><strong>{{ category.actual_participants|number }}</strong><span> Actual / {{ category.participant_target|number }} Target</span></p>
-                {% if category.target_configured %}{% set visual_progress = 100 if category.progress_percentage > 100 else category.progress_percentage %}<div class="satellite-target-progress" role="progressbar" aria-label="{{ category.name }} participant progress" aria-valuenow="{{ visual_progress }}" aria-valuemin="0" aria-valuemax="100"><i style="width: {{ visual_progress }}%"></i></div><footer><strong>{{ category.progress_percentage|percent }}</strong><span>{% if category.target_exceeded %}Exceeded by {{ category.exceeded_amount|number }}{% else %}{{ category.remaining_slots|number }} Remaining{% endif %}</span></footer>
+            {% for group in dashboard.satellite_target_groups %}<article class="satellite-target-card {{ 'exceeded' if group.target_exceeded else '' }}">
+                <header><div><h3>{{ group.name }}</h3><small>{{ group.satellite_count|number }} configured {{ 'Satellite' if group.satellite_count == 1 else 'Satellites' }}</small></div>{% if group.target_exceeded %}<span class="satellite-target-status">Exceeded by {{ group.exceeded_amount|number }}</span>{% endif %}</header>
+                <p class="satellite-target-total"><strong>{{ group.actual_participants|number }}</strong><span> Actual / {{ group.participant_target|number }} Target</span></p>
+                {% if group.target_configured %}{% set visual_progress = 100 if group.progress_percentage > 100 else group.progress_percentage %}<div class="satellite-target-progress" role="progressbar" aria-label="{{ group.name }} participant progress" aria-valuenow="{{ visual_progress }}" aria-valuemin="0" aria-valuemax="100"><i style="width: {{ visual_progress }}%"></i></div><footer><strong>{{ group.progress_percentage|percent }}</strong><span>{% if group.target_exceeded %}Exceeded by {{ group.exceeded_amount|number }}{% else %}{{ group.remaining_slots|number }} Remaining{% endif %}</span></footer>
                 {% else %}<div class="satellite-target-progress unconfigured"><i></i></div><footer><strong>—</strong><span>Target is zero · progress unconfigured</span></footer>{% endif %}
             </article>{% endfor %}
         </div>
@@ -221,21 +221,4 @@
     <small>Last updated: {{ dashboard.last_updated|datetime_short }}</small>
 </aside>
 
-{% if event_mutations_allowed %}<div class="satellite-target-modal" data-satellite-targets-modal hidden>
-    <div class="satellite-target-modal-backdrop" data-satellite-targets-close></div>
-    <section class="satellite-target-dialog" role="dialog" aria-modal="true" aria-labelledby="satellite-target-modal-title">
-        <header><div><p class="eyebrow">Event configuration</p><h2 id="satellite-target-modal-title" tabindex="-1">Set Satellite Targets</h2><p>Enter participant targets for the three fixed reporting categories.</p></div><button type="button" aria-label="Close Satellite Target settings" data-satellite-targets-close>×</button></header>
-        <form method="post" action="{{ url_for('dashboard.update_satellite_target_category_targets', event_id=event.id) }}" data-satellite-target-form>
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <div class="satellite-target-fields">{% for category in dashboard.satellite_target_categories %}<label><span>{{ category.name }}</span><span class="phase1-input-wrap">{{ icon('person', 18) }}<input type="number" name="target_{{ category.key }}" value="{{ category.participant_target }}" min="0" max="1000000000" step="1" inputmode="numeric" required></span><small>{{ category.satellite_count|number }} configured {{ 'Satellite' if category.satellite_count == 1 else 'Satellites' }} · 0 means not configured.</small></label>{% endfor %}</div>
-            <aside>{{ icon('info', 18) }}<p>Satellite membership is managed in Satellite Settings. Actuals count distinct participants, exclude volunteers, and do not depend on attendance or check-in.</p></aside>
-            <footer><button class="button secondary" type="button" data-satellite-targets-close>Cancel</button><button class="button primary" type="submit" data-loading-label="Saving Satellite Targets…">Save Targets</button></footer>
-        </form>
-    </section>
-</div>
-{% endif %}
-{% endblock %}
-
-{% block scripts %}
-<script src="{{ url_for('static', filename='dashboard_satellite_targets.js', v='20260905-phase3') }}" defer></script>
 {% endblock %}
