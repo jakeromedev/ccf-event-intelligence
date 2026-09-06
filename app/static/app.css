@@ -1223,6 +1223,9 @@ button.quality-summary-card:focus-visible { outline: 3px solid rgba(0, 166, 178,
 .dashboard-satellite-table .dashboard-hub-only-row td { background: #fffaf2; }
 .dashboard-satellite-table .dashboard-hub-only-row td:first-child { box-shadow: inset 3px 0 #d49a34; }
 .dashboard-satellite-table-card .satellite-pagination { padding-inline: 16px; }
+.dashboard-satellite-hub-chart { padding: 20px 24px 22px; border-top: 1px solid var(--b1g-border); border-radius: 0; box-shadow: none; }
+.dashboard-satellite-hub-chart .satellite-hub-chart-body { min-height: 220px; grid-template-columns: 190px minmax(260px, 520px); justify-content: center; column-gap: 36px; }
+.dashboard-satellite-hub-chart .satellite-hub-legend li { min-height: 24px; font-size: 9px; }
 @media (max-width: 1050px) {
     .dashboard-satellite-reporting-grid { grid-template-columns: 1fr; }
     .dashboard-satellite-category-chart { border-right: 0; border-bottom: 1px solid var(--b1g-border); }

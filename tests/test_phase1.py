@@ -2898,6 +2898,11 @@ class EventIntegrationTests(unittest.TestCase):
             dashboard["location_responses"],
         )
         self.assertEqual(4, dashboard["inferred_location_participants"])
+        icp_chart_item = next(
+            item for item in dashboard["hub_chart"] if item["name"] == "ICP"
+        )
+        self.assertEqual(4, icp_chart_item["associations"])
+        self.assertEqual(4, dashboard["hub_association_count"])
         outside_after = next(
             item["participants"]
             for item in dashboard["categories"]
@@ -2912,6 +2917,8 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertIn(b">B1G Singapore</strong>", page.data)
         self.assertNotIn(b">ICP</strong>", page.data)
         self.assertNotIn(b"Satellite not specified", page.data)
+        self.assertIn(b"Registrant\xe2\x80\x93Satellite Associations by Hub", page.data)
+        self.assertIn(b">ICP</span><strong>4</strong>", page.data)
         self.assertIn(b"participant location responses", page.data)
 
     def test_data_quality_filters_pagination_sorting_scope_and_privacy(self):

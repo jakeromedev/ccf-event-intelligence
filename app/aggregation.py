@@ -14,6 +14,7 @@ from .normalization import (
 )
 from .satellite_analytics import (
     EFFECTIVE_ASSOCIATIONS_CTE,
+    HUB_CHART_COLORS,
     canonical_satellite_metrics,
     satellite_target_category_analytics,
 )
@@ -72,6 +73,68 @@ def _inferred_icp_directory_ids(source_data_json, directories):
                 matches.add(directory["id"])
                 break
     return matches
+
+
+def _dashboard_hub_chart(satellite_rows):
+    associations_by_hub = defaultdict(int)
+    for row in satellite_rows:
+        if row["hub_name"] and row["hub_name"] != "Needs Mapping":
+            associations_by_hub[(row["hub_id"], row["hub_name"])] += row[
+                "participants"
+            ]
+    ranked = sorted(
+        (
+            {"id": hub_id, "name": name, "associations": associations}
+            for (hub_id, name), associations in associations_by_hub.items()
+        ),
+        key=lambda item: (-item["associations"], item["name"].casefold()),
+    )
+    if len(ranked) > 8:
+        displayed = ranked[:7]
+        icp = next(
+            (item for item in ranked if item["name"].casefold() == "icp"), None
+        )
+        if icp is not None and icp not in displayed:
+            displayed[-1] = icp
+        displayed_ids = {item["id"] for item in displayed}
+        displayed.append(
+            {
+                "id": None,
+                "name": "Other",
+                "associations": sum(
+                    item["associations"]
+                    for item in ranked
+                    if item["id"] not in displayed_ids
+                ),
+            }
+        )
+    else:
+        displayed = ranked
+
+    association_count = sum(item["associations"] for item in ranked)
+    cursor = 0.0
+    chart = []
+    for index, item in enumerate(displayed):
+        percentage = (
+            item["associations"] / association_count * 100
+            if association_count
+            else 0
+        )
+        chart.append(
+            {
+                **item,
+                "percentage": percentage,
+                "start": cursor,
+                "end": cursor + percentage,
+                "color": HUB_CHART_COLORS[index],
+            }
+        )
+        cursor += percentage
+    return {
+        "association_count": association_count,
+        "hubs_represented": len(ranked),
+        "items": chart,
+    }
 
 
 def active_batch(db, event_id):
@@ -882,6 +945,9 @@ def dashboard_satellite_metrics(db, event_id, batch_id, query="", page=1):
             "location_responses": 0,
             "hub_only_participants": 0,
             "inferred_location_participants": 0,
+            "hub_association_count": 0,
+            "hubs_represented": 0,
+            "hub_chart": [],
             "categorized_participants": 0,
             "categories": empty_categories,
             "rows": [],
@@ -907,7 +973,7 @@ def dashboard_satellite_metrics(db, event_id, batch_id, query="", page=1):
         + represented_directories_cte
         + """
         SELECT directory.id, directory.name,
-               hub.name hub_name, hub.is_main,
+               hub.id hub_id, hub.name hub_name, hub.is_main,
                hub_group.code group_code, hub_group.name group_name,
                COUNT(DISTINCT participant.id) participants
         FROM represented_directories represented
@@ -923,7 +989,7 @@ def dashboard_satellite_metrics(db, event_id, batch_id, query="", page=1):
          AND participant.event_id = association.event_id
          AND participant.batch_id = association.batch_id
          AND participant.registration_type = 'participant'
-        GROUP BY directory.id, directory.name, hub.name, hub.is_main,
+        GROUP BY directory.id, directory.name, hub.id, hub.name, hub.is_main,
                  hub_group.code, hub_group.name
         """,
         params,
@@ -933,7 +999,7 @@ def dashboard_satellite_metrics(db, event_id, batch_id, query="", page=1):
         for row in db.execute(
             """
             SELECT directory.id, directory.name,
-                   hub.name hub_name, hub.is_main,
+                   hub.id hub_id, hub.name hub_name, hub.is_main,
                    hub_group.code group_code, hub_group.name group_name
             FROM satellite_directory directory
             JOIN satellite_hubs hub ON hub.id = directory.hub_id
@@ -1005,12 +1071,14 @@ def dashboard_satellite_metrics(db, event_id, batch_id, query="", page=1):
             "id": row["id"],
             "name": row["name"],
             "participants": row["participants"],
+            "hub_id": row["hub_id"],
             "hub_name": row["hub_name"] or "Needs Mapping",
             "group_name": row["group_name"] or "Needs Mapping",
             "hub_only": False,
         }
         for row in rows_by_directory.values()
     ]
+    hub_chart = _dashboard_hub_chart(satellite_rows)
     for row in satellite_rows:
         row["percentage"] = (
             row["participants"] / location_responses * 100
@@ -1095,6 +1163,9 @@ def dashboard_satellite_metrics(db, event_id, batch_id, query="", page=1):
         "location_responses": location_responses,
         "hub_only_participants": inferred_location_participants,
         "inferred_location_participants": inferred_location_participants,
+        "hub_association_count": hub_chart["association_count"],
+        "hubs_represented": hub_chart["hubs_represented"],
+        "hub_chart": hub_chart["items"],
         "categorized_participants": category_total,
         "categories": categories,
         "rows": visible_rows,

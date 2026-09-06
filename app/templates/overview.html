@@ -312,6 +312,25 @@
             </footer>
         </article>
     </div>
+    <article class="dashboard-satellite-hub-chart satellite-hub-chart" aria-labelledby="dashboard-satellite-hub-title">
+        <header class="satellite-chart-heading">
+            <div><h2 id="dashboard-satellite-hub-title">Registrant–Satellite Associations by Hub</h2><p>An additive distribution for people associated with one or more Satellites.</p></div>
+        </header>
+        {% if dashboard.satellites.hub_chart %}
+        <div class="satellite-hub-chart-body">
+            <div class="satellite-hub-donut" role="img" aria-label="{{ dashboard.satellites.hub_association_count|number }} registrant-to-Satellite associations across {{ dashboard.satellites.hubs_represented|number }} Hubs" style="background: conic-gradient({% for hub in dashboard.satellites.hub_chart %}{{ hub.color }} {{ hub.start }}% {{ hub.end }}%{{ ', ' if not loop.last else '' }}{% endfor %})">
+                <div><strong>{{ dashboard.satellites.hub_association_count|number }}</strong><span>Associations</span></div>
+            </div>
+            <ul class="satellite-hub-legend" aria-label="Dashboard Hub distribution data">
+                {% for hub in dashboard.satellites.hub_chart %}
+                <li><i style="background: {{ hub.color }}"></i><span>{{ hub.name }}</span><strong>{{ hub.associations|number }}</strong><small>{{ hub.percentage|percent }}</small></li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% else %}
+        <div class="satellite-chart-empty">{{ icon('chart', 28) }}<strong>No Hub distribution is available.</strong><span>Satellite associations will appear here after locations are matched.</span></div>
+        {% endif %}
+    </article>
 </section>
 
 <section class="dashboard-leadership panel" id="dashboard-leadership" aria-labelledby="dashboard-leadership-title">
