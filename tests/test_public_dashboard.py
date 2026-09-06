@@ -94,7 +94,7 @@ class PublicDashboardTests(unittest.TestCase):
         self.assertIn(b"Registration snapshot", dashboard.data)
         self.assertIn(b'id="dashboard-satellite-reporting"', dashboard.data)
         self.assertIn(b"data-public-dashboard-nav", dashboard.data)
-        self.assertEqual(8, dashboard.data.count(b"data-dashboard-nav-link"))
+        self.assertEqual(9, dashboard.data.count(b"data-dashboard-nav-link"))
         for section_id in (
             "event-overview",
             "registration-progress",
@@ -104,6 +104,7 @@ class PublicDashboardTests(unittest.TestCase):
             "dashboard-transportation",
             "dashboard-shirt-sizes",
             "participant-profile",
+            "dashboard-validation-status",
         ):
             self.assertIn('href="#{}"'.format(section_id).encode(), dashboard.data)
             self.assertIn('id="{}"'.format(section_id).encode(), dashboard.data)

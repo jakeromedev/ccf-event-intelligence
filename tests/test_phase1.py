@@ -558,6 +558,9 @@ class EventIntegrationTests(unittest.TestCase):
             self.assertEqual(4, dashboard["overview"]["participants"])
             self.assertEqual(1, dashboard["overview"]["volunteers"])
             self.assertEqual(5, dashboard["overview"]["total_registrations"])
+            self.assertEqual(5, dashboard["operational_status"]["payment"]["validated"])
+            self.assertEqual(0, dashboard["operational_status"]["payment"]["for_validation"])
+            self.assertEqual(5, dashboard["operational_status"]["attestation"]["pending"])
             self.assertEqual(50, dashboard["overview"]["progress_percentage"])
             self.assertEqual(4, dashboard["overview"]["remaining_slots"])
             self.assertTrue(all(dashboard["reconciliation"].values()))
@@ -582,8 +585,65 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertNotIn(b"Participant target not configured", page.data)
         self.assertIn(b"B1G Admin Internal System", page.data)
         self.assertIn(b'class="application-header"', page.data)
-        self.assertIn(b'form="event-settings-form"', page.data)
-        self.assertEqual(1, page.data.count(b">Save Changes</span>"))
+        self.assertIn(b'data-dashboard-config-open', page.data)
+        self.assertIn(b'data-dashboard-config-dialog', page.data)
+        self.assertIn(b'id="event-settings-form"', page.data)
+        self.assertEqual(1, page.data.count(b"Save Configuration</button>"))
+        self.assertIn(b"Payment and Attestation Status", page.data)
+        self.assertIn(b"For Payment Validation", page.data)
+        self.assertIn(b"Attestation Forms", page.data)
+
+    def test_dashboard_operational_status_counts_active_payment_and_attestation_states(self):
+        batch_id = self._process(self.event_a)
+        with self.app.app_context():
+            db = get_db()
+            mappings = db.execute(
+                """
+                SELECT attestation_participant_id, registrant_id
+                FROM attestation_participant_registrants
+                WHERE event_id = ? AND batch_id = ?
+                ORDER BY registrant_id LIMIT 2
+                """,
+                (self.event_a, batch_id),
+            ).fetchall()
+            self.assertEqual(2, len(mappings))
+            for mapping, status in zip(mappings, ("verified", "invalid")):
+                db.execute(
+                    """
+                    INSERT INTO attestation_verifications (
+                        event_id, attestation_participant_id, registrant_id, status
+                    ) VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        self.event_a,
+                        mapping["attestation_participant_id"],
+                        mapping["registrant_id"],
+                        status,
+                    ),
+                )
+            ticket_code = db.execute(
+                "SELECT ticket_code FROM registrants WHERE batch_id = ? ORDER BY id LIMIT 1",
+                (batch_id,),
+            ).fetchone()["ticket_code"]
+            db.execute(
+                """
+                UPDATE tickets SET payment_status = 'For Payment Validation'
+                WHERE batch_id = ? AND ticket_code = ?
+                """,
+                (batch_id, ticket_code),
+            )
+            db.commit()
+            status = event_dashboard_metrics(db, self.event_a)["operational_status"]
+
+        self.assertEqual(
+            {"validated": 4, "for_validation": 1, "total": 5},
+            status["payment"],
+        )
+        self.assertEqual(
+            {"pending": 3, "verified": 1, "invalid": 1, "total": 5},
+            status["attestation"],
+        )
+        self.assertEqual(5, status["total_registrations"])
 
     def test_satellite_dataset_crud_validation_and_event_scoping(self):
         batch_a = self._process(self.event_a)
@@ -1585,6 +1645,7 @@ class EventIntegrationTests(unittest.TestCase):
                 },
             )
             self.assertEqual(302, response.status_code)
+            self.assertIn("configure=1#event-settings", response.headers["Location"])
         with self.app.app_context():
             event_name = get_db().execute(
                 "SELECT name FROM events WHERE id = ?", (self.event_a,)

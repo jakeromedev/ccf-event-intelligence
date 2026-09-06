@@ -1173,6 +1173,72 @@ def dashboard_satellite_metrics(db, event_id, batch_id, query="", page=1):
     }
 
 
+def dashboard_operational_status_metrics(db, batch_id):
+    """Summarize payment and attestation workflow states for one active batch."""
+    if batch_id is None:
+        return {
+            "total_registrations": 0,
+            "payment": {"validated": 0, "for_validation": 0, "total": 0},
+            "attestation": {"pending": 0, "verified": 0, "invalid": 0, "total": 0},
+        }
+
+    row = db.execute(
+        """
+        SELECT
+            COUNT(*) AS total_registrations,
+            COUNT(CASE
+                WHEN LOWER(TRIM(ticket.payment_status)) = 'payment validated'
+                THEN 1
+            END) AS payment_validated,
+            COUNT(CASE
+                WHEN LOWER(TRIM(ticket.payment_status)) = 'for payment validation'
+                THEN 1
+            END) AS payment_for_validation,
+            COUNT(CASE
+                WHEN COALESCE(verification.status, 'pending') = 'pending'
+                THEN 1
+            END) AS attestation_pending,
+            COUNT(CASE WHEN verification.status = 'verified' THEN 1 END)
+                AS attestation_verified,
+            COUNT(CASE WHEN verification.status = 'invalid' THEN 1 END)
+                AS attestation_invalid
+        FROM registrants record
+        JOIN import_batches batch ON batch.id = record.batch_id
+        LEFT JOIN tickets ticket
+          ON ticket.batch_id = record.batch_id
+         AND ticket.ticket_code = record.ticket_code
+        LEFT JOIN attestation_participant_registrants participant_mapping
+          ON participant_mapping.batch_id = record.batch_id
+         AND participant_mapping.registrant_id = record.id
+        LEFT JOIN attestation_verifications verification
+          ON verification.event_id = batch.event_id
+         AND verification.attestation_participant_id =
+             participant_mapping.attestation_participant_id
+        WHERE record.batch_id = ?
+        """,
+        (batch_id,),
+    ).fetchone()
+    payment_validated = row["payment_validated"] or 0
+    payment_for_validation = row["payment_for_validation"] or 0
+    attestation_pending = row["attestation_pending"] or 0
+    attestation_verified = row["attestation_verified"] or 0
+    attestation_invalid = row["attestation_invalid"] or 0
+    return {
+        "total_registrations": row["total_registrations"] or 0,
+        "payment": {
+            "validated": payment_validated,
+            "for_validation": payment_for_validation,
+            "total": payment_validated + payment_for_validation,
+        },
+        "attestation": {
+            "pending": attestation_pending,
+            "verified": attestation_verified,
+            "invalid": attestation_invalid,
+            "total": attestation_pending + attestation_verified + attestation_invalid,
+        },
+    }
+
+
 def event_dashboard_metrics(db, event_id, satellite_query="", satellite_page=1):
     """Return the authoritative, event-scoped Phase 1 dashboard response."""
     event = db.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
@@ -1224,6 +1290,9 @@ def event_dashboard_metrics(db, event_id, satellite_query="", satellite_page=1):
     target_groups = satellite_target_category_metrics(
         db, event_id, batch["id"] if batch else None
     )
+    operational_status = dashboard_operational_status_metrics(
+        db, batch["id"] if batch else None
+    )
     return {
         "event": {
             "id": event["id"],
@@ -1243,6 +1312,7 @@ def event_dashboard_metrics(db, event_id, satellite_query="", satellite_page=1):
             **progress,
         },
         "participant_profile": profile,
+        "operational_status": operational_status,
         **participant_details,
         "transportation": transportation,
         "satellite_target_groups": target_groups,
@@ -1271,6 +1341,8 @@ def event_dashboard_metrics(db, event_id, satellite_query="", satellite_page=1):
             "raw_to_curated_reconciles": raw_registrations
             == total_registrations + max(raw_registrations - total_registrations, 0),
             "source_traceability_reconciles": source_mappings == raw_registrations,
+            "attestation_statuses_reconcile": operational_status["attestation"]["total"]
+            == operational_status["total_registrations"],
         },
     }
 

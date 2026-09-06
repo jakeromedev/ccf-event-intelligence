@@ -405,10 +405,10 @@ def update_event_settings(event_id):
 
     if not event_name:
         flash("Event Name is required.", "error")
-        return redirect(url_for("dashboard.event_overview", event_id=event_id) + "#event-settings")
+        return redirect(url_for("dashboard.event_overview", event_id=event_id, configure=1) + "#event-settings")
     if len(event_name) > 160:
         flash("Event Name must be 160 characters or fewer.", "error")
-        return redirect(url_for("dashboard.event_overview", event_id=event_id) + "#event-settings")
+        return redirect(url_for("dashboard.event_overview", event_id=event_id, configure=1) + "#event-settings")
 
     if event_date:
         try:
@@ -417,7 +417,7 @@ def update_event_settings(event_id):
                 raise ValueError
         except ValueError:
             flash("Event Date must be a valid date.", "error")
-            return redirect(url_for("dashboard.event_overview", event_id=event_id) + "#event-settings")
+            return redirect(url_for("dashboard.event_overview", event_id=event_id, configure=1) + "#event-settings")
 
     participant_target = None
     if target_raw:
@@ -427,22 +427,22 @@ def update_event_settings(event_id):
             participant_target = -1
         if participant_target < 0:
             flash("Participant Target must be a non-negative whole number.", "error")
-            return redirect(url_for("dashboard.event_overview", event_id=event_id) + "#event-settings")
+            return redirect(url_for("dashboard.event_overview", event_id=event_id, configure=1) + "#event-settings")
         if participant_target > 1_000_000_000:
             flash("Participant Target must be 1,000,000,000 or fewer.", "error")
-            return redirect(url_for("dashboard.event_overview", event_id=event_id) + "#event-settings")
+            return redirect(url_for("dashboard.event_overview", event_id=event_id, configure=1) + "#event-settings")
 
     if disable_public_dashboard and public_password:
         flash("Disable the public dashboard or set a new password, but not both.", "error")
-        return redirect(url_for("dashboard.event_overview", event_id=event_id) + "#event-settings")
+        return redirect(url_for("dashboard.event_overview", event_id=event_id, configure=1) + "#event-settings")
     if public_password:
         password_error = password_policy_error(public_password)
         if password_error:
             flash("Public Dashboard Password: {}".format(password_error), "error")
-            return redirect(url_for("dashboard.event_overview", event_id=event_id) + "#event-settings")
+            return redirect(url_for("dashboard.event_overview", event_id=event_id, configure=1) + "#event-settings")
         if public_password != public_password_confirmation:
             flash("Public Dashboard Passwords must match.", "error")
-            return redirect(url_for("dashboard.event_overview", event_id=event_id) + "#event-settings")
+            return redirect(url_for("dashboard.event_overview", event_id=event_id, configure=1) + "#event-settings")
 
     public_password_hash = event["public_dashboard_password_hash"]
     public_access_version = event["public_dashboard_access_version"]

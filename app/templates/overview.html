@@ -70,6 +70,7 @@
     <a href="#event-overview" data-dashboard-nav-link>Overview</a>
     <a href="#registration-progress" data-dashboard-nav-link>Progress</a>
     <a href="#participant-profile" data-dashboard-nav-link>Profile</a>
+    <a href="#dashboard-validation-status" data-dashboard-nav-link>Validation</a>
     <a href="#satellite-targets" data-dashboard-nav-link>Targets</a>
     <a href="#dashboard-satellite-reporting" data-dashboard-nav-link>Satellites</a>
     <a href="#dashboard-leadership" data-dashboard-nav-link>Leadership</a>
@@ -84,69 +85,59 @@
             <h1>Event Dashboard</h1>
             <p>Overview and participant profile insights for the selected event dataset.</p>
         </div>
-        {% if event_mutations_allowed and event_settings_visible %}<button class="button primary" type="submit" form="event-settings-form" aria-label="Save Changes">{{ icon('save', 17) }} <span>Save Changes</span></button>{% endif %}
+        {% if event_mutations_allowed and event_settings_visible %}<button class="button primary" type="button" data-dashboard-config-open>{{ icon('settings', 17) }} <span>Configure Dashboard</span></button>{% endif %}
     </header>
 </section>
 {% endif %}
-{% if event_settings_visible and not public_dashboard|default(false) %}<section class="phase1-settings panel" id="event-settings" aria-labelledby="event-settings-title">
-    <form id="event-settings-form" method="post" action="{{ url_for('dashboard.update_event_settings', event_id=event['id']) }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <header class="phase1-section-heading settings-heading">
-            <span class="phase1-section-icon">{{ icon('save', 20) }}</span>
-            <div>
-                <p class="eyebrow" id="event-settings-title">Event Settings</p>
-                <h2>Dashboard configuration</h2>
-            </div>
-        </header>
-        <div class="phase1-settings-grid">
-            <label class="phase1-field">
-                <span>Event Name</span>
-                <span class="phase1-input-wrap">{{ icon('events', 19) }}<input type="text" name="event_name" value="{{ event['name'] }}" maxlength="160" autocomplete="organization" required {{ 'disabled' if not event_mutations_allowed else '' }}></span>
-                <small>Shown in event navigation, dashboards, and reports.</small>
-            </label>
-            <label class="phase1-field">
-                <span>Event Date</span>
-                <span class="phase1-input-wrap">{{ icon('events', 19) }}<input type="date" name="event_date" value="{{ event['event_date'] or '' }}" {{ 'disabled' if not event_mutations_allowed else '' }}></span>
-                <small>Used for age calculation and time-based metrics.</small>
-            </label>
-            <label class="phase1-field">
-                <span>Participant Target <i class="phase1-inline-info" title="This benchmark never alters registration records.">i</i></span>
-                <span class="phase1-input-wrap">{{ icon('person', 19) }}<input type="number" min="0" max="1000000000" step="1" inputmode="numeric" name="participant_target" value="{{ event['participant_target'] if event['participant_target'] is not none else '' }}" placeholder="Not configured" {{ 'disabled' if not event_mutations_allowed else '' }}></span>
-                <small>Set the target number of participant registrations.</small>
-            </label>
-            <div class="phase1-field public-dashboard-setting">
-                <span>Public Dashboard</span>
-                {% if event['public_dashboard_password_hash'] %}
-                    <strong class="public-dashboard-status enabled">Password protected · Enabled</strong>
-                    <a class="text-link" href="{{ url_for('public_dashboard.event_dashboard', event_id=event['id'], _external=true) }}" target="_blank" rel="noopener">Open presentation view</a>
-                {% else %}
-                    <strong class="public-dashboard-status">Not configured</strong>
-                    <small>Set a password below to enable the presentation-only link.</small>
-                {% endif %}
-            </div>
-            <label class="phase1-field">
-                <span>{{ 'Change' if event['public_dashboard_password_hash'] else 'Set' }} Public Dashboard Password</span>
-                <span class="phase1-input-wrap">{{ icon('lock', 19) }}<input type="password" name="public_dashboard_password" minlength="12" maxlength="128" autocomplete="new-password" placeholder="{{ 'Leave blank to keep current password' if event['public_dashboard_password_hash'] else '12–128 characters' }}" {{ 'disabled' if not event_mutations_allowed else '' }}></span>
-                <small>Use at least three of: uppercase, lowercase, numbers, and symbols.</small>
-            </label>
-            <label class="phase1-field">
-                <span>Confirm Public Dashboard Password</span>
-                <span class="phase1-input-wrap">{{ icon('lock', 19) }}<input type="password" name="public_dashboard_password_confirmation" maxlength="128" autocomplete="new-password" placeholder="Repeat the new password" {{ 'disabled' if not event_mutations_allowed else '' }}></span>
-                <small>Viewers stay authorized on that browser for seven days.</small>
-            </label>
-            {% if event['public_dashboard_password_hash'] and event_mutations_allowed %}
-            <label class="public-dashboard-disable">
-                <input type="checkbox" name="disable_public_dashboard" value="1">
-                <span><strong>Disable public dashboard</strong><small>Immediately revokes all existing viewer access.</small></span>
-            </label>
-            {% endif %}
-            <aside class="phase1-target-note">
-                <span class="phase1-target-icon">{{ icon('chart', 34) }}</span>
-                <p>The participant target measures registration progress. It does not affect registration data.</p>
-            </aside>
+{% if event_settings_visible and not public_dashboard|default(false) %}
+<section class="dashboard-config-card panel" id="event-settings" aria-labelledby="event-settings-title">
+    <header class="dashboard-config-card-heading">
+        <div class="phase1-section-heading">
+            <span class="phase1-section-icon">{{ icon('settings', 20) }}</span>
+            <div><p class="eyebrow">Event Settings</p><h2 id="event-settings-title">Dashboard Configuration</h2></div>
         </div>
+        {% if event_mutations_allowed %}<button class="button secondary compact" type="button" data-dashboard-config-open>{{ icon('settings', 15) }} Edit Configuration</button>{% endif %}
+    </header>
+    <dl class="dashboard-config-summary">
+        <div><dt>Event name</dt><dd>{{ event['name'] }}</dd></div>
+        <div><dt>Event date</dt><dd>{{ event['event_date'] or 'Not set' }}</dd></div>
+        <div><dt>Participant target</dt><dd>{{ event['participant_target']|number if event['participant_target'] is not none else 'Not set' }}</dd></div>
+        <div class="dashboard-config-public"><dt>Public dashboard</dt><dd><span class="dashboard-config-status {{ 'enabled' if event['public_dashboard_password_hash'] else '' }}"><i aria-hidden="true"></i>{{ 'Enabled' if event['public_dashboard_password_hash'] else 'Not configured' }}</span>{% if event['public_dashboard_password_hash'] %}<span class="dashboard-config-link-actions"><a href="{{ url_for('public_dashboard.event_dashboard', event_id=event['id'], _external=true) }}" target="_blank" rel="noopener">Open</a><button type="button" data-dashboard-copy-link data-copy-value="{{ url_for('public_dashboard.event_dashboard', event_id=event['id'], _external=true) }}">Copy link</button></span>{% endif %}</dd></div>
+    </dl>
+</section>
+
+{% if event_mutations_allowed %}
+<dialog class="dashboard-config-dialog" aria-labelledby="dashboard-config-dialog-title" aria-describedby="dashboard-config-dialog-description" data-dashboard-config-dialog data-open-on-load="{{ 'true' if request.args.get('configure') == '1' else 'false' }}">
+    <form class="dashboard-config-dialog-panel" id="event-settings-form" method="post" action="{{ url_for('dashboard.update_event_settings', event_id=event['id']) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <header>
+            <div><p class="eyebrow">Event Settings</p><h2 id="dashboard-config-dialog-title">Configure Dashboard</h2><p id="dashboard-config-dialog-description">Manage event details, targets, and presentation access.</p></div>
+            <button class="dashboard-config-close" type="button" aria-label="Close dashboard configuration" data-dashboard-config-close>{{ icon('close', 18) }}</button>
+        </header>
+        <div class="dashboard-config-dialog-body">
+            <section class="dashboard-config-dialog-section" aria-labelledby="dashboard-event-details-title">
+                <header><span>{{ icon('events', 18) }}</span><div><h3 id="dashboard-event-details-title">Event details</h3><p>These values control dashboard labels and calculations.</p></div></header>
+                <div class="dashboard-config-fields">
+                    <label class="dashboard-config-field full"><span>Event name</span><input type="text" name="event_name" value="{{ event['name'] }}" maxlength="160" autocomplete="organization" required data-dashboard-config-first></label>
+                    <label class="dashboard-config-field"><span>Event date</span><input type="date" name="event_date" value="{{ event['event_date'] or '' }}"><small>Used to calculate participant ages.</small></label>
+                    <label class="dashboard-config-field"><span>Participant target</span><input type="number" min="0" max="1000000000" step="1" inputmode="numeric" name="participant_target" value="{{ event['participant_target'] if event['participant_target'] is not none else '' }}" placeholder="Not configured"><small>Tracks registration progress without changing data.</small></label>
+                </div>
+            </section>
+            <section class="dashboard-config-dialog-section" aria-labelledby="dashboard-public-access-title">
+                <header><span>{{ icon('lock', 18) }}</span><div><h3 id="dashboard-public-access-title">Public sharing</h3><p>Share the presentation-only dashboard without an operator account.</p></div><span class="dashboard-config-status {{ 'enabled' if event['public_dashboard_password_hash'] else '' }}"><i aria-hidden="true"></i>{{ 'Enabled' if event['public_dashboard_password_hash'] else 'Off' }}</span></header>
+                {% if event['public_dashboard_password_hash'] %}<div class="dashboard-config-public-link"><div><strong>Presentation link</strong><small>Viewers enter the shared password once every seven days.</small></div><a href="{{ url_for('public_dashboard.event_dashboard', event_id=event['id'], _external=true) }}" target="_blank" rel="noopener">Open dashboard</a><button class="button secondary compact" type="button" data-dashboard-copy-link data-copy-value="{{ url_for('public_dashboard.event_dashboard', event_id=event['id'], _external=true) }}">Copy link</button></div>{% endif %}
+                <div class="dashboard-config-fields" data-dashboard-password-fields>
+                    <label class="dashboard-config-field"><span>{{ 'New shared password' if event['public_dashboard_password_hash'] else 'Shared password' }}</span><span class="dashboard-config-password"><input type="password" name="public_dashboard_password" minlength="12" maxlength="128" autocomplete="new-password" placeholder="{{ 'Leave blank to keep current' if event['public_dashboard_password_hash'] else '12–128 characters' }}" data-dashboard-password><button type="button" data-password-toggle>Show</button></span><small>Use uppercase, lowercase, numbers, and symbols.</small></label>
+                    <label class="dashboard-config-field"><span>Confirm password</span><span class="dashboard-config-password"><input type="password" name="public_dashboard_password_confirmation" maxlength="128" autocomplete="new-password" placeholder="Repeat the new password" data-dashboard-password-confirmation><button type="button" data-password-toggle>Show</button></span><small>Changing it revokes all existing viewer access.</small></label>
+                </div>
+                {% if event['public_dashboard_password_hash'] %}<label class="dashboard-config-disable"><input type="checkbox" name="disable_public_dashboard" value="1" data-dashboard-disable-public><span><strong>Disable public dashboard</strong><small>Immediately revoke the shared link and every remembered browser.</small></span></label>{% endif %}
+            </section>
+        </div>
+        <footer><p>Changes apply immediately after saving.</p><div><button class="button secondary" type="button" data-dashboard-config-close>Cancel</button><button class="button primary" type="submit" data-loading-label="Saving Configuration…">{{ icon('save', 16) }} Save Configuration</button></div></footer>
     </form>
-</section>{% endif %}
+</dialog>
+{% endif %}
+{% endif %}
 
 {% if not active_batch %}
 <aside class="phase1-import-empty">
@@ -235,6 +226,34 @@
             <footer><span>Total Participants</span><strong>{{ profile.age.total|number }}</strong></footer>
         </section>
     </div>
+</section>
+
+<section class="dashboard-operational-status panel" id="dashboard-validation-status" aria-labelledby="dashboard-validation-status-title">
+    <header class="dashboard-operational-heading">
+        <div class="phase1-section-heading">
+            <span class="phase1-section-icon">{{ icon('quality', 20) }}</span>
+            <div><p class="eyebrow">Registration Requirements</p><h2 id="dashboard-validation-status-title">Payment and Attestation Status</h2></div>
+        </div>
+        {% if registrations_allowed and not public_dashboard|default(false) %}<a class="button secondary compact" href="{{ url_for('dashboard.event_registrations', event_id=event['id']) }}">Review Registrations</a>{% endif %}
+    </header>
+    <div class="dashboard-operational-grid">
+        <article class="dashboard-workflow-card payment">
+            <header><span>{{ icon('ticket', 19) }}</span><div><h3>Payment Validation</h3><p>Generated-ticket payment statuses</p></div><strong>{{ dashboard.operational_status.payment.total|number }}<small>classified</small></strong></header>
+            <div class="dashboard-workflow-statuses two-column">
+                <div class="dashboard-workflow-status validated"><span><i></i>Payment Validated</span><strong>{{ dashboard.operational_status.payment.validated|number }}</strong></div>
+                <div class="dashboard-workflow-status review"><span><i></i>For Payment Validation</span><strong>{{ dashboard.operational_status.payment.for_validation|number }}</strong></div>
+            </div>
+        </article>
+        <article class="dashboard-workflow-card attestation">
+            <header><span>{{ icon('document', 19) }}</span><div><h3>Attestation Forms</h3><p>Current verification status</p></div><strong>{{ dashboard.operational_status.attestation.total|number }}<small>registrations</small></strong></header>
+            <div class="dashboard-workflow-statuses three-column">
+                <div class="dashboard-workflow-status pending"><span><i></i>Pending</span><strong>{{ dashboard.operational_status.attestation.pending|number }}</strong></div>
+                <div class="dashboard-workflow-status verified"><span><i></i>Verified</span><strong>{{ dashboard.operational_status.attestation.verified|number }}</strong></div>
+                <div class="dashboard-workflow-status invalid"><span><i></i>Invalid</span><strong>{{ dashboard.operational_status.attestation.invalid|number }}</strong></div>
+            </div>
+        </article>
+    </div>
+    <footer>Active dataset · {{ dashboard.operational_status.total_registrations|number }} registration {{ 'record' if dashboard.operational_status.total_registrations == 1 else 'records' }}</footer>
 </section>
 
 <section class="satellite-targets panel" id="satellite-targets" aria-labelledby="satellite-targets-title">
@@ -394,4 +413,10 @@
 
 {% endblock %}
 
-{% block scripts %}{% if public_dashboard|default(false) %}<script src="{{ url_for('static', filename='public_dashboard.js', v='20260905-section-navigation') }}" defer></script>{% endif %}{% endblock %}
+{% block scripts %}
+{% if public_dashboard|default(false) %}
+<script src="{{ url_for('static', filename='public_dashboard.js', v='20260905-section-navigation') }}" defer></script>
+{% elif event_settings_visible %}
+<script src="{{ url_for('static', filename='dashboard_configuration.js', v='20260905-config-modal') }}" defer></script>
+{% endif %}
+{% endblock %}
