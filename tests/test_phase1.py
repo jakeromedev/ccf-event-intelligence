@@ -2919,6 +2919,12 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertNotIn(b"Satellite not specified", page.data)
         self.assertIn(b"Registrant\xe2\x80\x93Satellite Associations by Hub", page.data)
         self.assertIn(b">ICP</span><strong>4</strong>", page.data)
+        self.assertIn(b"dashboard-satellite-slider-viewport", page.data)
+        self.assertIn(b"Swipe to change view", page.data)
+        self.assertLess(
+            page.data.index(b'id="dashboard-satellite-hub-slide"'),
+            page.data.index(b'id="dashboard-satellite-category-slide"'),
+        )
         self.assertIn(b"participant location responses", page.data)
 
     def test_data_quality_filters_pagination_sorting_scope_and_privacy(self):

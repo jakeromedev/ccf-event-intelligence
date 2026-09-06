@@ -1223,13 +1223,36 @@ button.quality-summary-card:focus-visible { outline: 3px solid rgba(0, 166, 178,
 .dashboard-satellite-table .dashboard-hub-only-row td { background: #fffaf2; }
 .dashboard-satellite-table .dashboard-hub-only-row td:first-child { box-shadow: inset 3px 0 #d49a34; }
 .dashboard-satellite-table-card .satellite-pagination { padding-inline: 16px; }
-.dashboard-satellite-hub-chart { padding: 20px 24px 22px; border-top: 1px solid var(--b1g-border); border-radius: 0; box-shadow: none; }
-.dashboard-satellite-hub-chart .satellite-hub-chart-body { min-height: 220px; grid-template-columns: 190px minmax(260px, 520px); justify-content: center; column-gap: 36px; }
-.dashboard-satellite-hub-chart .satellite-hub-legend li { min-height: 24px; font-size: 9px; }
+.dashboard-satellite-chart-slider { min-width: 0; overflow: hidden; border-right: 1px solid var(--b1g-border); background: var(--b1g-surface-muted); }
+.dashboard-satellite-slider-heading { padding: 13px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--b1g-border); background: rgba(255, 255, 255, .72); }
+.dashboard-satellite-slider-heading > span { color: var(--b1g-text-muted); font-size: 7px; font-weight: 700; white-space: nowrap; }
+.dashboard-satellite-slider-tabs { padding: 3px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px; border: 1px solid #d9e1ea; border-radius: 9px; background: #eef2f6; }
+.dashboard-satellite-slider-tabs a { min-height: 29px; padding: 0 11px; display: grid; place-items: center; color: #69788b; border-radius: 6px; font-size: 8px; font-weight: 750; line-height: 1.2; text-align: center; text-decoration: none; white-space: nowrap; }
+.dashboard-satellite-slider-tabs a:hover { color: var(--b1g-burgundy); }
+.dashboard-satellite-slider-tabs a.is-default,
+.dashboard-satellite-chart-slider:has(#dashboard-satellite-category-slide:target) .dashboard-satellite-slider-tabs a[href="#dashboard-satellite-category-slide"] { color: var(--b1g-burgundy); background: #fff; box-shadow: 0 1px 4px rgba(31, 50, 75, .13); }
+.dashboard-satellite-chart-slider:has(#dashboard-satellite-category-slide:target) .dashboard-satellite-slider-tabs a.is-default { color: #69788b; background: transparent; box-shadow: none; }
+.dashboard-satellite-slider-viewport { max-width: 100%; overflow-x: auto; overflow-y: hidden; scroll-behavior: smooth; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; scrollbar-width: none; }
+.dashboard-satellite-slider-viewport::-webkit-scrollbar { display: none; }
+.dashboard-satellite-slider-track { display: flex; align-items: stretch; }
+.dashboard-satellite-slider-slide { min-width: 0; padding: 20px 22px 23px; flex: 0 0 100%; scroll-snap-align: start; scroll-snap-stop: always; }
+.dashboard-satellite-slider-slide > header h3 { margin: 0; font-size: 13px; }
+.dashboard-satellite-slider-slide > header p { margin: 4px 0 0; color: var(--b1g-text-muted); font-size: 9px; line-height: 1.5; }
+.dashboard-satellite-slider-slide .satellite-hub-chart-body { min-height: 0; padding-top: 18px; grid-template-columns: 1fr; }
+.dashboard-satellite-slider-slide .satellite-hub-donut { width: 170px; height: 170px; }
+.dashboard-satellite-slider-slide .satellite-hub-legend li { min-height: 22px; font-size: 8px; }
+.dashboard-satellite-slider-slide .dashboard-satellite-category-body { margin-top: 18px; }
 @media (max-width: 1050px) {
     .dashboard-satellite-reporting-grid { grid-template-columns: 1fr; }
-    .dashboard-satellite-category-chart { border-right: 0; border-bottom: 1px solid var(--b1g-border); }
+    .dashboard-satellite-chart-slider { border-right: 0; border-bottom: 1px solid var(--b1g-border); }
+    .dashboard-satellite-slider-slide .satellite-hub-chart-body { grid-template-columns: 180px minmax(260px, 520px); justify-content: center; column-gap: 32px; }
     .dashboard-satellite-category-body { grid-template-columns: auto minmax(240px, 420px); align-items: center; justify-content: center; }
+}
+@media (max-width: 600px) {
+    .dashboard-satellite-slider-heading { align-items: stretch; flex-direction: column; }
+    .dashboard-satellite-slider-heading > span { text-align: center; }
+    .dashboard-satellite-slider-slide { padding: 18px 16px 21px; }
+    .dashboard-satellite-slider-slide .satellite-hub-chart-body { grid-template-columns: 1fr; }
 }
 @media (max-width: 1550px) and (min-width: 701px) {
     .public-dashboard-main { padding-right: 150px; }

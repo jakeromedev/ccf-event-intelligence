@@ -269,18 +269,46 @@
         <span>{{ dashboard.satellites.location_responses|number }} participant location responses</span>
     </header>
     <div class="dashboard-satellite-reporting-grid">
-        <article class="dashboard-satellite-category-chart" aria-labelledby="dashboard-satellite-category-title">
-            <header><h3 id="dashboard-satellite-category-title">Participants by Reporting Category</h3><p>International Satellites are included under Outside Metro Manila.</p></header>
-            {% if dashboard.satellites.categorized_participants %}
-            <div class="dashboard-satellite-category-body">
-                <div class="dashboard-satellite-category-donut" role="img" aria-label="Participant distribution across Outside Metro Manila, Within Metro Manila, and Main" style="background: conic-gradient({% for item in dashboard.satellites.categories %}{{ item.color }} {{ item.start }}% {{ item.end }}%{% if not loop.last %}, {% endif %}{% endfor %})">
-                    <span><strong>{{ dashboard.satellites.categorized_participants|number }}</strong><small>Categorized</small></span>
+        <article class="dashboard-satellite-chart-slider" aria-label="Satellite distribution charts">
+            <header class="dashboard-satellite-slider-heading">
+                <nav class="dashboard-satellite-slider-tabs" aria-label="Choose Satellite chart">
+                    <a class="is-default" href="#dashboard-satellite-hub-slide">By Hub</a>
+                    <a href="#dashboard-satellite-category-slide">Reporting Category</a>
+                </nav>
+                <span>Swipe to change view</span>
+            </header>
+            <div class="dashboard-satellite-slider-viewport">
+                <div class="dashboard-satellite-slider-track">
+                    <section class="dashboard-satellite-slider-slide is-hub" id="dashboard-satellite-hub-slide" role="group" aria-roledescription="slide" aria-label="1 of 2, Registrant–Satellite Associations by Hub">
+                        <header><h3>Registrant–Satellite Associations by Hub</h3><p>An additive distribution for people associated with one or more Satellites.</p></header>
+                        {% if dashboard.satellites.hub_chart %}
+                        <div class="satellite-hub-chart-body">
+                            <div class="satellite-hub-donut" role="img" aria-label="{{ dashboard.satellites.hub_association_count|number }} registrant-to-Satellite associations across {{ dashboard.satellites.hubs_represented|number }} Hubs" style="background: conic-gradient({% for hub in dashboard.satellites.hub_chart %}{{ hub.color }} {{ hub.start }}% {{ hub.end }}%{{ ', ' if not loop.last else '' }}{% endfor %})">
+                                <div><strong>{{ dashboard.satellites.hub_association_count|number }}</strong><span>Associations</span></div>
+                            </div>
+                            <ul class="satellite-hub-legend" aria-label="Dashboard Hub distribution data">
+                                {% for hub in dashboard.satellites.hub_chart %}
+                                <li><i style="background: {{ hub.color }}"></i><span>{{ hub.name }}</span><strong>{{ hub.associations|number }}</strong><small>{{ hub.percentage|percent }}</small></li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                        {% else %}<div class="dashboard-insight-empty">No Hub distribution is available.</div>{% endif %}
+                    </section>
+                    <section class="dashboard-satellite-slider-slide is-category" id="dashboard-satellite-category-slide" role="group" aria-roledescription="slide" aria-label="2 of 2, Participants by Reporting Category">
+                        <header><h3>Participants by Reporting Category</h3><p>International Satellites are included under Outside Metro Manila.</p></header>
+                        {% if dashboard.satellites.categorized_participants %}
+                        <div class="dashboard-satellite-category-body">
+                            <div class="dashboard-satellite-category-donut" role="img" aria-label="Participant distribution across Outside Metro Manila, Within Metro Manila, and Main" style="background: conic-gradient({% for item in dashboard.satellites.categories %}{{ item.color }} {{ item.start }}% {{ item.end }}%{% if not loop.last %}, {% endif %}{% endfor %})">
+                                <span><strong>{{ dashboard.satellites.categorized_participants|number }}</strong><small>Categorized</small></span>
+                            </div>
+                            <ul class="dashboard-satellite-category-legend">
+                                {% for item in dashboard.satellites.categories %}<li><i style="background: {{ item.color }}"></i><span>{{ item.label }}{% if item.key == 'outside_metro_manila' %}<small>Includes international</small>{% endif %}</span><strong>{{ item.participants|number }}</strong><small>{{ item.percentage|percent }}</small></li>{% endfor %}
+                            </ul>
+                        </div>
+                        {% else %}<div class="dashboard-insight-empty">No categorized participant Satellite assignments are available.</div>{% endif %}
+                    </section>
                 </div>
-                <ul class="dashboard-satellite-category-legend">
-                    {% for item in dashboard.satellites.categories %}<li><i style="background: {{ item.color }}"></i><span>{{ item.label }}{% if item.key == 'outside_metro_manila' %}<small>Includes international</small>{% endif %}</span><strong>{{ item.participants|number }}</strong><small>{{ item.percentage|percent }}</small></li>{% endfor %}
-                </ul>
             </div>
-            {% else %}<div class="dashboard-insight-empty">No categorized participant Satellite assignments are available.</div>{% endif %}
         </article>
         <article class="dashboard-satellite-table-card">
             <header class="dashboard-satellite-table-heading">
@@ -312,25 +340,6 @@
             </footer>
         </article>
     </div>
-    <article class="dashboard-satellite-hub-chart satellite-hub-chart" aria-labelledby="dashboard-satellite-hub-title">
-        <header class="satellite-chart-heading">
-            <div><h2 id="dashboard-satellite-hub-title">Registrant–Satellite Associations by Hub</h2><p>An additive distribution for people associated with one or more Satellites.</p></div>
-        </header>
-        {% if dashboard.satellites.hub_chart %}
-        <div class="satellite-hub-chart-body">
-            <div class="satellite-hub-donut" role="img" aria-label="{{ dashboard.satellites.hub_association_count|number }} registrant-to-Satellite associations across {{ dashboard.satellites.hubs_represented|number }} Hubs" style="background: conic-gradient({% for hub in dashboard.satellites.hub_chart %}{{ hub.color }} {{ hub.start }}% {{ hub.end }}%{{ ', ' if not loop.last else '' }}{% endfor %})">
-                <div><strong>{{ dashboard.satellites.hub_association_count|number }}</strong><span>Associations</span></div>
-            </div>
-            <ul class="satellite-hub-legend" aria-label="Dashboard Hub distribution data">
-                {% for hub in dashboard.satellites.hub_chart %}
-                <li><i style="background: {{ hub.color }}"></i><span>{{ hub.name }}</span><strong>{{ hub.associations|number }}</strong><small>{{ hub.percentage|percent }}</small></li>
-                {% endfor %}
-            </ul>
-        </div>
-        {% else %}
-        <div class="satellite-chart-empty">{{ icon('chart', 28) }}<strong>No Hub distribution is available.</strong><span>Satellite associations will appear here after locations are matched.</span></div>
-        {% endif %}
-    </article>
 </section>
 
 <section class="dashboard-leadership panel" id="dashboard-leadership" aria-labelledby="dashboard-leadership-title">
