@@ -2803,7 +2803,7 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertIn(b"No linked Satellites match these filters", empty.data)
         self.assertIn(b"Clear filters", empty.data)
 
-    def test_dashboard_satellite_table_includes_hub_only_icp_responses(self):
+    def test_dashboard_satellite_table_infers_icp_child_satellites(self):
         batch_id = self._process(self.event_a)
         with self.app.app_context():
             db = get_db()
@@ -2833,64 +2833,85 @@ class EventIntegrationTests(unittest.TestCase):
                 """,
                 (group_id,),
             ).lastrowid
-            db.execute(
+            hong_kong_id = db.execute(
                 """
-                INSERT INTO registrants (
-                    batch_id, registration_code, ticket_code, last_name,
-                    gender_raw, birth_month_raw, birth_year_raw,
-                    b1g_satellite_hub_raw, affiliation, registration_type,
-                    ticket_matched, checked_in
-                ) VALUES (?, 'R-ICP-HUB', 'T-ICP-HUB', 'Hubonly',
-                          'Female', 'January', '1990', ' ICP ', 'Unknown',
-                          'participant', 1, 0)
+                INSERT INTO satellite_directory (hub_id, name, normalized_name)
+                VALUES (?, 'B1G Hong Kong', 'b1g hong kong')
                 """,
-                (batch_id,),
+                (hub_id,),
+            ).lastrowid
+            singapore_id = db.execute(
+                """
+                INSERT INTO satellite_directory (hub_id, name, normalized_name)
+                VALUES (?, 'B1G Singapore', 'b1g singapore')
+                """,
+                (hub_id,),
+            ).lastrowid
+            source_locations = (
+                {"Specify Home Location": "Stanley Hong Kong", "Specify Work Location": "Stanley Hong Kong"},
+                {"Specify Home Location": "", "Specify Work Location": "Quezon City"},
+                {"Specify Home Location": "Singapore", "Specify Work Location": "Singapore"},
+                {"Specify Home Location": "Singaporr", "Specify Work Location": "Singapore"},
+                {"Specify Home Location": "Singapore", "Specify Work Location": "Singapore"},
             )
+            for index, source_data in enumerate(source_locations, start=1):
+                db.execute(
+                    """
+                    INSERT INTO registrants (
+                        batch_id, registration_code, ticket_code, last_name,
+                        gender_raw, birth_month_raw, birth_year_raw,
+                        b1g_satellite_hub_raw, affiliation, registration_type,
+                        ticket_matched, checked_in, source_data_json
+                    ) VALUES (?, ?, ?, ?, 'Female', 'January', '1990',
+                              ' ICP ', 'Unknown', 'participant', 1, 0, ?)
+                    """,
+                    (
+                        batch_id,
+                        "R-ICP-{}".format(index),
+                        "T-ICP-{}".format(index),
+                        "Icp{}".format(index),
+                        json.dumps(source_data),
+                    ),
+                )
             rebuild_batch_curation(db, batch_id)
             db.commit()
             dashboard = dashboard_satellite_metrics(
                 db, self.event_a, batch_id, query="ICP"
             )
 
-        self.assertEqual(1, dashboard["pagination"]["total"])
+        self.assertEqual(2, dashboard["pagination"]["total"])
         self.assertEqual(
-            {
-                "id": -hub_id,
-                "name": "ICP",
-                "participants": 1,
-                "hub_name": "ICP",
-                "group_name": "Outside Metro Manila Hubs",
-                "hub_only": True,
-            },
-            {
-                key: dashboard["rows"][0][key]
-                for key in (
-                    "id",
-                    "name",
-                    "participants",
-                    "hub_name",
-                    "group_name",
-                    "hub_only",
+            [
+                (singapore_id, "B1G Singapore", 3, "ICP", False),
+                (hong_kong_id, "B1G Hong Kong", 1, "ICP", False),
+            ],
+            [
+                (
+                    row["id"], row["name"], row["participants"],
+                    row["hub_name"], row["hub_only"],
                 )
-            },
+                for row in dashboard["rows"]
+            ],
         )
         self.assertEqual(
-            dashboard["participant_assignments"] + 1,
+            dashboard["participant_assignments"] + 4,
             dashboard["location_responses"],
         )
-        self.assertEqual(1, dashboard["hub_only_participants"])
+        self.assertEqual(4, dashboard["inferred_location_participants"])
         outside_after = next(
             item["participants"]
             for item in dashboard["categories"]
             if item["key"] == "outside_metro_manila"
         )
-        self.assertEqual(outside_before + 1, outside_after)
+        self.assertEqual(outside_before + 4, outside_after)
 
         page = self.app.test_client().get(
             "/events/{}?satellite_q=ICP".format(self.event_a)
         )
-        self.assertIn(b">ICP</strong>", page.data)
-        self.assertIn(b"Satellite not specified", page.data)
+        self.assertIn(b">B1G Hong Kong</strong>", page.data)
+        self.assertIn(b">B1G Singapore</strong>", page.data)
+        self.assertNotIn(b">ICP</strong>", page.data)
+        self.assertNotIn(b"Satellite not specified", page.data)
         self.assertIn(b"participant location responses", page.data)
 
     def test_data_quality_filters_pagination_sorting_scope_and_privacy(self):

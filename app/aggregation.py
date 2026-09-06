@@ -1,3 +1,4 @@
+import json
 import re
 from collections import defaultdict
 
@@ -21,6 +22,56 @@ from .satellite_reporting_categories import (
     REPORTING_CATEGORY_LABELS,
     REPORTING_CATEGORY_SQL,
 )
+
+
+ICP_LOCATION_SOURCE_FIELDS = (
+    "Specify Icp Hub",
+    "Icp Hub",
+    "B1g Satellite",
+    "Specify B1g Satellite",
+    "Specify Home Location",
+    "Specify Work Location",
+)
+
+
+def _dashboard_location_key(value):
+    key = re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).strip()
+    for prefix in ("b1g ", "ccf "):
+        if key.startswith(prefix):
+            key = key[len(prefix) :].strip()
+    return key
+
+
+def _inferred_icp_directory_ids(source_data_json, directories):
+    try:
+        source_data = json.loads(source_data_json or "{}")
+    except (TypeError, ValueError):
+        return set()
+    if not isinstance(source_data, dict):
+        return set()
+
+    casefolded = {str(key).casefold(): value for key, value in source_data.items()}
+    candidates = [
+        _dashboard_location_key(casefolded.get(field.casefold()))
+        for field in ICP_LOCATION_SOURCE_FIELDS
+    ]
+    candidates = [candidate for candidate in candidates if candidate]
+    matches = set()
+    for directory in directories:
+        directory_key = _dashboard_location_key(directory["name"])
+        if not directory_key:
+            continue
+        compact_directory_key = directory_key.replace(" ", "")
+        for candidate in candidates:
+            compact_candidate = candidate.replace(" ", "")
+            if (
+                candidate == directory_key
+                or directory_key in candidate
+                or compact_directory_key in compact_candidate
+            ):
+                matches.add(directory["id"])
+                break
+    return matches
 
 
 def active_batch(db, event_id):
@@ -830,6 +881,7 @@ def dashboard_satellite_metrics(db, event_id, batch_id, query="", page=1):
             "participant_assignments": 0,
             "location_responses": 0,
             "hub_only_participants": 0,
+            "inferred_location_participants": 0,
             "categorized_participants": 0,
             "categories": empty_categories,
             "rows": [],
@@ -876,12 +928,25 @@ def dashboard_satellite_metrics(db, event_id, batch_id, query="", page=1):
         """,
         params,
     ).fetchall()
-    hub_only_rows = db.execute(
+    icp_directories = [
+        dict(row)
+        for row in db.execute(
+            """
+            SELECT directory.id, directory.name,
+                   hub.name hub_name, hub.is_main,
+                   hub_group.code group_code, hub_group.name group_name
+            FROM satellite_directory directory
+            JOIN satellite_hubs hub ON hub.id = directory.hub_id
+            LEFT JOIN hub_groups hub_group ON hub_group.id = hub.hub_group_id
+            WHERE LOWER(hub.normalized_name) = 'icp'
+            ORDER BY directory.id
+            """
+        ).fetchall()
+    ]
+    icp_source_rows = db.execute(
         EFFECTIVE_ASSOCIATIONS_CTE
         + """
-        SELECT hub.id, hub.name, hub.is_main,
-               hub_group.code group_code, hub_group.name group_name,
-               COUNT(DISTINCT participant.id) participants
+        SELECT participant.id participant_id, raw.source_data_json
         FROM curated_registrants participant
         JOIN curated_registrant_sources source
           ON source.event_id = participant.event_id
@@ -891,9 +956,9 @@ def dashboard_satellite_metrics(db, event_id, batch_id, query="", page=1):
           ON raw.batch_id = source.batch_id AND raw.id = source.registrant_id
         JOIN satellite_hubs hub
           ON LOWER(hub.normalized_name) = LOWER(TRIM(raw.b1g_satellite_hub_raw))
-        LEFT JOIN hub_groups hub_group ON hub_group.id = hub.hub_group_id
         WHERE participant.event_id = ? AND participant.batch_id = ?
           AND participant.registration_type = 'participant'
+          AND LOWER(hub.normalized_name) = 'icp'
           AND NULLIF(TRIM(COALESCE(raw.satellite_name, '')), '') IS NULL
           AND NOT EXISTS (
               SELECT 1 FROM effective_associations assigned
@@ -901,14 +966,40 @@ def dashboard_satellite_metrics(db, event_id, batch_id, query="", page=1):
                 AND assigned.batch_id = participant.batch_id
                 AND assigned.curated_registrant_id = participant.id
           )
-        GROUP BY hub.id, hub.name, hub.is_main,
-                 hub_group.code, hub_group.name
         """,
         (event_id, batch_id),
     ).fetchall()
     participant_assignments = sum(row["participants"] for row in rows)
-    hub_only_participants = sum(row["participants"] for row in hub_only_rows)
-    location_responses = participant_assignments + hub_only_participants
+    inferred_candidates = defaultdict(set)
+    for source_row in icp_source_rows:
+        inferred_candidates[source_row["participant_id"]].update(
+            _inferred_icp_directory_ids(
+                source_row["source_data_json"], icp_directories
+            )
+        )
+    inferred_by_directory = defaultdict(set)
+    for participant_id, directory_ids in inferred_candidates.items():
+        if len(directory_ids) == 1:
+            inferred_by_directory[next(iter(directory_ids))].add(participant_id)
+    inferred_location_participants = sum(
+        len(participant_ids)
+        for participant_ids in inferred_by_directory.values()
+    )
+    location_responses = participant_assignments + inferred_location_participants
+    rows_by_directory = {row["id"]: dict(row) for row in rows}
+    icp_directories_by_id = {
+        directory["id"]: directory for directory in icp_directories
+    }
+    for directory_id, participant_ids in inferred_by_directory.items():
+        inferred_count = len(participant_ids)
+        if directory_id in rows_by_directory:
+            rows_by_directory[directory_id]["participants"] += inferred_count
+            continue
+        directory = icp_directories_by_id[directory_id]
+        rows_by_directory[directory_id] = {
+            **directory,
+            "participants": inferred_count,
+        }
     satellite_rows = [
         {
             "id": row["id"],
@@ -918,19 +1009,8 @@ def dashboard_satellite_metrics(db, event_id, batch_id, query="", page=1):
             "group_name": row["group_name"] or "Needs Mapping",
             "hub_only": False,
         }
-        for row in rows
+        for row in rows_by_directory.values()
     ]
-    satellite_rows.extend(
-        {
-            "id": -row["id"],
-            "name": row["name"],
-            "participants": row["participants"],
-            "hub_name": row["name"],
-            "group_name": row["group_name"] or "Needs Mapping",
-            "hub_only": True,
-        }
-        for row in hub_only_rows
-    )
     for row in satellite_rows:
         row["percentage"] = (
             row["participants"] / location_responses * 100
@@ -984,10 +1064,13 @@ def dashboard_satellite_metrics(db, event_id, batch_id, query="", page=1):
             if row["category_key"] in counts
         }
     )
-    for row in hub_only_rows:
-        category_key = "main" if row["is_main"] else row["group_code"]
+    for directory_id, participant_ids in inferred_by_directory.items():
+        directory = icp_directories_by_id[directory_id]
+        category_key = (
+            "main" if directory["is_main"] else directory["group_code"]
+        )
         if category_key in counts:
-            counts[category_key] += row["participants"]
+            counts[category_key] += len(participant_ids)
     category_total = sum(counts.values())
     cursor = 0.0
     categories = []
@@ -1010,7 +1093,8 @@ def dashboard_satellite_metrics(db, event_id, batch_id, query="", page=1):
         "query": query,
         "participant_assignments": participant_assignments,
         "location_responses": location_responses,
-        "hub_only_participants": hub_only_participants,
+        "hub_only_participants": inferred_location_participants,
+        "inferred_location_participants": inferred_location_participants,
         "categorized_participants": category_total,
         "categories": categories,
         "rows": visible_rows,
