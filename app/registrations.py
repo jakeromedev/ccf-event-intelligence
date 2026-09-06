@@ -509,6 +509,7 @@ def update_attestation_verification(
     batch_argument,
     status,
     reviewer_user_id,
+    remark_text=None,
 ):
     """Update current verification state after enforcing Event and batch ownership."""
     batch_scope = resolve_batch_scope(
@@ -531,6 +532,18 @@ def update_attestation_verification(
         return None
     if status not in ATTESTATION_STATUSES:
         raise AdminTableQueryError("Attestation status is invalid.")
+    if remark_text is not None:
+        if status != "invalid":
+            raise AdminTableQueryError("Remarks may only accompany an Invalid status.")
+        if not isinstance(remark_text, str):
+            raise AdminTableQueryError("Remark text must be text.")
+        remark_text = remark_text.strip()
+        if not remark_text:
+            remark_text = None
+        elif len(remark_text) > MAX_REMARK_LENGTH:
+            raise AdminTableQueryError(
+                "Remark text cannot exceed {} characters.".format(MAX_REMARK_LENGTH)
+            )
 
     participant_id = resolve_attestation_participant(
         db, event_id, registration["batch_id"], registrant_id
@@ -572,17 +585,40 @@ def update_attestation_verification(
                 reviewed_at,
             ),
         )
+    remark_id = None
+    if remark_text:
+        remark_id = db.execute(
+            """
+            INSERT INTO registrant_remarks (
+                event_id, attestation_participant_id, remark, status,
+                created_by_user_id, created_at, updated_at
+            ) VALUES (?, ?, ?, 'pending', ?, ?, ?)
+            """,
+            (
+                event_id,
+                participant_id,
+                remark_text,
+                reviewer_user_id,
+                reviewed_at,
+                reviewed_at,
+            ),
+        ).lastrowid
     db.commit()
     reviewer = db.execute(
         "SELECT username FROM users WHERE id = ?", (reviewer_user_id,)
     ).fetchone()
-    return {
+    result = {
         "batch_id": registration["batch_id"],
         "status": status,
         "label": ATTESTATION_STATUS_LABELS[status],
         "updated_by": reviewer["username"] if reviewer else None,
         "updated_at": format_operational_datetime(reviewed_at),
     }
+    if remark_id is not None:
+        result["remark"] = _remark_payload(
+            _select_remark(db, event_id, participant_id, remark_id)
+        )
+    return result
 
 
 def _scoped_registration_participant(

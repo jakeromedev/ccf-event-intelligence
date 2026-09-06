@@ -1191,7 +1191,7 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         self.assertIn('aria-label="Fit complete document to viewer"', page)
         self.assertIn('aria-label="Show document at 100 percent"', page)
         self.assertIn('target="_blank" rel="noopener noreferrer"', page)
-        self.assertNotIn("<iframe", page)
+        self.assertIn('data-attestation-frame', page)
 
         self.assertIn("previewImage.onload", script)
         self.assertIn('fitDocumentToView(zoomPreference.mode, true)', script)
@@ -1215,7 +1215,9 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         self.assertIn('fitPageButton.addEventListener("click", () => selectFitZoom("fit-page"))', script)
         self.assertIn('retryPreviewButton.addEventListener("click", retryPreview)', script)
 
-        self.assertIn("previewImage.onerror = () => showPreviewFailure(session)", script)
+        self.assertIn("previewFrame.src = frameUrl", script)
+        self.assertIn('parsed.hostname !== "drive.google.com"', script)
+        self.assertIn("previewFrame.onerror = () => showPreviewFailure(session)", script)
         self.assertIn("window.setTimeout(() => showPreviewFailure(session), 15000)", script)
         self.assertIn("session !== previewSession", script)
         self.assertIn("previewSession += 1", script)
@@ -1287,6 +1289,44 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         self.assertIn("tr.has-pending-remarks td", styles)
         self.assertIn(".remark-card.is-pending", styles)
         self.assertIn(".remark-card.is-resolved", styles)
+
+    def test_registration_view_action_shows_ordered_complete_details(self):
+        self._process(self.event_a)
+        root = Path(__file__).parents[1]
+        page = self.app.test_client().get(
+            "/events/{}/registrations".format(self.event_a)
+        ).get_data(as_text=True)
+        script = (root / "app/static/registrations.js").read_text()
+        styles = (root / "app/static/app.css").read_text()
+
+        for marker in (
+            'data-registration-details-modal',
+            'aria-labelledby="registration-details-title"',
+            'data-registration-details-content',
+            'data-registration-details-close',
+        ):
+            self.assertIn(marker, page)
+        self.assertIn('viewLabel.textContent = "View"', script)
+        self.assertIn('actionsViewItem.setAttribute("role", "menuitem")', script)
+        self.assertIn("openRegistrationDetails(row, trigger)", script)
+        self.assertIn("registrationDetailGroups.map", script)
+        self.assertIn("detailsContent.replaceChildren(...groups)", script)
+        self.assertIn('label: "Registration"', script)
+        self.assertIn('label: "Attestation & Payment"', script)
+        self.assertIn('label: "Registrant Profile"', script)
+        self.assertIn('label: "Logistics"', script)
+        for key in (
+            "batch_id", "registration_code", "ticket_code", "email_address",
+            "mobile_number", "attestation_status", "payment_status",
+            "attestation_form", "pending_remark_count", "resolved_remark_count",
+            "last_reviewed_by", "last_reviewed_at", "gender", "birth_month",
+            "birth_year", "life_stage", "satellite", "shirt_size",
+            "transportation_to_mmrc", "transportation_from_mmrc", "plate_number",
+        ):
+            self.assertIn('["{}",'.format(key), script)
+        self.assertIn(".registration-details-dialog", styles)
+        self.assertIn(".registration-detail-group", styles)
+        self.assertNotIn("innerHTML", script)
 
     def test_remark_aggregate_query_count_is_constant(self):
         batch_id = self._process(self.event_a)
@@ -1856,7 +1896,9 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
         self.assertEqual(200, standard_page.status_code)
         self.assertEqual(200, self.client.get(data_url).status_code)
         self.assertIn(('href="{}"'.format(page_url)).encode(), standard_page.data)
-        self.assertNotIn(b'data-attestation-save', standard_page.data)
+        self.assertIn(b'data-attestation-save', standard_page.data)
+        self.assertIn(b'data-attestation-remark', standard_page.data)
+        self.assertIn(b'data-remarks-form', standard_page.data)
         for label in (
             b">Dashboard</span>",
             b">Registrations</span>",
@@ -1872,14 +1914,13 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
         ):
             self.assertNotIn(label, standard_page.data)
         csrf_token = self._csrf_token()
-        self.assertEqual(
-            403,
-            self.client.patch(
-                update_url,
-                json={"status": "verified"},
-                headers={"X-CSRFToken": csrf_token},
-            ).status_code,
+        standard_update = self.client.patch(
+            update_url,
+            json={"status": "invalid", "remark": "The signature is missing."},
+            headers={"X-CSRFToken": csrf_token},
         )
+        self.assertEqual(200, standard_update.status_code)
+        self.assertEqual("operator", standard_update.get_json()["remark"]["created_by"])
         overview = self.client.get("/events/{}".format(self.event_id))
         self.assertIn(page_url.encode(), overview.data)
         self.assertEqual(
@@ -2183,21 +2224,25 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
         self.client.post("/logout", data={"csrf_token": self._csrf_token()})
         self._login("operator", "User-Registrations-Password-1!")
         self.assertEqual(200, self.client.get(collection_url).status_code)
-        unauthorized_csrf = self._csrf_token()
+        standard_csrf = self._csrf_token()
+        standard_remark = self.client.post(
+            collection_url,
+            json={"remark": "Standard-user follow-up"},
+            headers={"X-CSRFToken": standard_csrf},
+        )
+        self.assertEqual(201, standard_remark.status_code)
         self.assertEqual(
-            403,
-            self.client.post(
-                collection_url,
-                json={"remark": "Denied"},
-                headers={"X-CSRFToken": unauthorized_csrf},
-            ).status_code,
+            "operator", standard_remark.get_json()["remark"]["created_by"]
+        )
+        standard_resolve_url = collection_url + "/{}".format(
+            standard_remark.get_json()["remark"]["id"]
         )
         self.assertEqual(
-            403,
+            200,
             self.client.patch(
-                resolve_url,
+                standard_resolve_url,
                 json={"status": "resolved"},
-                headers={"X-CSRFToken": unauthorized_csrf},
+                headers={"X-CSRFToken": standard_csrf},
             ).status_code,
         )
 

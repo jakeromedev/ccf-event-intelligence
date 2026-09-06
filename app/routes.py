@@ -608,6 +608,10 @@ def update_registration_attestation(event_id, registrant_id):
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         return jsonify({"error": "A JSON request body is required."}), 400
+    if "status" not in payload or not set(payload).issubset({"status", "remark"}):
+        return jsonify(
+            {"error": "Only attestation status and an optional invalid-status remark may be supplied."}
+        ), 400
     try:
         result = update_attestation_verification(
             db,
@@ -617,6 +621,7 @@ def update_registration_attestation(event_id, registrant_id):
             request.args.get("batch"),
             payload.get("status"),
             current_user.id,
+            payload.get("remark"),
         )
     except AdminTableQueryError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -631,6 +636,9 @@ def update_registration_attestation(event_id, registrant_id):
             "registrant_id": registrant_id,
             "user_id": current_user.id,
             "status": result["status"],
+            "remark_id": (
+                result["remark"]["id"] if result.get("remark") else None
+            ),
         },
     )
     return jsonify(result)

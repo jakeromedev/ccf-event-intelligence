@@ -69,6 +69,8 @@ STANDARD_USER_CAPABILITIES = frozenset(
         CAPABILITY_VIEW_DASHBOARD,
         CAPABILITY_VIEW_REGISTRATIONS,
         CAPABILITY_VIEW_SATELLITES,
+        CAPABILITY_EDIT_ATTESTATION,
+        CAPABILITY_EDIT_REMARKS,
         CAPABILITY_CREATE_EVENTS,
         CAPABILITY_VIEW_EVENT_SETTINGS,
     }
@@ -228,28 +230,16 @@ def can_edit_attestation_verification() -> bool:
     return bool(
         current_user.is_authenticated
         and current_user.status == "approved"
-        and (
-            current_user.is_admin
-            or (
-                current_user.role == "registration"
-                and CAPABILITY_EDIT_ATTESTATION in REGISTRATION_CAPABILITIES
-            )
-        )
+        and has_capability(CAPABILITY_EDIT_ATTESTATION)
     )
 
 
 def can_edit_registrant_remarks() -> bool:
-    """Require an attributable administrator or Registration operator."""
+    """Require an attributable operator with the Remarks capability."""
     return bool(
         current_user.is_authenticated
         and current_user.status == "approved"
-        and (
-            current_user.is_admin
-            or (
-                current_user.role == "registration"
-                and CAPABILITY_EDIT_REMARKS in REGISTRATION_CAPABILITIES
-            )
-        )
+        and has_capability(CAPABILITY_EDIT_REMARKS)
     )
 
 

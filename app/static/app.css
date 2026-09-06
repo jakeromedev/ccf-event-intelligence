@@ -2545,6 +2545,7 @@ body.admin-drawer-open { overflow: hidden; }
 .attestation-preview:focus-visible { border-color: #078b97; box-shadow: inset 0 0 0 2px rgba(5,127,140,.15); }
 .attestation-document-canvas { position: relative; min-width: 100%; min-height: 100%; box-sizing: border-box; }
 .attestation-document-image { position: absolute; display: block; max-width: none; object-fit: contain; box-shadow: 0 6px 24px rgba(16,48,58,.16); }
+.attestation-document-frame { width: 100%; height: 100%; min-height: 100%; display: block; border: 0; background: #fff; }
 .attestation-preview-state,
 .attestation-preview-unavailable { position: absolute; z-index: 2; inset: 0; padding: 24px; place-content: center; justify-items: center; color: #71858e; background: rgba(237,243,244,.94); text-align: center; }
 .attestation-preview-state { display: grid; gap: 9px; color: #607983; font-size: 10px; font-weight: 700; }
@@ -2555,6 +2556,7 @@ body.admin-drawer-open { overflow: hidden; }
 .attestation-preview-unavailable[hidden],
 .attestation-document-canvas[hidden],
 .attestation-document-image[hidden],
+.attestation-document-frame[hidden],
 .attestation-open-original[hidden],
 .attestation-modal-feedback[hidden] { display: none; }
 .attestation-preview-unavailable svg { color: #8099a2; }
@@ -2577,6 +2579,12 @@ body.admin-drawer-open { overflow: hidden; }
 .attestation-status-control select:focus { border-color: #078b97; outline: 3px solid rgba(5,127,140,.12); }
 .attestation-status-panel > p:not(.eyebrow):not(.attestation-modal-feedback) { margin: 11px 0 0; color: #728891; font-size: 9px; line-height: 1.55; }
 .attestation-status-panel .attestation-status-changed { color: #8a6419; font-weight: 800; }
+.attestation-invalid-remark { margin-top: 15px; display: grid; gap: 6px; }
+.attestation-invalid-remark[hidden] { display: none; }
+.attestation-invalid-remark > span { color: #934a43; font-size: 9px; font-weight: 800; }
+.attestation-invalid-remark textarea { width: 100%; min-height: 86px; padding: 9px 10px; resize: vertical; color: #263f49; border: 1px solid #ebc9c5; border-radius: 8px; background: #fffafa; font: inherit; font-size: 9px; line-height: 1.5; }
+.attestation-invalid-remark textarea:focus { border-color: #b45b52; outline: 3px solid rgba(180,91,82,.12); }
+.attestation-invalid-remark small { color: #728891; font-size: 8px; line-height: 1.4; }
 .attestation-save-status { width: 100%; margin-top: 18px; }
 .attestation-modal-feedback { margin: 15px 0 0; padding: 9px 10px; color: #176b5c; border: 1px solid #cce4dc; border-radius: 7px; background: #f1faf7; font-size: 9px; font-weight: 700; line-height: 1.45; }
 .attestation-modal-feedback.is-error { color: #914a43; border-color: #edcfcb; background: #fff5f4; }
@@ -3630,6 +3638,19 @@ body.registrations-filter-open { overflow: hidden; }
 }
 .registration-actions-menu button:disabled { color: var(--b1g-text-muted); cursor: not-allowed; opacity: .55; }
 .registration-actions-menu svg { width: 15px; height: 15px; flex: 0 0 auto; }
+.registration-details-dialog { width: min(920px, 100%); max-height: min(860px, 92vh); display: flex; flex-direction: column; border-color: var(--b1g-border); border-radius: 13px; box-shadow: 0 24px 70px rgba(74, 9, 9, .24); }
+.registration-details-content { min-height: 0; padding: 22px 24px 28px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 14px; overflow-y: auto; background: #f8fafb; }
+.registration-detail-group { min-width: 0; overflow: hidden; border: 1px solid var(--b1g-border); border-radius: 10px; background: var(--b1g-white); }
+.registration-detail-group h3 { margin: 0; padding: 12px 15px; color: var(--b1g-red-dark); border-bottom: 1px solid var(--b1g-border); background: var(--b1g-off-white); font-size: 11px; }
+.registration-detail-group dl { margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.registration-detail-field { min-width: 0; padding: 12px 15px; border-bottom: 1px solid var(--b1g-border); }
+.registration-detail-field:nth-child(odd) { border-right: 1px solid var(--b1g-border); }
+.registration-detail-field:nth-last-child(-n+2) { border-bottom: 0; }
+.registration-detail-field dt { margin: 0 0 5px; color: var(--b1g-text-muted); font-size: 7.5px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
+.registration-detail-field dd { margin: 0; color: var(--b1g-text); font-size: 9.5px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
+.registration-detail-field a { color: var(--b1g-red); font-weight: 750; text-decoration: underline; text-underline-offset: 2px; }
+.registration-details-footer { min-height: 62px; padding: 11px 24px; display: flex; justify-content: flex-end; border-top: 1px solid var(--b1g-border); background: var(--b1g-white); }
+.registration-details-footer .button { min-height: var(--registrations-control-height); border-radius: var(--registrations-radius); }
 .registration-attestation-badge,
 .registration-payment-badge {
     min-height: 25px;
@@ -3734,6 +3755,12 @@ body.registrations-filter-open { overflow: hidden; }
 }
 
 @media (max-width: 780px) {
+    .registration-details-dialog { width: 100%; height: 100%; max-height: none; border: 0; border-radius: 0; }
+    .registration-details-content { padding: 16px; grid-template-columns: 1fr; }
+    .registration-detail-group dl { grid-template-columns: 1fr; }
+    .registration-detail-field:nth-child(odd) { border-right: 0; }
+    .registration-detail-field:nth-last-child(2) { border-bottom: 1px solid var(--b1g-border); }
+    .registration-details-footer { padding-inline: 16px; }
     .registrations-summary-grid > div:nth-child(2n) { border-right: 0; }
     .registrations-summary-grid > div:nth-child(n+3) { border-top: 1px solid var(--b1g-border); }
     .registrations-control-bar { padding-block: 14px; }

@@ -33,6 +33,11 @@
     const columnsMenu = root.querySelector("[data-columns-menu]");
     const columnsToggle = root.querySelector("[data-columns-toggle]");
     const columnGroupControls = [...root.querySelectorAll("[data-column-group]")];
+    const detailsModal = document.querySelector("[data-registration-details-modal]");
+    const detailsDialog = detailsModal.querySelector("[role='dialog']");
+    const detailsCloseButton = detailsModal.querySelector(".registrant-modal-close");
+    const detailsName = detailsModal.querySelector("[data-registration-details-name]");
+    const detailsContent = detailsModal.querySelector("[data-registration-details-content]");
     const modal = document.querySelector("[data-attestation-modal]");
     const modalDialog = modal.querySelector("[role='dialog']");
     const modalCloseButton = modal.querySelector(".registrant-modal-close");
@@ -52,6 +57,7 @@
     const previewUnavailable = modal.querySelector("[data-attestation-preview-unavailable]");
     const previewCanvas = modal.querySelector("[data-attestation-canvas]");
     const previewImage = modal.querySelector("[data-attestation-image]");
+    const previewFrame = modal.querySelector("[data-attestation-frame]");
     const zoomOutButton = modal.querySelector("[data-attestation-zoom-out]");
     const zoomInButton = modal.querySelector("[data-attestation-zoom-in]");
     const fitWidthButton = modal.querySelector("[data-attestation-fit-width]");
@@ -61,6 +67,9 @@
     const openOriginal = modal.querySelector("[data-attestation-original]");
     const unavailableOriginal = modal.querySelector("[data-attestation-unavailable-original]");
     const retryPreviewButton = modal.querySelector("[data-attestation-retry]");
+    const invalidRemarkField = modal.querySelector("[data-attestation-invalid-remark]");
+    const invalidRemarkText = modal.querySelector("[data-attestation-remark]");
+    const invalidRemarkCount = modal.querySelector("[data-attestation-remark-count]");
     const canEditAttestation = root.dataset.canEditAttestation === "true";
     const remarksModal = document.querySelector("[data-remarks-modal]");
     const remarksDialog = remarksModal?.querySelector("[role='dialog']");
@@ -91,6 +100,52 @@
     const groupVisibility = Object.fromEntries(columnGroupOrder.map((group) => [group, true]));
     const allowedStatuses = ["pending", "verified", "invalid"];
     const statusLabels = {pending: "Pending", verified: "Verified", invalid: "Invalid"};
+    const registrationDetailGroups = [
+        {
+            label: "Registration",
+            fields: [
+                ["batch_id", "Import Batch"],
+                ["registration_code", "Registration Code"],
+                ["ticket_code", "Ticket Code"],
+                ["first_name", "First Name"],
+                ["last_name", "Last Name"],
+                ["email_address", "Email Address"],
+                ["mobile_number", "Mobile Number"],
+            ],
+        },
+        {
+            label: "Attestation & Payment",
+            fields: [
+                ["attestation_status", "Attestation Status"],
+                ["payment_status", "Payment Status"],
+                ["attestation_form", "Attestation Form"],
+                ["pending_remark_count", "Pending Remarks"],
+                ["resolved_remark_count", "Resolved Remarks"],
+                ["total_remark_count", "Total Remarks"],
+                ["last_reviewed_by", "Last Reviewed By"],
+                ["last_reviewed_at", "Last Reviewed At"],
+            ],
+        },
+        {
+            label: "Registrant Profile",
+            fields: [
+                ["gender", "Gender"],
+                ["birth_month", "Birth Month"],
+                ["birth_year", "Birth Year"],
+                ["life_stage", "Life Stage"],
+                ["satellite", "Satellite"],
+            ],
+        },
+        {
+            label: "Logistics",
+            fields: [
+                ["shirt_size", "Shirt Size"],
+                ["transportation_to_mmrc", "Transportation To MMRC"],
+                ["transportation_from_mmrc", "Transportation From MMRC"],
+                ["plate_number", "Plate Number"],
+            ],
+        },
+    ];
     const minimumZoom = 0.25;
     const maximumZoom = 3;
     const zoomStep = 0.25;
@@ -153,6 +208,7 @@
     let queuePageRows = [];
     let queueRequestSession = 0;
     let filterReturnFocus = null;
+    let detailsReturnFocus = null;
     let activeRemarksRow = null;
     let remarksReturnFocus = null;
     let remarksMutationPending = false;
@@ -160,6 +216,7 @@
     let actionsMenu = null;
     let actionsMenuTrigger = null;
     let actionsMenuRow = null;
+    let actionsViewItem = null;
     let actionsAttestationItem = null;
     let actionsRemarksItem = null;
     let actionsRemarksLabel = null;
@@ -435,6 +492,16 @@
         }
     };
 
+    const documentFrameUrl = (url) => {
+        const parsed = new URL(url);
+        if (parsed.hostname !== "drive.google.com") return url;
+        const pathMatch = parsed.pathname.match(/^\/file\/d\/([^/]+)/);
+        const fileId = pathMatch?.[1] || parsed.searchParams.get("id");
+        return fileId
+            ? `https://drive.google.com/file/d/${encodeURIComponent(fileId)}/preview`
+            : url;
+    };
+
     const showUpdateFeedback = (message, isError = false) => {
         updateFeedback.hidden = !message;
         updateFeedback.textContent = message || "";
@@ -570,6 +637,10 @@
         previewImage.removeAttribute("src");
         previewImage.removeAttribute("style");
         previewImage.hidden = true;
+        previewFrame.onload = null;
+        previewFrame.onerror = null;
+        previewFrame.removeAttribute("src");
+        previewFrame.hidden = true;
         previewCanvas.removeAttribute("style");
         previewCanvas.hidden = true;
         previewUnavailable.hidden = true;
@@ -609,6 +680,10 @@
         previewImage.onerror = null;
         previewImage.removeAttribute("src");
         previewImage.hidden = true;
+        previewFrame.onload = null;
+        previewFrame.onerror = null;
+        previewFrame.removeAttribute("src");
+        previewFrame.hidden = true;
         previewCanvas.hidden = true;
         previewState.hidden = true;
         previewUnavailable.hidden = false;
@@ -630,6 +705,29 @@
         unavailableOriginal.href = url;
         unavailableOriginal.hidden = false;
         retryPreviewButton.hidden = false;
+        const frameUrl = documentFrameUrl(url);
+        const isPdfDocument = /\.pdf(?:$|[?#])/i.test(url)
+            || /[?&](?:filename|name)=[^&]*\.pdf(?:&|$)/i.test(url)
+            || frameUrl !== url;
+        if (isPdfDocument) {
+            previewFrame.onload = () => {
+                if (session !== previewSession) return;
+                window.clearTimeout(previewLoadTimer);
+                previewLoadTimer = null;
+                previewState.hidden = true;
+                previewUnavailable.hidden = true;
+                previewCanvas.hidden = false;
+                previewCanvas.style.width = "100%";
+                previewCanvas.style.height = "100%";
+                previewFrame.hidden = false;
+                previewViewer.setAttribute("aria-busy", "false");
+                setZoomControls(false);
+            };
+            previewFrame.onerror = () => showPreviewFailure(session);
+            previewLoadTimer = window.setTimeout(() => showPreviewFailure(session), 15000);
+            previewFrame.src = frameUrl;
+            return;
+        }
         previewImage.onload = () => {
             if (session !== previewSession) return;
             window.clearTimeout(previewLoadTimer);
@@ -644,7 +742,28 @@
                 if (session === previewSession) applyZoomPreference();
             });
         };
-        previewImage.onerror = () => showPreviewFailure(session);
+        previewImage.onerror = () => {
+            if (session !== previewSession) return;
+            window.clearTimeout(previewLoadTimer);
+            previewLoadTimer = null;
+            previewImage.onload = null;
+            previewImage.onerror = null;
+            previewImage.removeAttribute("src");
+            previewFrame.onload = () => {
+                if (session !== previewSession) return;
+                previewState.hidden = true;
+                previewUnavailable.hidden = true;
+                previewCanvas.hidden = false;
+                previewCanvas.style.width = "100%";
+                previewCanvas.style.height = "100%";
+                previewFrame.hidden = false;
+                previewViewer.setAttribute("aria-busy", "false");
+                setZoomControls(false);
+            };
+            previewFrame.onerror = () => showPreviewFailure(session);
+            previewLoadTimer = window.setTimeout(() => showPreviewFailure(session), 15000);
+            previewFrame.src = frameUrl;
+        };
         previewLoadTimer = window.setTimeout(() => showPreviewFailure(session), 15000);
         previewImage.src = url;
     };
@@ -659,7 +778,10 @@
 
     const hasUnsavedModalChange = () => Boolean(
         canEditAttestation && activeRow && modalStatus
-        && modalStatus.value !== normalizeStatus(activeRow.attestation_status)
+        && (
+            modalStatus.value !== normalizeStatus(activeRow.attestation_status)
+            || (modalStatus.value === "invalid" && invalidRemarkText?.value.trim())
+        )
     );
 
     const updateStatusEditor = () => {
@@ -667,8 +789,10 @@
         const selected = normalizeStatus(modalStatus.value);
         const persisted = normalizeStatus(activeRow?.attestation_status);
         const changed = Boolean(activeRow && selected !== persisted);
+        const hasRemark = selected === "invalid" && Boolean(invalidRemarkText?.value.trim());
         modalStatus.parentElement.dataset.status = selected;
-        modalSave.disabled = savePending || !changed;
+        invalidRemarkField.hidden = selected !== "invalid";
+        modalSave.disabled = savePending || (!changed && !hasRemark);
         modalStatusChanged.hidden = !changed;
         modalStatusChanged.textContent = changed ? `Changed from ${statusLabels[persisted]}` : "";
         updateQueueNavigation();
@@ -704,6 +828,8 @@
         modalPayment.replaceChildren(paymentBadge(row.payment_status));
         setStatusBadge(modalCurrentStatus, row.attestation_status);
         if (modalStatus) modalStatus.value = normalizeStatus(row.attestation_status);
+        if (invalidRemarkText) invalidRemarkText.value = "";
+        if (invalidRemarkCount) invalidRemarkCount.textContent = "0";
         setModalFeedback("");
         const session = preparePreview(name);
         updateStatusEditor();
@@ -796,6 +922,10 @@
         const visibleRow = latestPayload?.rows?.find((item) => item.id === row.id);
         if (visibleRow && visibleRow !== row) Object.assign(visibleRow, row);
         const tableRow = tableBody.querySelector(`tr[data-registration-id="${row.id}"]`);
+        tableRow?.classList.toggle(
+            "has-pending-remarks",
+            Number(row.pending_remark_count || 0) > 0,
+        );
         const statusCell = tableRow?.querySelector('[data-column-key="attestation_status"]');
         if (statusCell) {
             const badge = document.createElement("span");
@@ -822,7 +952,8 @@
     const saveAttestationStatus = () => {
         if (!canEditAttestation || !activeRow || !modalStatus || !modalSave) return;
         const status = modalStatus.value;
-        if (status === normalizeStatus(activeRow.attestation_status)) {
+        const remark = status === "invalid" ? invalidRemarkText?.value.trim() || "" : "";
+        if (status === normalizeStatus(activeRow.attestation_status) && !remark) {
             updateStatusEditor();
             return;
         }
@@ -830,6 +961,7 @@
         const params = new URLSearchParams({batch: batchSelect.value});
         savePending = true;
         modalStatus.disabled = true;
+        if (invalidRemarkText) invalidRemarkText.disabled = true;
         modalSave.disabled = true;
         modalSave.textContent = "Saving…";
         setModalFeedback("Saving Attestation Status…");
@@ -842,7 +974,7 @@
                 "Content-Type": "application/json",
                 "X-CSRFToken": root.dataset.csrfToken,
             },
-            body: JSON.stringify({status}),
+            body: JSON.stringify(remark ? {status, remark} : {status}),
         })
             .then((response) => response.ok
                 ? response.json()
@@ -853,10 +985,17 @@
                 activeRow.attestation_status = payload.status;
                 activeRow.last_reviewed_by = payload.updated_by;
                 activeRow.last_reviewed_at = payload.updated_at;
+                if (payload.remark) {
+                    activeRow.pending_remark_count = Number(activeRow.pending_remark_count || 0) + 1;
+                    invalidRemarkText.value = "";
+                    invalidRemarkCount.textContent = "0";
+                }
                 setStatusBadge(modalCurrentStatus, payload.status);
                 updateVisibleAttestationRow(activeRow);
                 showUpdateFeedback(`Attestation Status changed to ${payload.label}.`);
-                setModalFeedback(`Attestation Status saved as ${payload.label}.`);
+                setModalFeedback(payload.remark
+                    ? `Attestation Status saved as ${payload.label}, with a Pending remark.`
+                    : `Attestation Status saved as ${payload.label}.`);
                 refreshAttestationCounts();
             })
             .catch((error) => {
@@ -865,6 +1004,7 @@
             .finally(() => {
                 savePending = false;
                 modalStatus.disabled = false;
+                if (invalidRemarkText) invalidRemarkText.disabled = false;
                 modalSave.textContent = "Save Status";
                 updateStatusEditor();
                 updateQueueNavigation();
@@ -1058,6 +1198,83 @@
             });
     };
 
+    const registrationDetailValue = (row, key) => {
+        if (key === "attestation_status") return statusLabels[normalizeStatus(row[key])];
+        return displayValue(row[key]);
+    };
+
+    const renderRegistrationDetails = (row) => {
+        const groups = registrationDetailGroups.map((group) => {
+            const section = document.createElement("section");
+            section.className = "registration-detail-group";
+            const heading = document.createElement("h3");
+            heading.textContent = group.label;
+            const list = document.createElement("dl");
+            group.fields.forEach(([key, label]) => {
+                const field = document.createElement("div");
+                field.className = "registration-detail-field";
+                const term = document.createElement("dt");
+                term.textContent = label;
+                const value = document.createElement("dd");
+                if (key === "attestation_form" && safeExternalUrl(row[key])) {
+                    const link = document.createElement("a");
+                    link.href = safeExternalUrl(row[key]);
+                    link.target = "_blank";
+                    link.rel = "noopener noreferrer";
+                    link.textContent = "Open submitted form ↗";
+                    value.append(link);
+                } else {
+                    value.textContent = registrationDetailValue(row, key);
+                }
+                field.append(term, value);
+                list.append(field);
+            });
+            section.append(heading, list);
+            return section;
+        });
+        detailsContent.replaceChildren(...groups);
+    };
+
+    const closeRegistrationDetails = () => {
+        if (detailsModal.hidden) return false;
+        detailsModal.hidden = true;
+        document.body.classList.remove("registrant-modal-open");
+        detailsContent.replaceChildren();
+        const focusTarget = detailsReturnFocus;
+        detailsReturnFocus = null;
+        focusTarget?.focus?.();
+        return true;
+    };
+
+    const openRegistrationDetails = (row, trigger) => {
+        detailsReturnFocus = trigger;
+        detailsName.textContent = [row.first_name, row.last_name].filter(Boolean).join(" ")
+            || "this registrant";
+        renderRegistrationDetails(row);
+        detailsModal.hidden = false;
+        document.body.classList.add("registrant-modal-open");
+        window.requestAnimationFrame(() => detailsCloseButton.focus());
+    };
+
+    const viewIcon = () => {
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.setAttribute("fill", "none");
+        svg.setAttribute("stroke", "currentColor");
+        svg.setAttribute("stroke-width", "1.8");
+        svg.setAttribute("stroke-linecap", "round");
+        svg.setAttribute("stroke-linejoin", "round");
+        svg.setAttribute("aria-hidden", "true");
+        const eye = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        eye.setAttribute("d", "M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z");
+        const pupil = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        pupil.setAttribute("cx", "12");
+        pupil.setAttribute("cy", "12");
+        pupil.setAttribute("r", "2.5");
+        svg.append(eye, pupil);
+        return svg;
+    };
+
     const editIcon = () => {
         const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
         svg.setAttribute("viewBox", "0 0 24 24");
@@ -1130,6 +1347,13 @@
         actionsMenu.setAttribute("aria-label", "Registrant actions");
         actionsMenu.hidden = true;
 
+        actionsViewItem = document.createElement("button");
+        actionsViewItem.type = "button";
+        actionsViewItem.setAttribute("role", "menuitem");
+        const viewLabel = document.createElement("span");
+        viewLabel.textContent = "View";
+        actionsViewItem.append(viewIcon(), viewLabel);
+
         actionsAttestationItem = document.createElement("button");
         actionsAttestationItem.type = "button";
         actionsAttestationItem.setAttribute("role", "menuitem");
@@ -1144,6 +1368,12 @@
         actionsRemarksLabel.textContent = "Remarks";
         actionsRemarksItem.append(commentIcon(), actionsRemarksLabel);
 
+        actionsViewItem.addEventListener("click", () => {
+            const row = actionsMenuRow;
+            const trigger = actionsMenuTrigger;
+            closeActionsMenu();
+            if (row && trigger) openRegistrationDetails(row, trigger);
+        });
         actionsAttestationItem.addEventListener("click", () => {
             const row = actionsMenuRow;
             const trigger = actionsMenuTrigger;
@@ -1157,7 +1387,8 @@
             if (row && trigger && hasRemarksUi) openRemarksModal(row, trigger);
         });
         actionsMenu.addEventListener("keydown", (event) => {
-            const items = [actionsAttestationItem, actionsRemarksItem].filter((item) => !item.disabled);
+            const items = [actionsViewItem, actionsAttestationItem, actionsRemarksItem]
+                .filter((item) => !item.disabled);
             const index = items.indexOf(document.activeElement);
             if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
                 event.preventDefault();
@@ -1173,7 +1404,7 @@
                 closeActionsMenu();
             }
         });
-        actionsMenu.append(actionsAttestationItem, actionsRemarksItem);
+        actionsMenu.append(actionsViewItem, actionsAttestationItem, actionsRemarksItem);
         document.body.append(actionsMenu);
     };
 
@@ -1193,7 +1424,8 @@
         trigger.setAttribute("aria-expanded", "true");
         actionsMenu.hidden = false;
         positionActionsMenu();
-        const items = [actionsAttestationItem, actionsRemarksItem].filter((item) => !item.disabled);
+        const items = [actionsViewItem, actionsAttestationItem, actionsRemarksItem]
+            .filter((item) => !item.disabled);
         (focusLast ? items[items.length - 1] : items[0])?.focus();
     };
 
@@ -1524,6 +1756,9 @@
         if (latestPayload) renderTable(latestPayload);
     });
 
+    detailsModal.querySelectorAll("[data-registration-details-close]").forEach((control) => {
+        control.addEventListener("click", closeRegistrationDetails);
+    });
     modal.querySelectorAll("[data-attestation-close]").forEach((control) => {
         control.addEventListener("click", () => closeAttestationModal());
     });
@@ -1537,6 +1772,11 @@
     nextButton.addEventListener("click", () => navigateAttestationQueue(1));
     modalSave?.addEventListener("click", saveAttestationStatus);
     modalStatus?.addEventListener("change", () => {
+        setModalFeedback("");
+        updateStatusEditor();
+    });
+    invalidRemarkText?.addEventListener("input", () => {
+        invalidRemarkCount.textContent = String(invalidRemarkText.value.length);
         setModalFeedback("");
         updateStatusEditor();
     });
@@ -1578,6 +1818,28 @@
             closeActionsMenu(true);
             return;
         }
+        if (!detailsModal.hidden) {
+            if (event.key === "Escape") {
+                event.preventDefault();
+                closeRegistrationDetails();
+                return;
+            }
+            if (event.key !== "Tab") return;
+            const focusable = [...detailsDialog.querySelectorAll(
+                "a[href], button:not([disabled]), [tabindex]:not([tabindex='-1'])",
+            )].filter((element) => !element.hidden);
+            if (!focusable.length) return;
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+            return;
+        }
         if (hasRemarksUi && !remarksModal.hidden) {
             if (event.key === "Escape") {
                 event.preventDefault();
@@ -1608,7 +1870,7 @@
             }
             if (event.key !== "Tab") return;
             const focusable = [...modalDialog.querySelectorAll(
-                "a[href], button:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex='-1'])",
+                "a[href], button:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])",
             )].filter((element) => !element.hidden);
             if (!focusable.length) return;
             const first = focusable[0];
