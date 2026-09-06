@@ -266,7 +266,7 @@
             <span class="phase1-section-icon">{{ icon('location', 20) }}</span>
             <div><p class="eyebrow">Satellite Distribution</p><h2 id="dashboard-satellite-reporting-title">Participants by Satellite</h2></div>
         </div>
-        <span>{{ dashboard.satellites.participant_assignments|number }} participant-Satellite assignments</span>
+        <span>{{ dashboard.satellites.location_responses|number }} participant location responses</span>
     </header>
     <div class="dashboard-satellite-reporting-grid">
         <article class="dashboard-satellite-category-chart" aria-labelledby="dashboard-satellite-category-title">
@@ -297,7 +297,7 @@
                 <table class="dashboard-satellite-table">
                     <thead><tr><th>Satellite Name</th><th class="numeric"># of Participants</th><th class="numeric">%</th><th>Hub</th><th>Hub Group</th></tr></thead>
                     <tbody>
-                        {% for satellite in dashboard.satellites.rows %}<tr><td><strong>{{ satellite.name }}</strong></td><td class="numeric">{{ satellite.participants|number }}</td><td class="numeric">{{ satellite.percentage|percent }}</td><td>{{ satellite.hub_name }}</td><td>{{ satellite.group_name }}</td></tr>
+                        {% for satellite in dashboard.satellites.rows %}<tr class="{{ 'dashboard-hub-only-row' if satellite.hub_only else '' }}"><td><strong>{{ satellite.name }}</strong>{% if satellite.hub_only %}<small>Satellite not specified</small>{% endif %}</td><td class="numeric">{{ satellite.participants|number }}</td><td class="numeric">{{ satellite.percentage|percent }}</td><td>{{ satellite.hub_name }}</td><td>{{ satellite.group_name }}</td></tr>
                         {% else %}<tr><td class="empty-table" colspan="5"><strong>No Satellites match this search.</strong>{% if dashboard.satellites.query %}<a class="text-link" href="{{ dashboard_satellite_url(query='') }}">Clear search</a>{% endif %}</td></tr>{% endfor %}
                     </tbody>
                 </table>

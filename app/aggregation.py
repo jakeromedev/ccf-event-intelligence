@@ -828,6 +828,8 @@ def dashboard_satellite_metrics(db, event_id, batch_id, query="", page=1):
         return {
             "query": query,
             "participant_assignments": 0,
+            "location_responses": 0,
+            "hub_only_participants": 0,
             "categorized_participants": 0,
             "categories": empty_categories,
             "rows": [],
@@ -874,22 +876,67 @@ def dashboard_satellite_metrics(db, event_id, batch_id, query="", page=1):
         """,
         params,
     ).fetchall()
+    hub_only_rows = db.execute(
+        EFFECTIVE_ASSOCIATIONS_CTE
+        + """
+        SELECT hub.id, hub.name, hub.is_main,
+               hub_group.code group_code, hub_group.name group_name,
+               COUNT(DISTINCT participant.id) participants
+        FROM curated_registrants participant
+        JOIN curated_registrant_sources source
+          ON source.event_id = participant.event_id
+         AND source.batch_id = participant.batch_id
+         AND source.curated_registrant_id = participant.id
+        JOIN registrants raw
+          ON raw.batch_id = source.batch_id AND raw.id = source.registrant_id
+        JOIN satellite_hubs hub
+          ON LOWER(hub.normalized_name) = LOWER(TRIM(raw.b1g_satellite_hub_raw))
+        LEFT JOIN hub_groups hub_group ON hub_group.id = hub.hub_group_id
+        WHERE participant.event_id = ? AND participant.batch_id = ?
+          AND participant.registration_type = 'participant'
+          AND NULLIF(TRIM(COALESCE(raw.satellite_name, '')), '') IS NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM effective_associations assigned
+              WHERE assigned.event_id = participant.event_id
+                AND assigned.batch_id = participant.batch_id
+                AND assigned.curated_registrant_id = participant.id
+          )
+        GROUP BY hub.id, hub.name, hub.is_main,
+                 hub_group.code, hub_group.name
+        """,
+        (event_id, batch_id),
+    ).fetchall()
     participant_assignments = sum(row["participants"] for row in rows)
+    hub_only_participants = sum(row["participants"] for row in hub_only_rows)
+    location_responses = participant_assignments + hub_only_participants
     satellite_rows = [
         {
             "id": row["id"],
             "name": row["name"],
             "participants": row["participants"],
-            "percentage": (
-                row["participants"] / participant_assignments * 100
-                if participant_assignments
-                else 0
-            ),
             "hub_name": row["hub_name"] or "Needs Mapping",
             "group_name": row["group_name"] or "Needs Mapping",
+            "hub_only": False,
         }
         for row in rows
     ]
+    satellite_rows.extend(
+        {
+            "id": -row["id"],
+            "name": row["name"],
+            "participants": row["participants"],
+            "hub_name": row["name"],
+            "group_name": row["group_name"] or "Needs Mapping",
+            "hub_only": True,
+        }
+        for row in hub_only_rows
+    )
+    for row in satellite_rows:
+        row["percentage"] = (
+            row["participants"] / location_responses * 100
+            if location_responses
+            else 0
+        )
     satellite_rows.sort(
         key=lambda item: (-item["participants"], item["name"].casefold(), item["id"])
     )
@@ -937,6 +984,10 @@ def dashboard_satellite_metrics(db, event_id, batch_id, query="", page=1):
             if row["category_key"] in counts
         }
     )
+    for row in hub_only_rows:
+        category_key = "main" if row["is_main"] else row["group_code"]
+        if category_key in counts:
+            counts[category_key] += row["participants"]
     category_total = sum(counts.values())
     cursor = 0.0
     categories = []
@@ -958,6 +1009,8 @@ def dashboard_satellite_metrics(db, event_id, batch_id, query="", page=1):
     return {
         "query": query,
         "participant_assignments": participant_assignments,
+        "location_responses": location_responses,
+        "hub_only_participants": hub_only_participants,
         "categorized_participants": category_total,
         "categories": categories,
         "rows": visible_rows,

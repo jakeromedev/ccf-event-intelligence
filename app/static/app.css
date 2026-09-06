@@ -1219,6 +1219,9 @@ button.quality-summary-card:focus-visible { outline: 3px solid rgba(0, 166, 178,
 .dashboard-satellite-table td { padding: 11px 13px; font-size: 9px; }
 .dashboard-satellite-table th { white-space: nowrap; }
 .dashboard-satellite-table td strong { font-size: 10px; }
+.dashboard-satellite-table td:first-child small { margin-top: 3px; display: block; color: var(--b1g-text-muted); font-size: 7px; font-weight: 700; }
+.dashboard-satellite-table .dashboard-hub-only-row td { background: #fffaf2; }
+.dashboard-satellite-table .dashboard-hub-only-row td:first-child { box-shadow: inset 3px 0 #d49a34; }
 .dashboard-satellite-table-card .satellite-pagination { padding-inline: 16px; }
 @media (max-width: 1050px) {
     .dashboard-satellite-reporting-grid { grid-template-columns: 1fr; }

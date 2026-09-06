@@ -2803,6 +2803,96 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertIn(b"No linked Satellites match these filters", empty.data)
         self.assertIn(b"Clear filters", empty.data)
 
+    def test_dashboard_satellite_table_includes_hub_only_icp_responses(self):
+        batch_id = self._process(self.event_a)
+        with self.app.app_context():
+            db = get_db()
+            baseline = dashboard_satellite_metrics(db, self.event_a, batch_id)
+            outside_before = next(
+                item["participants"]
+                for item in baseline["categories"]
+                if item["key"] == "outside_metro_manila"
+            )
+            group = db.execute(
+                "SELECT id FROM hub_groups WHERE code = 'outside_metro_manila'"
+            ).fetchone()
+            if group is None:
+                group_id = db.execute(
+                    """
+                    INSERT INTO hub_groups (code, name, sort_order)
+                    VALUES ('outside_metro_manila', 'Outside Metro Manila Hubs', 1)
+                    """
+                ).lastrowid
+            else:
+                group_id = group["id"]
+            hub_id = db.execute(
+                """
+                INSERT INTO satellite_hubs (
+                    hub_group_id, name, normalized_name, is_main
+                ) VALUES (?, 'ICP', 'icp', 0)
+                """,
+                (group_id,),
+            ).lastrowid
+            db.execute(
+                """
+                INSERT INTO registrants (
+                    batch_id, registration_code, ticket_code, last_name,
+                    gender_raw, birth_month_raw, birth_year_raw,
+                    b1g_satellite_hub_raw, affiliation, registration_type,
+                    ticket_matched, checked_in
+                ) VALUES (?, 'R-ICP-HUB', 'T-ICP-HUB', 'Hubonly',
+                          'Female', 'January', '1990', ' ICP ', 'Unknown',
+                          'participant', 1, 0)
+                """,
+                (batch_id,),
+            )
+            rebuild_batch_curation(db, batch_id)
+            db.commit()
+            dashboard = dashboard_satellite_metrics(
+                db, self.event_a, batch_id, query="ICP"
+            )
+
+        self.assertEqual(1, dashboard["pagination"]["total"])
+        self.assertEqual(
+            {
+                "id": -hub_id,
+                "name": "ICP",
+                "participants": 1,
+                "hub_name": "ICP",
+                "group_name": "Outside Metro Manila Hubs",
+                "hub_only": True,
+            },
+            {
+                key: dashboard["rows"][0][key]
+                for key in (
+                    "id",
+                    "name",
+                    "participants",
+                    "hub_name",
+                    "group_name",
+                    "hub_only",
+                )
+            },
+        )
+        self.assertEqual(
+            dashboard["participant_assignments"] + 1,
+            dashboard["location_responses"],
+        )
+        self.assertEqual(1, dashboard["hub_only_participants"])
+        outside_after = next(
+            item["participants"]
+            for item in dashboard["categories"]
+            if item["key"] == "outside_metro_manila"
+        )
+        self.assertEqual(outside_before + 1, outside_after)
+
+        page = self.app.test_client().get(
+            "/events/{}?satellite_q=ICP".format(self.event_a)
+        )
+        self.assertIn(b">ICP</strong>", page.data)
+        self.assertIn(b"Satellite not specified", page.data)
+        self.assertIn(b"participant location responses", page.data)
+
     def test_data_quality_filters_pagination_sorting_scope_and_privacy(self):
         batch_a = self._process(self.event_a)
         self._add_quality_fixture(batch_a)
