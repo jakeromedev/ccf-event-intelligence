@@ -372,6 +372,7 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         self.assertEqual(
             [
                 "Actions", "AF Status", "Remarks", "Payment Status",
+                "FB Group",
                 "First Name", "Last Name", "Email Address", "Mobile Number",
                 "Gender", "Birth Month", "Birth Year", "Life Stage", "Satellite", "Shirt Size",
                 "Transportation To MMRC", "Transportation From MMRC",
@@ -402,6 +403,7 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         self.assertEqual("PLATE-001", row["plate_number"])
         self.assertEqual("https://files.example.com/form-1.pdf", row["attestation_form"])
         self.assertEqual("pending", row["attestation_status"])
+        self.assertEqual("not_joined", row["facebook_group_status"])
         self.assertEqual(0, row["pending_remark_count"])
         self.assertEqual(0, row["resolved_remark_count"])
         self.assertEqual(0, row["total_remark_count"])
@@ -417,12 +419,20 @@ class RegistrationsIntegrationTests(unittest.TestCase):
             payload["column_options"]["remarks"],
         )
         self.assertEqual(
+            ["joined", "not_joined"],
+            [
+                item["value"]
+                for item in payload["column_options"]["facebook_group_status"]
+            ],
+        )
+        self.assertEqual(
             {
                 "total_registrations": 30,
                 "attestation_pending": 30,
                 "attestation_verified": 0,
                 "attestation_invalid": 0,
                 "payment_validated": 15,
+                "facebook_group_joined": 0,
             },
             payload["summary"],
         )
@@ -515,6 +525,39 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         self.assertEqual("pending", new_row["attestation_status"])
         self.assertIsNone(new_row["last_reviewed_by"])
         self.assertIsNone(new_row["last_reviewed_at"])
+
+    def test_reimport_preserves_facebook_group_tag_for_same_participant(self):
+        initial_batch_id = self._process(self.event_a)
+        initial_row = next(
+            row
+            for row in self._data(per_page=50)["rows"]
+            if row["registration_code"] == "R-001"
+        )
+        with self.app.app_context():
+            db = get_db()
+            participant_id = resolve_attestation_participant(
+                db, self.event_a, initial_batch_id, initial_row["id"]
+            )
+            db.execute(
+                """
+                INSERT INTO registrant_facebook_group_memberships (
+                    event_id, attestation_participant_id, joined
+                ) VALUES (?, ?, 1)
+                """,
+                (self.event_a, participant_id),
+            )
+            db.commit()
+
+        self._write_fixture(31, first_satellite="B1G Gen. Trias")
+        replacement_batch_id = self._process(self.event_a)
+        replacement_row = next(
+            row
+            for row in self._data(per_page=50)["rows"]
+            if row["registration_code"] == "R-001"
+        )
+        self.assertNotEqual(initial_batch_id, replacement_batch_id)
+        self.assertNotEqual(initial_row["id"], replacement_row["id"])
+        self.assertEqual("joined", replacement_row["facebook_group_status"])
 
     def test_reimport_reuses_stable_attestation_participant_ownership(self):
         initial_batch_id = self._process(self.event_a)
@@ -1487,7 +1530,10 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         payload = self._data(per_page=25)
         sortable = [column["key"] for column in payload["columns"] if column["sortable"]]
         self.assertEqual(
-            ["attestation_status", "payment_status", "first_name", "last_name", "shirt_size"],
+            [
+                "attestation_status", "payment_status", "facebook_group_status",
+                "first_name", "last_name", "shirt_size",
+            ],
             sortable,
         )
 
@@ -1619,6 +1665,8 @@ class RegistrationsIntegrationTests(unittest.TestCase):
             mutations = rule.methods - {"GET", "HEAD", "OPTIONS"}
             if mutations:
                 if rule.rule.endswith("/<int:registrant_id>/attestation"):
+                    self.assertEqual({"PATCH"}, mutations)
+                elif rule.rule.endswith("/<int:registrant_id>/facebook-group"):
                     self.assertEqual({"PATCH"}, mutations)
                 elif rule.rule.endswith("/<int:registrant_id>/remarks"):
                     self.assertEqual({"POST"}, mutations)
@@ -2095,6 +2143,81 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
                 (self.registrant_id,),
             ).fetchone()
             self.assertEqual("registration-operator", reviewer["username"])
+
+    def test_registration_role_tags_facebook_group_with_scope_and_audit(self):
+        self._login(
+            "registration-operator", "Registration-Operator-Password-1!"
+        )
+        update_url = "/events/{}/registrations/{}/facebook-group".format(
+            self.event_id, self.registrant_id
+        )
+        csrf_token = self._csrf_token()
+        self.assertEqual(
+            400,
+            self.client.patch(
+                update_url,
+                json={"joined": "yes"},
+                headers={"X-CSRFToken": csrf_token},
+            ).status_code,
+        )
+        tagged = self.client.patch(
+            update_url,
+            json={"joined": True},
+            headers={"X-CSRFToken": csrf_token},
+        )
+        self.assertEqual(200, tagged.status_code)
+        self.assertEqual("joined", tagged.get_json()["status"])
+        self.assertEqual("registration-operator", tagged.get_json()["updated_by"])
+
+        table_payload = self.client.get(
+            "/events/{}/registrations/data".format(self.event_id)
+        ).get_json()
+        self.assertEqual("joined", table_payload["rows"][0]["facebook_group_status"])
+        self.assertEqual(1, table_payload["summary"]["facebook_group_joined"])
+        joined_only = self.client.get(
+            "/events/{}/registrations/data".format(self.event_id),
+            query_string={
+                "filters": json.dumps(
+                    [{
+                        "field": "facebook_group_status",
+                        "operator": "equals",
+                        "value": "joined",
+                    }]
+                )
+            },
+        ).get_json()
+        self.assertEqual(1, joined_only["pagination"]["total"])
+
+        cross_event_url = "/events/{}/registrations/{}/facebook-group".format(
+            self.event_id, self.other_registrant_id
+        )
+        self.assertEqual(
+            404,
+            self.client.patch(
+                cross_event_url,
+                json={"joined": True},
+                headers={"X-CSRFToken": csrf_token},
+            ).status_code,
+        )
+        untagged = self.client.patch(
+            update_url,
+            json={"joined": False},
+            headers={"X-CSRFToken": csrf_token},
+        )
+        self.assertEqual(200, untagged.status_code)
+        self.assertEqual("not_joined", untagged.get_json()["status"])
+        with self.app.app_context():
+            audit = get_db().execute(
+                """
+                SELECT membership.joined, users.username
+                FROM registrant_facebook_group_memberships membership
+                JOIN users ON users.id = membership.updated_by_user_id
+                WHERE membership.event_id = ?
+                """,
+                (self.event_id,),
+            ).fetchone()
+            self.assertFalse(audit["joined"])
+            self.assertEqual("registration-operator", audit["username"])
 
     def test_registrant_remarks_api_is_scoped_attributed_and_resolvable(self):
         self._login(

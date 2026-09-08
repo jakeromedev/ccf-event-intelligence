@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from .auth import (
     admin_required,
     can_edit_attestation_verification,
+    can_edit_facebook_group_membership,
     can_edit_registrant_remarks,
     can_view_admin_tables,
     can_view_registrations,
@@ -51,6 +52,7 @@ from .registrations import (
     registrations_data,
     resolve_registrant_remark,
     update_attestation_verification,
+    update_facebook_group_membership,
 )
 from .registrant_satellite_assignments import (
     RegistrantSatelliteAssignmentError,
@@ -576,6 +578,7 @@ def event_registrations(event_id):
         selected_batch=selected_batch,
         batches=event_batches(db, event_id),
         attestation_edit_allowed=can_edit_attestation_verification(),
+        facebook_group_edit_allowed=can_edit_facebook_group_membership(),
         remarks_edit_allowed=can_edit_registrant_remarks(),
     )
 
@@ -592,6 +595,49 @@ def event_registrations_data(event_id):
         )
     except AdminTableQueryError as exc:
         return jsonify({"error": str(exc)}), 400
+    return jsonify(result)
+
+
+@bp.patch(
+    "/events/<int:event_id>/registrations/<int:registrant_id>/facebook-group"
+)
+@registrations_access_required
+def update_registration_facebook_group(event_id, registrant_id):
+    if not can_edit_facebook_group_membership():
+        abort(403)
+    db = get_db()
+    get_event_or_404(event_id)
+    batch = active_batch(db, event_id)
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "A JSON request body is required."}), 400
+    if set(payload) != {"joined"}:
+        return jsonify({"error": "Only the Facebook Group joined tag may be supplied."}), 400
+    try:
+        result = update_facebook_group_membership(
+            db,
+            event_id,
+            batch["id"] if batch else None,
+            registrant_id,
+            request.args.get("batch"),
+            payload.get("joined"),
+            current_user.id,
+        )
+    except AdminTableQueryError as exc:
+        return jsonify({"error": str(exc)}), 400
+    if result is None:
+        abort(404)
+    current_app.logger.info(
+        "registrant_facebook_group_updated",
+        extra={
+            "event": "registrant_facebook_group_updated",
+            "event_id": event_id,
+            "batch_id": result["batch_id"],
+            "registrant_id": registrant_id,
+            "user_id": current_user.id,
+            "joined": result["joined"],
+        },
+    )
     return jsonify(result)
 
 

@@ -29,6 +29,10 @@ ATTESTATION_STATUS_LABELS = {
     "verified": "Verified",
     "invalid": "Invalid",
 }
+FACEBOOK_GROUP_STATUS_LABELS = {
+    "joined": "Joined",
+    "not_joined": "Not Joined",
+}
 
 
 SOURCE_HEADERS = {
@@ -155,6 +159,17 @@ def registration_columns(db):
             filterable=True,
             sortable=True,
             renderer="payment_status",
+        ),
+        _registration_column(
+            "facebook_group_status",
+            "FB Group",
+            "CASE WHEN COALESCE(facebook_group.joined, 0) = 1 "
+            "THEN 'joined' ELSE 'not_joined' END",
+            data_type="select",
+            group="Registrant Details",
+            filterable=True,
+            sortable=True,
+            renderer="facebook_group_status",
         ),
         _registration_column(
             "first_name",
@@ -346,6 +361,10 @@ def _base_sql():
              participant_mapping.attestation_participant_id
         LEFT JOIN users reviewer
           ON reviewer.id = verification.updated_by_user_id
+        LEFT JOIN registrant_facebook_group_memberships facebook_group
+          ON facebook_group.event_id = batch.event_id
+         AND facebook_group.attestation_participant_id =
+             participant_mapping.attestation_participant_id
     """
 
 
@@ -467,7 +486,9 @@ def registrations_data(db, event_id, active_batch_id, args):
                 AS attestation_invalid,
             COUNT(CASE
                 WHEN LOWER(TRIM(ticket.payment_status)) = 'payment validated' THEN 1
-            END) AS payment_validated
+            END) AS payment_validated,
+            COUNT(CASE WHEN facebook_group.joined = 1 THEN 1 END)
+                AS facebook_group_joined
         {base} WHERE {where}
         """.format(base=base_sql, where=where_sql),
         params,
@@ -513,6 +534,10 @@ def registrations_data(db, event_id, active_batch_id, args):
     ]
     column_options["remarks"] = [
         {"value": "has_pending", "label": "Has Pending Remarks"}
+    ]
+    column_options["facebook_group_status"] = [
+        {"value": value, "label": label}
+        for value, label in FACEBOOK_GROUP_STATUS_LABELS.items()
     ]
     return {
         "batch": batch_scope,
@@ -659,6 +684,66 @@ def update_attestation_verification(
             _select_remark(db, event_id, participant_id, remark_id)
         )
     return result
+
+
+def update_facebook_group_membership(
+    db,
+    event_id,
+    active_batch_id,
+    registrant_id,
+    batch_argument,
+    joined,
+    updater_user_id,
+):
+    """Set a durable, event-scoped Facebook Group membership tag."""
+    ownership = _scoped_registration_participant(
+        db, event_id, active_batch_id, registrant_id, batch_argument
+    )
+    if ownership is None:
+        return None
+    registration, participant_id = ownership
+    if not isinstance(joined, bool):
+        raise AdminTableQueryError("Facebook Group joined must be true or false.")
+
+    updated_at = utc_now()
+    updated = db.execute(
+        """
+        UPDATE registrant_facebook_group_memberships
+        SET joined = ?, updated_by_user_id = ?, updated_at = ?
+        WHERE event_id = ? AND attestation_participant_id = ?
+        """,
+        (joined, updater_user_id, updated_at, event_id, participant_id),
+    )
+    if updated.rowcount == 0:
+        db.execute(
+            """
+            INSERT INTO registrant_facebook_group_memberships (
+                event_id, attestation_participant_id, joined,
+                updated_by_user_id, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event_id,
+                participant_id,
+                joined,
+                updater_user_id,
+                updated_at,
+                updated_at,
+            ),
+        )
+    db.commit()
+    updater = db.execute(
+        "SELECT username FROM users WHERE id = ?", (updater_user_id,)
+    ).fetchone()
+    status = "joined" if joined else "not_joined"
+    return {
+        "batch_id": registration["batch_id"],
+        "joined": joined,
+        "status": status,
+        "label": FACEBOOK_GROUP_STATUS_LABELS[status],
+        "updated_by": updater["username"] if updater else None,
+        "updated_at": format_operational_datetime(updated_at),
+    }
 
 
 def _scoped_registration_participant(
@@ -868,4 +953,5 @@ __all__ = [
     "registrations_data",
     "resolve_registrant_remark",
     "update_attestation_verification",
+    "update_facebook_group_membership",
 ]

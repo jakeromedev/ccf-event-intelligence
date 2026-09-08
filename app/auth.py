@@ -45,6 +45,7 @@ CAPABILITY_VIEW_DASHBOARD = "dashboard.view"
 CAPABILITY_VIEW_REGISTRATIONS = "registrations.view"
 CAPABILITY_EDIT_ATTESTATION = "registrations.attestation.edit"
 CAPABILITY_EDIT_REMARKS = "registrations.remarks.edit"
+CAPABILITY_EDIT_FACEBOOK_GROUP = "registrations.facebook_group.edit"
 CAPABILITY_VIEW_ANALYTICS = "analytics.view"
 CAPABILITY_VIEW_SATELLITES = "satellites.view"
 CAPABILITY_MANAGE_SATELLITE_SETTINGS = "satellites.settings.manage"
@@ -62,6 +63,7 @@ REGISTRATION_CAPABILITIES = frozenset(
         CAPABILITY_VIEW_SATELLITES,
         CAPABILITY_EDIT_ATTESTATION,
         CAPABILITY_EDIT_REMARKS,
+        CAPABILITY_EDIT_FACEBOOK_GROUP,
     }
 )
 STANDARD_USER_CAPABILITIES = frozenset(
@@ -71,6 +73,7 @@ STANDARD_USER_CAPABILITIES = frozenset(
         CAPABILITY_VIEW_SATELLITES,
         CAPABILITY_EDIT_ATTESTATION,
         CAPABILITY_EDIT_REMARKS,
+        CAPABILITY_EDIT_FACEBOOK_GROUP,
         CAPABILITY_CREATE_EVENTS,
         CAPABILITY_VIEW_EVENT_SETTINGS,
     }
@@ -108,6 +111,7 @@ REGISTRATION_ENDPOINT_CAPABILITIES = {
     "dashboard.update_registration_attestation": CAPABILITY_EDIT_ATTESTATION,
     "dashboard.registration_remarks": CAPABILITY_VIEW_REGISTRATIONS,
     "dashboard.resolve_registration_remark": CAPABILITY_EDIT_REMARKS,
+    "dashboard.update_registration_facebook_group": CAPABILITY_EDIT_FACEBOOK_GROUP,
 }
 
 # Checking this when a username does not exist reduces timing differences
@@ -240,6 +244,15 @@ def can_edit_registrant_remarks() -> bool:
         current_user.is_authenticated
         and current_user.status == "approved"
         and has_capability(CAPABILITY_EDIT_REMARKS)
+    )
+
+
+def can_edit_facebook_group_membership() -> bool:
+    """Require an attributable operator for Facebook Group tagging."""
+    return bool(
+        current_user.is_authenticated
+        and current_user.status == "approved"
+        and has_capability(CAPABILITY_EDIT_FACEBOOK_GROUP)
     )
 
 

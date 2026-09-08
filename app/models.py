@@ -519,6 +519,54 @@ class AttestationVerification(Base):
     )
 
 
+class RegistrantFacebookGroupMembership(Base):
+    """Application-owned Facebook Group tag for one durable participant."""
+
+    __tablename__ = "registrant_facebook_group_memberships"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["event_id", "attestation_participant_id"],
+            ["attestation_participants.event_id", "attestation_participants.id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "event_id",
+            "attestation_participant_id",
+            name="uq_registrant_fb_group_memberships_participant",
+        ),
+        Index(
+            "idx_registrant_fb_group_memberships_joined",
+            "event_id",
+            "joined",
+        ),
+        Index(
+            "idx_registrant_fb_group_memberships_updater",
+            "updated_by_user_id",
+        ),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    attestation_participant_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    joined: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("0")
+    )
+    updated_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ID_TYPE, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+    updated_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+    updated_by: Mapped[Optional[User]] = relationship(
+        foreign_keys=[updated_by_user_id]
+    )
+
+
 class RegistrantRemark(Base):
     """Application-owned operational note for one durable participant."""
 

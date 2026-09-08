@@ -17,11 +17,13 @@
     data-event-id="{{ event['id'] }}"
     data-data-url="{{ url_for('dashboard.event_registrations_data', event_id=event['id']) }}"
     data-update-url="{{ url_for('dashboard.update_registration_attestation', event_id=event['id'], registrant_id=0) }}"
+    data-facebook-group-url="{{ url_for('dashboard.update_registration_facebook_group', event_id=event['id'], registrant_id=0) }}"
     data-remarks-url="{{ url_for('dashboard.registration_remarks', event_id=event['id'], registrant_id=0) }}"
     data-csrf-token="{{ csrf_token() }}"
     data-column-preference-key="ccf-registrations-column-groups"
     data-has-active-batch="{{ 'true' if active_batch else 'false' }}"
     data-can-edit-attestation="{{ 'true' if attestation_edit_allowed else 'false' }}"
+    data-can-edit-facebook-group="{{ 'true' if facebook_group_edit_allowed else 'false' }}"
     data-can-edit-remarks="{{ 'true' if remarks_edit_allowed else 'false' }}">
     <header class="admin-table-heading">
         <div>
@@ -51,6 +53,7 @@
         <div><span>Attestation Verified</span><strong data-summary="attestation_verified">—</strong></div>
         <div><span>Attestation Invalid</span><strong data-summary="attestation_invalid">—</strong></div>
         <div><span>Payment Validated</span><strong data-summary="payment_validated">—</strong></div>
+        <div><span>Joined FB Group</span><strong data-summary="facebook_group_joined">—</strong></div>
     </div>
 
     <div class="registrations-quick-filters" aria-label="Attestation status quick filters">
@@ -186,7 +189,10 @@
         <header class="registrant-modal-header">
             <div>
                 <p class="eyebrow">REGISTRATION RECORD</p>
-                <h2 id="registration-details-title">Registration Details</h2>
+                <div class="registration-details-title-row">
+                    <h2 id="registration-details-title">Registration Details</h2>
+                    <span class="registration-details-facebook-badge" data-registration-details-facebook-group>Not Joined</span>
+                </div>
                 <p id="registration-details-description">Complete information for <strong data-registration-details-name>this registrant</strong>.</p>
             </div>
             <button class="registrant-modal-close" type="button" data-registration-details-close aria-label="Close Registration Details">&times;</button>
@@ -352,5 +358,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='registrations.js', v='20260908-registration-contact-details') }}" defer></script>
+<script src="{{ url_for('static', filename='registrations.js', v='20260908-facebook-group-details-badge') }}" defer></script>
 {% endblock %}

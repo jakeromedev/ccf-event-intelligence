@@ -37,6 +37,7 @@
     const detailsDialog = detailsModal.querySelector("[role='dialog']");
     const detailsCloseButton = detailsModal.querySelector(".registrant-modal-close");
     const detailsName = detailsModal.querySelector("[data-registration-details-name]");
+    const detailsFacebookGroup = detailsModal.querySelector("[data-registration-details-facebook-group]");
     const detailsContent = detailsModal.querySelector("[data-registration-details-content]");
     const modal = document.querySelector("[data-attestation-modal]");
     const modalDialog = modal.querySelector("[role='dialog']");
@@ -72,6 +73,7 @@
     const invalidRemarkText = modal.querySelector("[data-attestation-remark]");
     const invalidRemarkCount = modal.querySelector("[data-attestation-remark-count]");
     const canEditAttestation = root.dataset.canEditAttestation === "true";
+    const canEditFacebookGroup = root.dataset.canEditFacebookGroup === "true";
     const remarksModal = document.querySelector("[data-remarks-modal]");
     const remarksDialog = remarksModal?.querySelector("[role='dialog']");
     const remarksCloseButton = remarksModal?.querySelector(".registrant-modal-close");
@@ -217,6 +219,7 @@
     let remarksReturnFocus = null;
     let remarksMutationPending = false;
     let remarksRequestSession = 0;
+    const facebookGroupUpdates = new Set();
     let actionsMenu = null;
     let actionsMenuTrigger = null;
     let actionsMenuRow = null;
@@ -531,6 +534,47 @@
         badge.className = `registration-payment-badge${normalized.includes("validated") ? " is-validated" : normalized.includes("failed") || normalized.includes("cancel") ? " is-problem" : ""}`;
         badge.textContent = displayValue(value);
         return badge;
+    };
+
+    const updateFacebookGroupTag = (row, button) => {
+        if (!canEditFacebookGroup || facebookGroupUpdates.has(row.id)) return;
+        const joined = row.facebook_group_status !== "joined";
+        const name = [row.first_name, row.last_name].filter(Boolean).join(" ") || "Registrant";
+        const updateUrl = root.dataset.facebookGroupUrl.replace(
+            "/0/facebook-group",
+            `/${row.id}/facebook-group`,
+        );
+        const params = new URLSearchParams({batch: batchSelect.value});
+        facebookGroupUpdates.add(row.id);
+        button.disabled = true;
+        button.textContent = "Saving…";
+        fetch(`${updateUrl}?${params}`, {
+            method: "PATCH",
+            credentials: "same-origin",
+            headers: {
+                Accept: "application/json",
+                "Content-Type": "application/json",
+                "X-CSRFToken": root.dataset.csrfToken,
+            },
+            body: JSON.stringify({joined}),
+        })
+            .then((response) => response.ok
+                ? response.json()
+                : response.json().catch(() => ({})).then((payload) => Promise.reject(
+                    new Error(payload.error || "FB Group tag could not be updated."),
+                )))
+            .then((payload) => {
+                row.facebook_group_status = payload.status;
+                return loadData(false).then(() => {
+                    showUpdateFeedback(`${name}: FB Group tag changed to ${payload.label}.`);
+                });
+            })
+            .catch((error) => {
+                button.disabled = false;
+                button.textContent = joined ? "Not Joined" : "Joined";
+                showUpdateFeedback(error.message || "FB Group tag could not be updated.", true);
+            })
+            .finally(() => facebookGroupUpdates.delete(row.id));
     };
 
     const setZoomControls = (enabled) => {
@@ -1207,6 +1251,9 @@
 
     const registrationDetailValue = (row, key) => {
         if (key === "attestation_status") return statusLabels[normalizeStatus(row[key])];
+        if (key === "facebook_group_status") {
+            return row[key] === "joined" ? "Joined" : "Not Joined";
+        }
         return displayValue(row[key]);
     };
 
@@ -1259,6 +1306,9 @@
         detailsReturnFocus = trigger;
         detailsName.textContent = [row.first_name, row.last_name].filter(Boolean).join(" ")
             || "this registrant";
+        const joinedFacebookGroup = row.facebook_group_status === "joined";
+        detailsFacebookGroup.textContent = joinedFacebookGroup ? "FB Group · Joined" : "FB Group · Not Joined";
+        detailsFacebookGroup.classList.toggle("is-joined", joinedFacebookGroup);
         renderRegistrationDetails(row);
         detailsModal.hidden = false;
         document.body.classList.add("registrant-modal-open");
@@ -1473,6 +1523,28 @@
         }
         if (column.renderer === "payment_status") {
             cell.append(paymentBadge(value));
+            return;
+        }
+        if (column.renderer === "facebook_group_status") {
+            const button = document.createElement("button");
+            const joined = value === "joined";
+            const name = [row.first_name, row.last_name].filter(Boolean).join(" ") || "registrant";
+            button.type = "button";
+            button.className = `registration-facebook-group-tag${joined ? " is-joined" : ""}`;
+            button.textContent = joined ? "Joined" : "Not Joined";
+            button.setAttribute("aria-pressed", String(joined));
+            button.setAttribute(
+                "aria-label",
+                canEditFacebookGroup
+                    ? `${joined ? "Remove" : "Add"} FB Group tag for ${name}`
+                    : `${name}: ${button.textContent} FB Group`,
+            );
+            button.disabled = !canEditFacebookGroup;
+            button.title = canEditFacebookGroup
+                ? "Click to update FB Group membership"
+                : "You do not have permission to update this tag";
+            button.addEventListener("click", () => updateFacebookGroupTag(row, button));
+            cell.append(button);
             return;
         }
         const displayed = displayValue(value);
