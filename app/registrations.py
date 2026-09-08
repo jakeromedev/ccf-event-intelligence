@@ -45,6 +45,23 @@ SOURCE_HEADERS = {
     ),
     "plate_number": ("Plate No", "Plate Number"),
     "attestation_form": ("Upload Your Accomplished Attestation Form Here",),
+    "dgroup_leader_name": (
+        "Complete Name Of Dgroup Leader",
+        "Dgroup Leader's Name",
+        "Dgroup Leader Name",
+        "Name Of Your Dgroup Leader",
+    ),
+    "facebook_link_or_name": (
+        "Social Media Account",
+        "FB Link/Name",
+        "Fb Link/Name",
+        "Facebook Link/Name",
+        "Facebook Link / Name",
+    ),
+    "ticket_reference_number": (
+        "Ticket Ref Number",
+        "Ticket Reference Number",
+    ),
 }
 
 
@@ -168,6 +185,29 @@ def registration_columns(db):
             _source_expression(db, "mobile_number"),
             group="Registrant Details",
             searchable=True,
+        ),
+        _registration_column(
+            "dgroup_leader_name",
+            "Dgroup Leader's Name",
+            _source_expression(db, "dgroup_leader_name"),
+            group="Registrant Details",
+            hidden=True,
+        ),
+        _registration_column(
+            "facebook_link_or_name",
+            "FB Link/Name",
+            _source_expression(db, "facebook_link_or_name"),
+            group="Registrant Details",
+            hidden=True,
+        ),
+        _registration_column(
+            "ticket_reference_number",
+            "Ticket Ref Number",
+            "COALESCE({}, ticket.buyer_reference)".format(
+                _source_expression(db, "ticket_reference_number")
+            ),
+            group="Registrant Details",
+            hidden=True,
         ),
         _registration_column(
             "gender",

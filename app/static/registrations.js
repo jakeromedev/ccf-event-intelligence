@@ -43,6 +43,7 @@
     const modalCloseButton = modal.querySelector(".registrant-modal-close");
     const modalName = modal.querySelector("[data-attestation-name]");
     const modalSatellite = modal.querySelector("[data-attestation-satellite]");
+    const modalDgroupLeader = modal.querySelector("[data-attestation-dgroup-leader]");
     const modalPayment = modal.querySelector("[data-attestation-payment]");
     const modalCurrentStatus = modal.querySelector("[data-attestation-current-status]");
     const modalStatus = modal.querySelector("[data-attestation-status]");
@@ -111,6 +112,9 @@
                 ["last_name", "Last Name"],
                 ["email_address", "Email Address"],
                 ["mobile_number", "Mobile Number"],
+                ["dgroup_leader_name", "Dgroup Leader's Name"],
+                ["facebook_link_or_name", "FB Link/Name"],
+                ["ticket_reference_number", "Ticket Ref Number"],
             ],
         },
         {
@@ -669,6 +673,7 @@
         previewImage.alt = `${registrantName || "Registrant"} submitted Attestation Form`;
         previewState.hidden = false;
         previewViewer.setAttribute("aria-busy", "true");
+        delete previewViewer.dataset.documentType;
         return session;
     };
 
@@ -710,6 +715,7 @@
             || /[?&](?:filename|name)=[^&]*\.pdf(?:&|$)/i.test(url)
             || frameUrl !== url;
         if (isPdfDocument) {
+            previewViewer.dataset.documentType = "pdf";
             previewFrame.onload = () => {
                 if (session !== previewSession) return;
                 window.clearTimeout(previewLoadTimer);
@@ -825,6 +831,7 @@
         const name = [row.first_name, row.last_name].filter(Boolean).join(" ");
         modalName.textContent = name || "Unnamed registrant";
         modalSatellite.textContent = displayValue(row.satellite);
+        modalDgroupLeader.textContent = displayValue(row.dgroup_leader_name);
         modalPayment.replaceChildren(paymentBadge(row.payment_status));
         setStatusBadge(modalCurrentStatus, row.attestation_status);
         if (modalStatus) modalStatus.value = normalizeStatus(row.attestation_status);
@@ -1216,12 +1223,14 @@
                 const term = document.createElement("dt");
                 term.textContent = label;
                 const value = document.createElement("dd");
-                if (key === "attestation_form" && safeExternalUrl(row[key])) {
+                if (["attestation_form", "facebook_link_or_name"].includes(key) && safeExternalUrl(row[key])) {
                     const link = document.createElement("a");
                     link.href = safeExternalUrl(row[key]);
                     link.target = "_blank";
                     link.rel = "noopener noreferrer";
-                    link.textContent = "Open submitted form ↗";
+                    link.textContent = key === "attestation_form"
+                        ? "Open submitted form ↗"
+                        : `${row[key]} ↗`;
                     value.append(link);
                 } else {
                     value.textContent = registrationDetailValue(row, key);

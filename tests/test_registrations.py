@@ -44,6 +44,7 @@ REGISTRANT_FIELDS = [
     "Which Local Satellite", "Which International Satellite", "Shirt Size",
     "Transportation From Ccf To Mmrc", "Transportation From Mmrc To Ccf",
     "Plate No", "Upload Your Accomplished Attestation Form Here",
+    "Complete Name Of Dgroup Leader", "Social Media Account",
 ]
 
 
@@ -283,6 +284,8 @@ class RegistrationsIntegrationTests(unittest.TestCase):
                     "Transportation From Mmrc To Ccf": transportation_from,
                     "Plate No": "PLATE-{}".format(identifier),
                     "Upload Your Accomplished Attestation Form Here": attestation_values.get(number, ""),
+                    "Complete Name Of Dgroup Leader": "Leader One" if number == 1 else "",
+                    "Social Media Account": "https://facebook.com/leader.one" if number == 1 else "",
                 }
             )
         write_csv(self.paths["tickets"], TICKET_FIELDS, tickets)
@@ -1322,8 +1325,16 @@ class RegistrationsIntegrationTests(unittest.TestCase):
             "last_reviewed_by", "last_reviewed_at", "gender", "birth_month",
             "birth_year", "life_stage", "satellite", "shirt_size",
             "transportation_to_mmrc", "transportation_from_mmrc", "plate_number",
+            "dgroup_leader_name", "facebook_link_or_name", "ticket_reference_number",
         ):
             self.assertIn('["{}",'.format(key), script)
+        first_row = self._data(per_page=25)["rows"][0]
+        self.assertEqual("Leader One", first_row["dgroup_leader_name"])
+        self.assertEqual("https://facebook.com/leader.one", first_row["facebook_link_or_name"])
+        self.assertEqual("B-1", first_row["ticket_reference_number"])
+        self.assertIn("data-attestation-dgroup-leader", page)
+        self.assertIn('previewViewer.dataset.documentType = "pdf"', script)
+        self.assertIn('.attestation-preview[data-document-type="pdf"]', styles)
         self.assertIn(".registration-details-dialog", styles)
         self.assertIn(".registration-detail-group", styles)
         self.assertNotIn("innerHTML", script)
@@ -1597,7 +1608,7 @@ class RegistrationsIntegrationTests(unittest.TestCase):
 
         excluded = {
             "source_data_json", "medical_details", "allergies", "emergency_contact",
-            "complete_address", "dgroup_leader_contact", "gross_amount", "amount_paid",
+            "complete_address", "gross_amount", "amount_paid",
         }
         payload = self._data(per_page=25)
         self.assertTrue(excluded.isdisjoint(payload["rows"][0]))

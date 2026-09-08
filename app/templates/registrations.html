@@ -222,6 +222,7 @@
                 <p class="eyebrow">REGISTRANT</p>
                 <strong class="attestation-registrant-name" data-attestation-name>—</strong>
                 <span class="attestation-registrant-satellite" data-attestation-satellite>—</span>
+                <div class="attestation-dgroup-context"><span>Dgroup Leader</span><strong data-attestation-dgroup-leader>—</strong></div>
                 <div class="attestation-payment-context"><span>Payment</span><strong data-attestation-payment>—</strong></div>
             </div>
 
@@ -351,5 +352,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='registrations.js', v='20260906-registration-details') }}" defer></script>
+<script src="{{ url_for('static', filename='registrations.js', v='20260908-registration-contact-details') }}" defer></script>
 {% endblock %}
