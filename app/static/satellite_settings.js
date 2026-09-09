@@ -503,6 +503,11 @@
                 badge.className = `satellite-status is-${statusClass(row)}`;
                 badge.textContent = row.status;
                 statusCell.append(badge);
+                if (row.review_reason) {
+                    const reason = document.createElement("small");
+                    reason.textContent = row.review_reason;
+                    statusCell.append(reason);
+                }
                 tr.append(statusCell);
                 const actionCell = document.createElement("td");
                 if (row.attestation_participant_id) {

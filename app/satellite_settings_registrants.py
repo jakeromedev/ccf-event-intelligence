@@ -203,7 +203,12 @@ def _records(db, event_id):
                 "source_satellite": resolution.get("source_satellite") or "—",
                 "status": MANUAL_PROTECTED if is_manual else resolution["status"],
                 "needs_review": (
-                    False if is_manual else resolution["status"] in NEEDS_REVIEW_STATUSES
+                    not _clean(resolution.get("source_satellite"))
+                    or (not is_manual and resolution["status"] in NEEDS_REVIEW_STATUSES)
+                ),
+                "review_reason": (
+                    "Missing imported Satellite"
+                    if not _clean(resolution.get("source_satellite")) else None
                 ),
             }
         )

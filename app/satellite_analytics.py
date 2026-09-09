@@ -65,6 +65,12 @@ def satellite_target_category_analytics(db, event_id, batch_id):
         group["id"]: {"actual_participants": 0, "associations": 0}
         for group in grouping["groups"]
     }
+    reconciliation = {
+        "unique_participants": 0,
+        "group_actual_total": 0,
+        "unassigned_participants": 0,
+        "additional_group_counts": 0,
+    }
     if batch_id is not None:
         batch = db.execute(
             "SELECT event_id FROM import_batches WHERE id = ?", (batch_id,)
@@ -111,6 +117,40 @@ def satellite_target_category_analytics(db, event_id, batch_id):
             }
         )
 
+        # Start with all curated participants so missing mappings are visible.
+        # A distinct count within each card does not deduplicate across cards.
+        coverage = db.execute(
+            EFFECTIVE_ASSOCIATIONS_CTE
+            + """
+            SELECT COUNT(*) unique_participants,
+                   COALESCE(SUM(group_count), 0) group_actual_total,
+                   COALESCE(SUM(CASE WHEN group_count = 0 THEN 1 ELSE 0 END), 0)
+                       unassigned_participants,
+                   COALESCE(SUM(CASE WHEN group_count > 1 THEN group_count - 1
+                                     ELSE 0 END), 0) additional_group_counts
+            FROM (
+                SELECT participant.id, COUNT(DISTINCT membership.target_group_id) group_count
+                FROM curated_registrants participant
+                LEFT JOIN effective_associations association
+                  ON association.curated_registrant_id = participant.id
+                 AND association.event_id = participant.event_id
+                 AND association.batch_id = participant.batch_id
+                LEFT JOIN satellite_directory directory ON directory.id = association.directory_id
+                LEFT JOIN satellite_hubs hub ON hub.id = directory.hub_id
+                LEFT JOIN hub_groups hub_group ON hub_group.id = hub.hub_group_id
+                LEFT JOIN event_satellite_target_group_categories membership
+                  ON membership.event_id = participant.event_id
+                 AND membership.category_key = {category_sql}
+                 AND hub_group.id IS NOT NULL
+                WHERE participant.event_id = ? AND participant.batch_id = ?
+                  AND participant.registration_type = 'participant'
+                GROUP BY participant.id
+            ) participant_groups
+            """.format(category_sql=REPORTING_CATEGORY_SQL),
+            (event_id, batch_id),
+        ).fetchone()
+        reconciliation = {key: int(coverage[key]) for key in reconciliation}
+
     association_total = sum(item["associations"] for item in counts.values())
     cursor = 0.0
     result = []
@@ -135,6 +175,7 @@ def satellite_target_category_analytics(db, event_id, batch_id):
         "batch_id": batch_id,
         "preset_key": grouping["preset_key"],
         "association_count": association_total,
+        "reconciliation": reconciliation,
         "groups": result,
         "categories": result,
     }
@@ -393,6 +434,64 @@ def _where(db, batch_id, filters, query):
     return " AND ".join(clauses), params
 
 
+def _unassigned_registrants(db, batch_id, filters, query):
+    """Find people absent from the association-based Satellite read model."""
+    if filters["link_status"] == "linked" or filters["satellite_id"]:
+        return []
+    clauses = ["curated.batch_id = ?"]
+    params = [batch_id]
+    for field, column in (("group_id", "hub.hub_group_id"), ("hub_id", "hub.id")):
+        if filters[field]:
+            clauses.append(column + " = ?")
+            params.append(filters[field])
+    name_sql = (
+        "CONCAT(COALESCE(raw.first_name, ''), ' ', COALESCE(raw.last_name, ''))"
+        if db.is_mysql else
+        "COALESCE(raw.first_name, '') || ' ' || COALESCE(raw.last_name, '')"
+    )
+    if query:
+        clauses.append("(" + " OR ".join(
+            "LOWER({}) LIKE LOWER(?)".format(column)
+            for column in (name_sql, "raw.registration_code", "raw.source_id",
+                           "raw.b1g_satellite_hub_raw", "hub_group.name")
+        ) + ")")
+        params.extend(["%{}%".format(query)] * 5)
+    rows = db.execute(
+        EFFECTIVE_ASSOCIATIONS_CTE + """
+        SELECT curated.id, raw.first_name, raw.last_name, raw.registration_code,
+               raw.b1g_satellite_hub_raw submitted_hub
+        FROM curated_registrants curated
+        JOIN curated_registrant_sources source
+          ON source.curated_registrant_id = curated.id
+         AND source.event_id = curated.event_id AND source.batch_id = curated.batch_id
+        JOIN registrants raw ON raw.id = source.registrant_id AND raw.batch_id = source.batch_id
+        LEFT JOIN satellite_hubs hub
+          ON LOWER(hub.normalized_name) = LOWER(TRIM(raw.b1g_satellite_hub_raw))
+        LEFT JOIN hub_groups hub_group ON hub_group.id = hub.hub_group_id
+        WHERE {where_sql}
+          AND NOT EXISTS (
+              SELECT 1 FROM effective_associations association
+              WHERE association.curated_registrant_id = curated.id
+                AND association.event_id = curated.event_id
+                AND association.batch_id = curated.batch_id
+          )
+        ORDER BY raw.last_name, raw.first_name, raw.registration_code
+        """.format(where_sql=" AND ".join(clauses)), params,
+    ).fetchall()
+    people = {}
+    for row in rows:
+        person = people.setdefault(row["id"], {
+            "id": row["id"],
+            "name": " ".join(filter(None, (row["first_name"], row["last_name"]))) or "Name unavailable",
+            "registration_codes": [], "submitted_hubs": [],
+        })
+        for key, value in (("registration_codes", row["registration_code"]),
+                           ("submitted_hubs", row["submitted_hub"])):
+            if value and value not in person[key]:
+                person[key].append(value)
+    return list(people.values())
+
+
 def _hub_chart(hubs, association_total):
     ranked = sorted(hubs, key=lambda item: (-item["associations"], item["name"].casefold()))
     if len(ranked) > 8:
@@ -463,6 +562,7 @@ def canonical_satellite_metrics(
     options = canonical_satellite_filter_options(db, batch_id)
     filters = _filters(options, group_id, hub_id, satellite_id, link_status)
     where_sql, params = _where(db, batch_id, filters, query)
+    unassigned_registrants = _unassigned_registrants(db, batch_id, filters, query)
 
     totals = db.execute(
         EFFECTIVE_ASSOCIATIONS_CTE
@@ -685,8 +785,11 @@ def canonical_satellite_metrics(
         "hubs_represented": totals["hubs_represented"] or 0,
         "satellites_represented": totals["satellites_represented"] or 0,
         "association_count": association_total,
-        "needs_mapping": totals["needs_mapping"] or 0,
-        "needs_mapping_registrants": totals["needs_mapping_registrants"] or 0,
+        "needs_mapping": (totals["needs_mapping"] or 0) + len(unassigned_registrants),
+        "needs_mapping_satellite_records": totals["needs_mapping"] or 0,
+        "unassigned_registrant_count": len(unassigned_registrants),
+        "unassigned_registrants": unassigned_registrants,
+        "needs_mapping_registrants": (totals["needs_mapping_registrants"] or 0) + len(unassigned_registrants),
         "needs_mapping_associations": totals["needs_mapping_associations"] or 0,
         "hub_groups": groups,
         "hubs": hubs,

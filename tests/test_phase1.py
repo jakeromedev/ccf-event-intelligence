@@ -486,6 +486,59 @@ class EventIntegrationTests(unittest.TestCase):
             self.assertEqual(5, summaries[self.event_a]["metrics"]["total_registrants"])
             self.assertEqual(2, summaries[self.event_b]["metrics"]["total_registrants"])
 
+    def test_target_reconciliation_includes_participants_without_assignments(self):
+        batch_id = self._process(self.event_a)
+        with self.app.app_context():
+            db = get_db()
+            db.execute(
+                "DELETE FROM curated_registrant_satellites WHERE batch_id = ?",
+                (batch_id,),
+            )
+            db.commit()
+            dashboard = event_dashboard_metrics(db, self.event_a)
+            coverage = dashboard["satellite_target_reconciliation"]
+            self.assertGreater(dashboard["overview"]["participants"], 0)
+            self.assertEqual(dashboard["overview"]["participants"], coverage["unassigned_participants"])
+            self.assertEqual(0, coverage["group_actual_total"])
+            self.assertEqual(0, coverage["additional_group_counts"])
+            self.assertEqual(coverage["unique_participants"], coverage["unassigned_participants"])
+        page = self.app.test_client().get("/events/{}".format(self.event_a))
+        self.assertIn(b"participants without a reporting group", page.data)
+
+    def test_satellite_search_finds_registrant_without_any_satellite(self):
+        batch_id = self._process(self.event_a)
+        with self.app.app_context():
+            db = get_db()
+            person_id = db.execute(
+                """SELECT source.curated_registrant_id FROM curated_registrant_sources source
+                JOIN registrants raw ON raw.id = source.registrant_id
+                WHERE source.batch_id = ? AND raw.registration_code = 'R-2'""",
+                (batch_id,),
+            ).fetchone()[0]
+            db.execute("DELETE FROM curated_registrant_satellites WHERE curated_registrant_id = ?", (person_id,))
+            db.execute(
+                """UPDATE registrants SET first_name = 'Vergel Jairus', last_name = 'Emas',
+                b1g_satellite_hub_raw = 'ICP', satellite_name = NULL
+                WHERE batch_id = ? AND registration_code = 'R-2'""", (batch_id,),
+            )
+            db.commit()
+            for query in ('Vergel', 'Vergel Jairus Emas', 'R-2', 'ICP'):
+                metrics = canonical_satellite_metrics(db, batch_id, query=query)
+                self.assertEqual(1, metrics['unassigned_registrant_count'])
+                self.assertGreaterEqual(metrics['needs_mapping'], 1)
+                self.assertEqual(['ICP'], metrics['unassigned_registrants'][0]['submitted_hubs'])
+            self.assertEqual(0, canonical_satellite_metrics(db, batch_id, query='Vergel', link_status='linked')['needs_mapping'])
+            self.assertEqual(0, canonical_satellite_metrics(db, batch_id, query='Nobody matches')['unassigned_registrant_count'])
+        client = self.app.test_client()
+        for status in ('all', 'needs_mapping'):
+            page = client.get('/events/{}/satellites'.format(self.event_a), query_string={'q': 'Vergel', 'link_status': status})
+            self.assertEqual(200, page.status_code)
+            self.assertIn(b'Vergel Jairus Emas', page.data)
+            self.assertIn(b'ICP', page.data)
+            self.assertIn(b'Satellite not assigned', page.data)
+        other = client.get('/events/{}/satellites'.format(self.event_b), query_string={'q': 'Vergel'})
+        self.assertNotIn(b'Vergel Jairus Emas', other.data)
+
     def test_mysql_schema_constraints_and_logical_orphans(self):
         batch_id = self._process(self.event_a)
         with self.app.app_context():
@@ -857,6 +910,7 @@ class EventIntegrationTests(unittest.TestCase):
         answers = {
             "R-1": {
                 "Dgroup Status": "DGroup Leader",
+                "How Many Are You Leading": "2",
                 "Years Leading A Dgroup": "< 1 year",
                 "Shirt Size": "M (W: 19inch L: 26inch)",
                 "Transportation To MMRC": "Carpool",
@@ -864,6 +918,7 @@ class EventIntegrationTests(unittest.TestCase):
             },
             "R-2": {
                 "Dgroup Status": "D12 Leader",
+                "How Many Are You Leading": "3",
                 "Years Leading A Dgroup": "3-5 years",
                 "Shirt Size": "XL (W: 21inch L: 28inch)",
                 "Transportation From Ccf To Mmrc": "Bus to MMRC",
@@ -871,12 +926,14 @@ class EventIntegrationTests(unittest.TestCase):
             },
             "R-3": {
                 "Dgroup Status": "D12 Leader",
+                "How Many Are You Leading": "12",
                 "Years Leading A Dgroup": "3-5 years",
                 "Shirt Size": "S (W: 18inch L: 25inch)",
                 "Transportation From Ccf To Mmrc": "Public Transportation",
                 "Transportation From Mmrc To Ccf": "Public Transportation",
             },
             "R-4": {
+                "How Many Are You Leading": "1",
                 "Years Leading A Dgroup": "1-2 years",
                 "Shirt Size": "M (W: 19inch L: 26inch)",
                 "Transportation From Ccf To Mmrc": "Bus to MMRC",
@@ -917,6 +974,11 @@ class EventIntegrationTests(unittest.TestCase):
             item["key"]: item["count"] for item in dashboard["shirt_sizes"]["items"]
         }
         self.assertEqual({"dgroup_leader": 1, "d12_leader": 2}, leadership)
+        self.assertEqual(
+            {2: 1, 3: 1, 12: 1},
+            {item["key"]: item["count"] for item in dashboard["leadership_downlines"]["items"]},
+        )
+        self.assertEqual(3, dashboard["leadership_downlines"]["total"])
         self.assertEqual(1, years["under_1"])
         self.assertEqual(1, years["1_2"])
         self.assertEqual(2, years["3_5"])
@@ -943,6 +1005,9 @@ class EventIntegrationTests(unittest.TestCase):
 
         page = self.app.test_client().get("/events/{}".format(self.event_a))
         self.assertIn(b"Dgroup Leadership", page.data)
+        self.assertIn(b"Dleaders by Downline Count", page.data)
+        self.assertIn(b"dashboard-downlines-bars", page.data)
+        self.assertIn(b"12 downlines: 1 Dleaders", page.data)
         self.assertIn(b"Years Leading", page.data)
         self.assertIn(b"T-shirt Size Distribution", page.data)
         self.assertIn(b"D12 Leaders", page.data)
@@ -1132,7 +1197,8 @@ class EventIntegrationTests(unittest.TestCase):
             100,
             sum(item["percentage"] for item in distribution["categories"]),
         )
-        self.assertEqual(1, before_satellites["needs_mapping"])
+        self.assertEqual(1, before_satellites["needs_mapping_satellite_records"])
+        self.assertEqual(3, before_satellites["needs_mapping"])
         self.assertEqual(1, before_satellites["needs_mapping_associations"])
 
         # Moving a canonical Satellite reclassifies both Dashboard Actuals and
@@ -1214,7 +1280,8 @@ class EventIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(2, moved_distribution["outside_metro_manila"]["associations"])
         self.assertEqual(4, moved_distribution["main"]["associations"])
-        self.assertEqual(0, moved_satellites["needs_mapping"])
+        self.assertEqual(0, moved_satellites["needs_mapping_satellite_records"])
+        self.assertEqual(2, moved_satellites["needs_mapping"])
 
         page = client.get("/events/{}".format(self.event_a))
         self.assertNotIn(b'name="target_group_', page.data)
@@ -1309,9 +1376,16 @@ class EventIntegrationTests(unittest.TestCase):
                 (self.event_a, batch_id, eastwood_person, main_satellite),
             )
             db.commit()
-            separate = event_dashboard_metrics(db, self.event_a)[
-                "satellite_target_groups"
-            ]
+            separate_dashboard = event_dashboard_metrics(db, self.event_a)
+            separate = separate_dashboard["satellite_target_groups"]
+            coverage = separate_dashboard["satellite_target_reconciliation"]
+            self.assertGreater(coverage["additional_group_counts"], 0)
+            self.assertEqual(sum(g["actual_participants"] for g in separate), coverage["group_actual_total"])
+            self.assertEqual(
+                separate_dashboard["overview"]["participants"],
+                coverage["group_actual_total"] + coverage["unassigned_participants"]
+                - coverage["additional_group_counts"],
+            )
         separate_by_key = {item["key"]: item for item in separate}
         separate_sum = (
             separate_by_key["outside_metro_manila"]["actual_participants"]
@@ -2000,8 +2074,10 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertEqual(3, metrics["association_count"])
         # The fixture's canonical CCF Main entry also has no Hub, alongside the
         # deliberately unlinked imported evidence added above.
-        self.assertEqual(2, metrics["needs_mapping"])
-        self.assertEqual(2, metrics["needs_mapping_registrants"])
+        self.assertEqual(2, metrics["needs_mapping_satellite_records"])
+        self.assertEqual(2, metrics["unassigned_registrant_count"])
+        self.assertEqual(4, metrics["needs_mapping"])
+        self.assertEqual(4, metrics["needs_mapping_registrants"])
         self.assertEqual(2, metrics["needs_mapping_associations"])
         self.assertEqual(
             ["Within Metro Manila Hubs", "Outside Metro Manila Hubs"],
@@ -2033,7 +2109,7 @@ class EventIntegrationTests(unittest.TestCase):
             {item["name"] for item in searched["ranking"]},
         )
         self.assertEqual(0, needs_mapping["association_count"])
-        self.assertEqual(2, needs_mapping["needs_mapping"])
+        self.assertEqual(4, needs_mapping["needs_mapping"])
 
         page = self.app.test_client().get("/events/{}/satellites".format(self.event_a))
         self.assertEqual(200, page.status_code)
@@ -2806,7 +2882,8 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertNotIn(b"Unique Checked In", ranking.data)
         self.assertNotIn(b"Attendance Rate", ranking.data)
         self.assertNotIn(b"Local Satellites", ranking.data)
-        self.assertNotIn(b"Test Registrant", ranking.data)
+        self.assertIn(b"Registrants without a Satellite", ranking.data)
+        self.assertIn(b"Test Registrant", ranking.data)
         dashboard_page = client.get("/events/{}".format(self.event_a))
         self.assertNotIn(b"data-public-dashboard-nav", dashboard_page.data)
         self.assertNotIn(b"/static/public_dashboard.js", dashboard_page.data)

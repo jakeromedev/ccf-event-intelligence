@@ -21,9 +21,10 @@ durable `attestation_participants` identity and preserve every existing manual
 assignment unchanged. Automatic Satellite synchronization may update the
 shared imported link, but the manual effective assignment still takes priority.
 Registrants with a manual override are reported as **Manual Assignment —
-Protected** by Satellite Settings and are removed from the **Needs Review**
-issue count. Their original imported mismatch remains preserved as source
-evidence.
+Protected** by Satellite Settings. A missing imported Satellite still counts
+under **Needs Review**, even with a manual assignment; other imported mismatches
+are excluded once manually assigned. The manual assignment stays protected from
+synchronization, and the original imported values remain preserved as source evidence.
 
 ## Resetting an override
 

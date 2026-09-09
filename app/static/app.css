@@ -835,6 +835,9 @@ body.registrant-modal-open { overflow: hidden; }
 .satellite-group-card.outside_metro_manila { background: linear-gradient(135deg, #fff, #f5fbfb); }
 
 .satellite-ranking-panel, .satellite-directory-panel { margin-top: 14px; overflow: hidden; border-radius: 12px; box-shadow: var(--shadow-soft); scroll-margin-top: 18px; }
+.satellite-ranking-search { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 14px 20px; border-bottom: 1px solid var(--b1g-border); }
+.satellite-ranking-search .satellite-dashboard-search { flex: 1 1 260px; min-width: 0; }
+.satellite-ranking-search p { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 12px; }
 .satellite-detail-heading { min-height: 70px; padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; gap: 18px; border-bottom: 1px solid var(--line); }
 .satellite-detail-heading h2 { margin: 0; color: var(--ink); font-size: 16px; }
 .satellite-detail-heading p { margin: 3px 0 0; color: var(--muted); font-size: 9px; }
@@ -2713,6 +2716,17 @@ body.admin-drawer-open { overflow: hidden; }
 .dashboard-insight-heading .phase1-section-heading { margin-bottom: 0; }
 .dashboard-insight-heading > span { padding: 6px 10px; color: var(--b1g-red-dark); border: 1px solid #e4caca; border-radius: 999px; background: #fbf4f3; font-size: 8px; font-weight: 800; white-space: nowrap; }
 .dashboard-leadership-grid { display: grid; grid-template-columns: minmax(310px, .9fr) minmax(420px, 1.35fr); gap: 16px; }
+.dashboard-downlines-chart { grid-column: 1 / -1; }
+.dashboard-downlines-plot { gap: 12px; }
+.dashboard-downlines-y-title, .dashboard-downlines-x-title { color: var(--b1g-text-muted); font-size: 10px; }
+.dashboard-downlines-x-title { text-align: center; }
+.dashboard-downlines-scroll { overflow-x: auto; padding-top: 24px; }
+.dashboard-downlines-bars { display: flex; gap: 16px; min-width: 100%; width: max-content; }
+.dashboard-downlines-column { flex: 1 0 42px; min-width: 42px; text-align: center; }
+.dashboard-downlines-track { height: 180px; display: flex; align-items: flex-end; justify-content: center; border-bottom: 1px solid var(--b1g-border); background: repeating-linear-gradient(to top, transparent 0, transparent 44px, var(--b1g-border) 44px, var(--b1g-border) 45px); }
+.dashboard-downlines-bar { position: relative; width: 70%; max-width: 64px; border-radius: 6px 6px 0 0; background: linear-gradient(to top, var(--b1g-red-dark), var(--b1g-red)); }
+.dashboard-downlines-bar strong { position: absolute; bottom: calc(100% + 6px); left: 0; width: 100%; color: var(--b1g-text); font-size: 11px; }
+.dashboard-downlines-column > span { display: block; padding-top: 9px; color: var(--b1g-text); font-size: 11px; font-weight: 700; }
 .dashboard-leadership-roles, .dashboard-years-chart { min-width: 0; padding: 18px; border: 1px solid var(--b1g-border); border-radius: 11px; background: linear-gradient(145deg, #fff, var(--b1g-off-white)); }
 .dashboard-leadership-roles { display: grid; grid-template-columns: 150px minmax(0, 1fr); align-items: center; gap: 20px; }
 .dashboard-leadership-donut { width: 142px; height: 142px; display: grid; place-items: center; border-radius: 50%; }

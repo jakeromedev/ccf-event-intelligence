@@ -1,6 +1,6 @@
 import json
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 from .classifier import AFFILIATIONS
 from .normalization import (
@@ -483,11 +483,12 @@ def participant_ministry_and_shirt_metrics(db, batch_id):
     )
     years = _source_answer_expression(db, "r", "Years Leading A Dgroup")
     shirt = _source_answer_expression(db, "r", "Shirt Size")
+    downlines = _source_answer_expression(db, "r", "How Many Are You Leading")
     rows = db.execute(
         """
         SELECT cr.id curated_id, {status} leadership_status,
                {legacy_leader} legacy_leader, {years} years_leading,
-               {shirt} shirt_size
+               {shirt} shirt_size, {downlines} downlines
         FROM curated_registrants cr
         JOIN curated_registrant_sources source
           ON source.event_id = cr.event_id AND source.batch_id = cr.batch_id
@@ -501,10 +502,11 @@ def participant_ministry_and_shirt_metrics(db, batch_id):
             legacy_leader=legacy_leader,
             years=years,
             shirt=shirt,
+            downlines=downlines,
         ),
         (batch_id,),
     ).fetchall()
-    people = defaultdict(lambda: {"roles": set(), "years": set(), "shirts": set()})
+    people = defaultdict(lambda: {"roles": set(), "years": set(), "shirts": set(), "downlines": set()})
     for row in rows:
         role = _leadership_role(row["leadership_status"])
         if role is None and _clean_answer(row["legacy_leader"]).casefold() in {
@@ -513,6 +515,11 @@ def participant_ministry_and_shirt_metrics(db, batch_id):
             role = "dgroup_leader"
         years_bucket = _years_leading_bucket(row["years_leading"])
         shirt_size = _shirt_size(row["shirt_size"])
+        answer = _clean_answer(row["downlines"])
+        if answer:
+            people[row["curated_id"]]["downlines"].add(
+                int(answer) if re.fullmatch(r"[0-9]+", answer) else "invalid"
+            )
         if role:
             people[row["curated_id"]]["roles"].add(role)
         if years_bucket:
@@ -528,9 +535,24 @@ def participant_ministry_and_shirt_metrics(db, batch_id):
     leadership_conflicts = 0
     years_conflicts = 0
     shirt_conflicts = 0
+    downline_counts = Counter()
+    downline_exclusions = Counter()
     for person in people.values():
         if len(person["roles"]) == 1:
             role_counts[next(iter(person["roles"]))] += 1
+            answers = person["downlines"]
+            if not answers:
+                downline_exclusions["unreported"] += 1
+            elif len(answers) > 1:
+                downline_exclusions["conflicts"] += 1
+            elif "invalid" in answers:
+                downline_exclusions["invalid"] += 1
+            else:
+                count = next(iter(answers))
+                if count == 0:
+                    downline_exclusions["zero"] += 1
+                else:
+                    downline_counts[count] += 1
         elif len(person["roles"]) > 1:
             leadership_conflicts += 1
         if len(person["years"]) == 1:
@@ -594,6 +616,15 @@ def participant_ministry_and_shirt_metrics(db, batch_id):
         )
     return {
         "leadership": leadership,
+        "leadership_downlines": {
+            **_distribution(
+                [(count, str(count)) for count in sorted(downline_counts)],
+                downline_counts,
+                sum(downline_counts.values()),
+            ),
+            "max_count": max(downline_counts.values(), default=0),
+            **{key: downline_exclusions[key] for key in ("zero", "unreported", "invalid", "conflicts")},
+        },
         "years_leading": {
             "total": years_total,
             "items": years_items,
@@ -611,6 +642,11 @@ def participant_ministry_and_shirt_metrics(db, batch_id):
 
 def participant_ministry_and_shirt_metrics_empty():
     return {
+        "leadership_downlines": {
+            **_distribution((), Counter(), 0),
+            "max_count": 0,
+            "zero": 0, "unreported": 0, "invalid": 0, "conflicts": 0,
+        },
         "leadership": {
             **_distribution(
                 LEADERSHIP_CATEGORIES,
@@ -879,9 +915,10 @@ def satellite_dataset_metrics(db, event_id, batch_id):
     return result
 
 
-def satellite_target_category_metrics(db, event_id, batch_id):
+def satellite_target_category_metrics(db, event_id, batch_id, *, analytics=None):
     """Calculate dynamic Dashboard Analytics Target Group metrics."""
-    analytics = satellite_target_category_analytics(db, event_id, batch_id)
+    if analytics is None:
+        analytics = satellite_target_category_analytics(db, event_id, batch_id)
     result = []
     for group in analytics["groups"]:
         actual = group["actual_participants"]
@@ -1287,8 +1324,11 @@ def event_dashboard_metrics(db, event_id, satellite_query="", satellite_page=1):
         db, batch["id"] if batch else None
     )
     total_registrations = participants + volunteers
-    target_groups = satellite_target_category_metrics(
+    target_analytics = satellite_target_category_analytics(
         db, event_id, batch["id"] if batch else None
+    )
+    target_groups = satellite_target_category_metrics(
+        db, event_id, batch["id"] if batch else None, analytics=target_analytics
     )
     operational_status = dashboard_operational_status_metrics(
         db, batch["id"] if batch else None
@@ -1316,6 +1356,7 @@ def event_dashboard_metrics(db, event_id, satellite_query="", satellite_page=1):
         **participant_details,
         "transportation": transportation,
         "satellite_target_groups": target_groups,
+        "satellite_target_reconciliation": target_analytics["reconciliation"],
         # Temporary response alias for consumers of the fixed-category release.
         "satellite_target_categories": target_groups,
         "satellite_datasets": satellite_dataset_metrics(

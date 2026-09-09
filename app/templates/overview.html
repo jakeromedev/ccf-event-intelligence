@@ -268,6 +268,15 @@
         {% if satellite_settings_management_allowed and not public_dashboard|default(false) %}<div class="satellite-target-actions"><a class="button primary" href="{{ url_for('dashboard.satellite_settings', event_id=event.id, view='targets') }}#dashboard-satellite-target-values">{{ icon('settings', 17) }} Manage Satellite Targets</a></div>{% endif %}
     </header>
     <div class="satellite-target-comparison">
+        {% set coverage = dashboard.satellite_target_reconciliation %}
+        <p class="satellite-target-reconciliation">
+            <strong>{{ coverage.group_actual_total|number }}</strong> group actuals
+            + <strong>{{ coverage.unassigned_participants|number }}</strong> participants without a reporting group
+            − <strong>{{ coverage.additional_group_counts|number }}</strong> extra counts across groups
+            = <strong>{{ coverage.unique_participants|number }}</strong> Unique Participants.
+            {% if coverage.unassigned_participants %}Participants without a reporting group need a Satellite assignment or a complete Satellite → Hub → Hub Group mapping.{% endif %}
+            {% if coverage.additional_group_counts %}Each card counts a participant once, but a participant may belong to more than one group.{% endif %}
+        </p>
         <div class="satellite-target-grid">
             {% for group in dashboard.satellite_target_groups %}<article class="satellite-target-card {{ 'exceeded' if group.target_exceeded else '' }}">
                 <header><div><h3>{{ group.name }}</h3><small>{{ group.satellite_count|number }} configured {{ 'Satellite' if group.satellite_count == 1 else 'Satellites' }}</small></div>{% if group.target_exceeded %}<span class="satellite-target-status">Exceeded by {{ group.exceeded_amount|number }}</span>{% endif %}</header>
@@ -372,6 +381,27 @@
             <div class="dashboard-leadership-legend">{% for item in dashboard.leadership['items'] %}<div><i class="is-{{ item.key }}"></i><span>{{ item.label }}</span><strong>{{ item.count|number }}</strong><small>{{ item.percentage|percent }}</small></div>{% endfor %}</div>
         </div>
         <div class="dashboard-years-chart"><header><div><h3>Years Leading</h3><p>All reported leaders, whether Dgroup or D12.</p></div><strong>{{ dashboard.years_leading.total|number }} responses</strong></header><div>{% for item in dashboard.years_leading['items'] %}<div class="dashboard-horizontal-bar"><span>{{ item.label }}</span><div><i style="width: {{ item.percentage }}%"></i></div><strong>{{ item.count|number }}</strong><small>{{ item.percentage|percent }}</small></div>{% endfor %}</div>{% if dashboard.years_leading.unreported %}<footer>{{ dashboard.years_leading.unreported|number }} {{ 'registrant has' if dashboard.years_leading.unreported == 1 else 'registrants have' }} no years-leading response.</footer>{% endif %}</div>
+        <div class="dashboard-years-chart dashboard-downlines-chart">
+            <header><div><h3>Dleaders by Downline Count</h3><p>Dgroup and D12 leaders, based on “How Many Are You Leading”. Each bar shows an exact downline count.</p></div><strong>{{ dashboard.leadership_downlines.total|number }} leaders</strong></header>
+            {% if dashboard.leadership_downlines.total %}
+            <div class="dashboard-downlines-plot">
+                <span class="dashboard-downlines-y-title">Number of Dleaders</span>
+                <div class="dashboard-downlines-scroll" role="region" aria-label="Dleaders by exact downline count" tabindex="0">
+                    <div class="dashboard-downlines-bars">
+                    {% for item in dashboard.leadership_downlines['items'] %}
+                        <div class="dashboard-downlines-column" role="img" aria-label="{{ item.label }} downlines: {{ item.count }} Dleaders">
+                            <div class="dashboard-downlines-track"><div class="dashboard-downlines-bar" style="height: {{ item.count / dashboard.leadership_downlines.max_count * 100 }}%"><strong>{{ item.count|number }}</strong></div></div>
+                            <span>{{ item.label }}</span>
+                        </div>
+                    {% endfor %}
+                    </div>
+                </div>
+                <span class="dashboard-downlines-x-title">Number of downlines</span>
+            </div>
+            {% else %}<p>No positive downline counts were reported by leaders in this batch.</p>{% endif %}
+            {% set downlines = dashboard.leadership_downlines %}
+            {% if downlines.zero or downlines.unreported or downlines.invalid or downlines.conflicts %}<footer>Not included: {{ downlines.zero|number }} with zero downlines · {{ downlines.unreported|number }} without a response · {{ (downlines.invalid + downlines.conflicts)|number }} with invalid or conflicting responses.</footer>{% endif %}
+        </div>
     </div>{% else %}<div class="dashboard-insight-empty">No Dgroup leadership information was reported in the active registration batch.</div>{% endif %}
 </section>
 
