@@ -286,7 +286,7 @@ class SatelliteSyncAnalysisTests(unittest.TestCase):
         self.assertEqual(0, result["synchronized_count"])
         self.assertIsNone(imported_directory_id)
 
-    def test_missing_imported_satellite_stays_in_review_with_manual_assignment(self):
+    def test_missing_imported_satellite_leaves_review_with_manual_assignment(self):
         hub_id = self._hub("Mindanao South")
         manual_id = self._directory(hub_id, "B1G Davao")
         self._evidence(source_hub="ICP", source_satellite="   ")
@@ -303,13 +303,13 @@ class SatelliteSyncAnalysisTests(unittest.TestCase):
             settings = event_settings_registrants(db, self.event_id, sync_status="needs_review")
             result = execute_event_satellite_sync(db, self.event_id)
 
-        self.assertEqual(1, settings["totals"]["review"])
-        self.assertEqual(1, settings["filtered_totals"]["review"])
-        self.assertEqual(1, settings["counts"][f"satellite:{manual_id}"]["review"])
-        self.assertEqual(1, len(settings["rows"]))
-        row = settings["rows"][0]
-        self.assertTrue(row["needs_review"])
-        self.assertEqual("Missing imported Satellite", row["review_reason"])
+        self.assertEqual(0, settings["totals"]["review"])
+        self.assertEqual(0, settings["filtered_totals"]["review"])
+        self.assertEqual([], settings["rows"])
+        with self.app.app_context():
+            row = event_settings_registrants(get_db(), self.event_id)["rows"][0]
+        self.assertFalse(row["needs_review"])
+        self.assertIsNone(row["review_reason"])
         self.assertEqual(MANUAL_PROTECTED, row["status"])
         self.assertEqual(manual_id, row["satellite_id"])
         self.assertEqual(0, result["synchronized_count"])

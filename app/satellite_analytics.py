@@ -30,17 +30,37 @@ TARGET_CATEGORY_CHART_COLORS = (
 )
 
 
+# Negative IDs represent manual assignments with no imported association in this
+# read model only. They let the hierarchy include those people without creating
+# or rewriting imported Satellite records.
 EFFECTIVE_ASSOCIATIONS_CTE = """
 WITH manual_curated AS (
-    SELECT DISTINCT source.curated_registrant_id, assignment.directory_id
+    SELECT DISTINCT source.curated_registrant_id, source.event_id, source.batch_id,
+           assignment.directory_id
     FROM curated_registrant_sources source
     JOIN attestation_participant_registrants owner
       ON owner.batch_id = source.batch_id
+     AND owner.event_id = source.event_id
      AND owner.registrant_id = source.registrant_id
     JOIN event_registrant_satellites assignment
       ON assignment.event_id = owner.event_id
      AND assignment.attestation_participant_id = owner.attestation_participant_id
      AND assignment.assignment_source = 'manual'
+), manual_without_import AS (
+    SELECT override_row.* FROM manual_curated override_row
+    WHERE NOT EXISTS (
+        SELECT 1 FROM curated_registrant_satellites association
+        WHERE association.curated_registrant_id = override_row.curated_registrant_id
+          AND association.event_id = override_row.event_id
+          AND association.batch_id = override_row.batch_id
+    )
+), effective_imports AS (
+    SELECT id, event_id, batch_id, directory_id, name, source_record_count FROM satellites
+    UNION ALL
+    SELECT -override_row.curated_registrant_id, override_row.event_id, override_row.batch_id,
+           override_row.directory_id, directory.name, 0
+    FROM manual_without_import override_row
+    JOIN satellite_directory directory ON directory.id = override_row.directory_id
 ), effective_associations AS (
     SELECT association.id, association.event_id, association.batch_id,
            association.curated_registrant_id, association.satellite_id,
@@ -49,6 +69,13 @@ WITH manual_curated AS (
     JOIN satellites imported ON imported.id = association.satellite_id
     LEFT JOIN manual_curated manual_override
       ON manual_override.curated_registrant_id = association.curated_registrant_id
+     AND manual_override.event_id = association.event_id
+     AND manual_override.batch_id = association.batch_id
+    UNION ALL
+    SELECT -override_row.curated_registrant_id, override_row.event_id, override_row.batch_id,
+           override_row.curated_registrant_id, -override_row.curated_registrant_id,
+           override_row.directory_id
+    FROM manual_without_import override_row
 )
 """
 
@@ -208,7 +235,7 @@ def _rows(db, level, where_sql, params):
                COUNT(DISTINCT curated.id) registrants,
                COUNT(association.id) associations
         FROM effective_associations association
-        JOIN satellites imported ON imported.id = association.satellite_id
+        JOIN effective_imports imported ON imported.id = association.satellite_id
         JOIN satellite_directory directory ON directory.id = association.directory_id
         JOIN satellite_hubs hubs ON hubs.id = directory.hub_id
         JOIN hub_groups hub_group ON hub_group.id = hubs.hub_group_id
@@ -583,7 +610,7 @@ def canonical_satellite_metrics(
                COALESCE(SUM(CASE WHEN hub_group.id IS NULL
                                       AND association.id IS NOT NULL
                             THEN 1 ELSE 0 END), 0) needs_mapping_associations
-        FROM satellites imported
+        FROM effective_imports imported
         LEFT JOIN effective_associations association
           ON association.satellite_id = imported.id
          AND association.batch_id = imported.batch_id
@@ -719,7 +746,7 @@ def canonical_satellite_metrics(
                hub_group.id group_id,
                COUNT(DISTINCT curated.id) registrants,
                COUNT(association.id) associations
-        FROM satellites imported
+        FROM effective_imports imported
         LEFT JOIN effective_associations association
           ON association.satellite_id = imported.id
          AND association.batch_id = imported.batch_id

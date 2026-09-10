@@ -503,7 +503,7 @@ class EventIntegrationTests(unittest.TestCase):
             self.assertEqual(0, coverage["additional_group_counts"])
             self.assertEqual(coverage["unique_participants"], coverage["unassigned_participants"])
         page = self.app.test_client().get("/events/{}".format(self.event_a))
-        self.assertIn(b"participants without a reporting group", page.data)
+        self.assertNotIn(b"participants without a reporting group", page.data)
 
     def test_satellite_search_finds_registrant_without_any_satellite(self):
         batch_id = self._process(self.event_a)
@@ -538,6 +538,49 @@ class EventIntegrationTests(unittest.TestCase):
             self.assertIn(b'Satellite not assigned', page.data)
         other = client.get('/events/{}/satellites'.format(self.event_b), query_string={'q': 'Vergel'})
         self.assertNotIn(b'Vergel Jairus Emas', other.data)
+
+        # A manual assignment must work even with no imported association.
+        with self.app.app_context():
+            db = get_db()
+            group_id = db.execute(
+                "INSERT INTO hub_groups (code, name, sort_order) "
+                "VALUES ('within_metro_manila', 'Within Metro Manila', 1)"
+            ).lastrowid
+            hub_id = db.execute(
+                "INSERT INTO satellite_hubs (hub_group_id, name, normalized_name, is_main) "
+                "VALUES (?, 'Override Hub', 'override hub', 1)", (group_id,),
+            ).lastrowid
+            directory_id = db.execute(
+                "INSERT INTO satellite_directory (hub_id, name, normalized_name) "
+                "VALUES (?, 'Override Satellite', 'override satellite')", (hub_id,),
+            ).lastrowid
+            participant_id = db.execute(
+                "SELECT owner.attestation_participant_id "
+                "FROM attestation_participant_registrants owner "
+                "JOIN registrants raw ON raw.id = owner.registrant_id "
+                "WHERE owner.event_id = ? AND owner.batch_id = ? "
+                "AND raw.registration_code = 'R-2'", (self.event_a, batch_id),
+            ).fetchone()[0]
+            set_manual_satellite_assignment(db, self.event_a, participant_id, directory_id)
+            db.commit()
+            metrics = canonical_satellite_metrics(db, batch_id, query='Vergel')
+            self.assertEqual(0, metrics['needs_mapping'])
+            self.assertEqual(0, metrics['unassigned_registrant_count'])
+            self.assertEqual(1, metrics['linked_registrants'])
+            self.assertEqual('Override Satellite', metrics['ranking'][0]['name'])
+            self.assertEqual('Override Hub', metrics['ranking'][0]['hub_name'])
+            self.assertEqual(1, metrics['ranking'][0]['registrants'])
+            self.assertEqual([], canonical_satellite_metrics(
+                db, batch_id, query='Vergel', link_status='needs_mapping'
+            )['ranking'])
+            dashboard = event_dashboard_metrics(db, self.event_a)
+            satellite = next(item for item in dashboard['satellites']['rows']
+                             if item['name'] == 'Override Satellite')
+            self.assertEqual(1, satellite['participants'])
+            self.assertEqual('Override Hub', satellite['hub_name'])
+            main = next(item for item in dashboard['satellite_target_groups']
+                        if item['key'] == 'main')
+            self.assertEqual(1, main['actual_participants'])
 
     def test_mysql_schema_constraints_and_logical_orphans(self):
         batch_id = self._process(self.event_a)

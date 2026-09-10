@@ -2717,16 +2717,19 @@ body.admin-drawer-open { overflow: hidden; }
 .dashboard-insight-heading > span { padding: 6px 10px; color: var(--b1g-red-dark); border: 1px solid #e4caca; border-radius: 999px; background: #fbf4f3; font-size: 8px; font-weight: 800; white-space: nowrap; }
 .dashboard-leadership-grid { display: grid; grid-template-columns: minmax(310px, .9fr) minmax(420px, 1.35fr); gap: 16px; }
 .dashboard-downlines-chart { grid-column: 1 / -1; }
-.dashboard-downlines-plot { gap: 12px; }
+.dashboard-downlines-chart > .dashboard-downlines-plot { gap: 6px; }
+.dashboard-years-chart.dashboard-downlines-chart { padding: 14px; }
+.dashboard-years-chart.dashboard-downlines-chart > header { margin-bottom: 8px; }
 .dashboard-downlines-y-title, .dashboard-downlines-x-title { color: var(--b1g-text-muted); font-size: 10px; }
 .dashboard-downlines-x-title { text-align: center; }
-.dashboard-downlines-scroll { overflow-x: auto; padding-top: 24px; }
-.dashboard-downlines-bars { display: flex; gap: 16px; min-width: 100%; width: max-content; }
-.dashboard-downlines-column { flex: 1 0 42px; min-width: 42px; text-align: center; }
-.dashboard-downlines-track { height: 180px; display: flex; align-items: flex-end; justify-content: center; border-bottom: 1px solid var(--b1g-border); background: repeating-linear-gradient(to top, transparent 0, transparent 44px, var(--b1g-border) 44px, var(--b1g-border) 45px); }
-.dashboard-downlines-bar { position: relative; width: 70%; max-width: 64px; border-radius: 6px 6px 0 0; background: linear-gradient(to top, var(--b1g-red-dark), var(--b1g-red)); }
-.dashboard-downlines-bar strong { position: absolute; bottom: calc(100% + 6px); left: 0; width: 100%; color: var(--b1g-text); font-size: 11px; }
-.dashboard-downlines-column > span { display: block; padding-top: 9px; color: var(--b1g-text); font-size: 11px; font-weight: 700; }
+.dashboard-downlines-scroll { overflow-x: auto; padding-top: 20px; }
+.dashboard-downlines-bars { display: flex; gap: 8px; min-width: 100%; width: max-content; }
+.dashboard-downlines-column { flex: 1 0 30px; min-width: 30px; text-align: center; }
+.dashboard-downlines-track { height: 110px; display: flex; align-items: flex-end; justify-content: center; border-bottom: 1px solid var(--b1g-border); background: repeating-linear-gradient(to top, transparent 0, transparent 26.5px, var(--b1g-border) 26.5px, var(--b1g-border) 27.5px); }
+.dashboard-downlines-bar { position: relative; width: 65%; max-width: 36px; border-radius: 4px 4px 0 0; background: linear-gradient(to top, var(--b1g-red-dark), var(--b1g-red)); }
+.dashboard-downlines-bar strong { position: absolute; bottom: calc(100% + 4px); left: 0; width: 100%; color: var(--b1g-text); font-size: 11px; }
+.dashboard-downlines-column > span { display: block; padding-top: 6px; color: var(--b1g-text); font-size: 11px; font-weight: 700; }
+.dashboard-years-chart.dashboard-downlines-chart > footer { margin: 10px -14px -14px; padding: 8px 14px; }
 .dashboard-leadership-roles, .dashboard-years-chart { min-width: 0; padding: 18px; border: 1px solid var(--b1g-border); border-radius: 11px; background: linear-gradient(145deg, #fff, var(--b1g-off-white)); }
 .dashboard-leadership-roles { display: grid; grid-template-columns: 150px minmax(0, 1fr); align-items: center; gap: 20px; }
 .dashboard-leadership-donut { width: 142px; height: 142px; display: grid; place-items: center; border-radius: 50%; }

@@ -268,15 +268,6 @@
         {% if satellite_settings_management_allowed and not public_dashboard|default(false) %}<div class="satellite-target-actions"><a class="button primary" href="{{ url_for('dashboard.satellite_settings', event_id=event.id, view='targets') }}#dashboard-satellite-target-values">{{ icon('settings', 17) }} Manage Satellite Targets</a></div>{% endif %}
     </header>
     <div class="satellite-target-comparison">
-        {% set coverage = dashboard.satellite_target_reconciliation %}
-        <p class="satellite-target-reconciliation">
-            <strong>{{ coverage.group_actual_total|number }}</strong> group actuals
-            + <strong>{{ coverage.unassigned_participants|number }}</strong> participants without a reporting group
-            − <strong>{{ coverage.additional_group_counts|number }}</strong> extra counts across groups
-            = <strong>{{ coverage.unique_participants|number }}</strong> Unique Participants.
-            {% if coverage.unassigned_participants %}Participants without a reporting group need a Satellite assignment or a complete Satellite → Hub → Hub Group mapping.{% endif %}
-            {% if coverage.additional_group_counts %}Each card counts a participant once, but a participant may belong to more than one group.{% endif %}
-        </p>
         <div class="satellite-target-grid">
             {% for group in dashboard.satellite_target_groups %}<article class="satellite-target-card {{ 'exceeded' if group.target_exceeded else '' }}">
                 <header><div><h3>{{ group.name }}</h3><small>{{ group.satellite_count|number }} configured {{ 'Satellite' if group.satellite_count == 1 else 'Satellites' }}</small></div>{% if group.target_exceeded %}<span class="satellite-target-status">Exceeded by {{ group.exceeded_amount|number }}</span>{% endif %}</header>
