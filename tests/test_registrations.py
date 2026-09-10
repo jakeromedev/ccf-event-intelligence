@@ -318,7 +318,7 @@ class RegistrationsIntegrationTests(unittest.TestCase):
     def _resubmission_csv(*rows):
         output = io.StringIO()
         fields = ["ID", "Event Slug", "Registration Code", "Ticket Code", "First Name",
-                  "Last Name", "Email Address", "Mobile Number", LINK_HEADER]
+                  "Last Name", "Email Address", "Mobile Number", "Created At", "Updated At", LINK_HEADER]
         writer = csv.DictWriter(output, fieldnames=fields)
         writer.writeheader()
         for values in rows:
@@ -473,7 +473,36 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         self.assertEqual(200, historical.status_code)
         self.assertEqual(3, len(historical.get_json()["forms"]))
 
-    def test_resubmission_matching_rejects_ambiguous_unmatched_and_conflicting_links(self):
+    def test_latest_resubmission_uses_timestamp_and_preserves_reviews_on_repeated_imports(self):
+        batch_id = self._process(self.event_a)
+        newer = {"Email Address": "person001@example.com", "Updated At": "September 09, 2026 9:04 PM",
+                 LINK_HEADER: "https://files.example.com/latest.pdf"}
+        older = {"Email Address": "person001@example.com", "Created At": "September 09, 2026 4:43 PM",
+                 LINK_HEADER: "https://files.example.com/older.pdf"}
+        with self.app.app_context():
+            db = get_db()
+            content = self._resubmission_csv(newer, older)
+            _, report = import_attestation_resubmissions(db, self.event_a, content, "af.csv", None)
+            db.commit()
+            self.assertEqual(["updated", "superseded"], [r["status"] for r in report["rows"]])
+            state = db.execute("SELECT registrant_id, form_url FROM attestation_verifications").fetchone()
+            self.assertEqual(newer[LINK_HEADER], state["form_url"])
+            update_attestation_verification(db, self.event_a, batch_id, state["registrant_id"], None, "invalid", None)
+            _, repeat = import_attestation_resubmissions(db, self.event_a, content, "af.csv", None)
+            db.commit()
+            self.assertEqual({"unchanged": 1, "superseded": 1}, repeat["counts"])
+            self.assertEqual("invalid", db.execute("SELECT status FROM attestation_verifications").fetchone()[0])
+            update_attestation_verification(db, self.event_a, batch_id, state["registrant_id"], None, "verified", None)
+            newest = {**newer, "Updated At": "September 10, 2026 9:04 PM",
+                      LINK_HEADER: "https://files.example.com/newest.pdf"}
+            _, protected = import_attestation_resubmissions(
+                db, self.event_a, self._resubmission_csv(older, newest), "af.csv", None,
+            )
+            db.commit()
+            self.assertEqual({"superseded": 1, "verified_protected": 1}, protected["counts"])
+            self.assertEqual(newer[LINK_HEADER], db.execute("SELECT form_url FROM attestation_verifications").fetchone()[0])
+
+    def test_resubmission_matching_rejects_unsafe_matches_and_selects_latest_link(self):
         self._process(self.event_a)
         with self.app.app_context():
             db = get_db()
@@ -486,8 +515,8 @@ class RegistrationsIntegrationTests(unittest.TestCase):
             content = self._resubmission_csv(*rows)
             _, report = import_attestation_resubmissions(db, self.event_a, content, "conflicts.csv", None)
             db.commit()
-            self.assertEqual({"unmatched": 1, "conflicting_links": 2, "missing_or_invalid_link": 1}, report["counts"])
-            self.assertEqual(0, db.execute("SELECT COUNT(*) FROM attestation_resubmissions").fetchone()[0])
+            self.assertEqual({"unmatched": 1, "superseded": 1, "updated": 1, "missing_or_invalid_link": 1}, report["counts"])
+            self.assertEqual(1, db.execute("SELECT COUNT(*) FROM attestation_resubmissions").fetchone()[0])
             # Same email on two distinct durable registrants is not safe to match.
             source = db.execute("SELECT id, source_data_json FROM registrants WHERE registration_code = 'R-002'").fetchone()
             values = json.loads(source["source_data_json"])

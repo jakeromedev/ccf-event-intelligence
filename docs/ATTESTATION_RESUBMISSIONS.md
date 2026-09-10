@@ -29,8 +29,11 @@ not changed while the reviewer was looking at the form.
 Repeated links, previously accepted links, and unchanged original links do not
 reset statuses. Verified participants are protected even when the upload contains
 a different URL: neither their status nor the verified document changes.
-Multiple different links for one participant in a single file are skipped for
-manual correction of the CSV. Blank links never clear an existing document.
+For multiple different links for one participant in a file, the latest submission
+is selected using Updated At (falling back to Created At). When any candidate
+lacks a usable timestamp, CSV row order is used; ties also use the later row.
+Earlier different links are reported as superseded. Verified and unchanged-link
+protections still apply to the selected submission. Blank links never clear an existing document.
 
 Accepted links and import reports are stored against the durable Event participant
 identity. Replacement registration imports preserve these links and statuses.

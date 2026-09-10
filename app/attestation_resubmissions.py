@@ -6,6 +6,8 @@ import io
 import json
 import re
 from collections import Counter, defaultdict
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from .attestation_identity import _normalize_identifier
 from .time_utils import utc_now
@@ -126,6 +128,44 @@ def match_resubmissions(db, event_id, rows):
     return batch, people, matched
 
 
+def _submission_time(row):
+    for key in ("Updated At", "Created At"):
+        value = str(row.get(key) or "").strip()
+        if not value:
+            continue
+        for parse in (
+            lambda raw: datetime.strptime(raw, "%B %d, %Y %I:%M %p"),
+            lambda raw: datetime.strptime(raw, "%b %d, %Y %I:%M %p"),
+            lambda raw: datetime.fromisoformat(raw.replace("Z", "+00:00")),
+        ):
+            try:
+                stamp = parse(value)
+                if stamp.tzinfo is None:
+                    stamp = stamp.replace(tzinfo=ZoneInfo("Asia/Manila"))
+                return stamp.astimezone(timezone.utc)
+            except ValueError:
+                continue
+    return None
+
+
+def _select_latest_submissions(matches, rows):
+    """Select one valid submission per person without relying on export order when dated."""
+    grouped = defaultdict(list)
+    for item, source in zip(matches, rows):
+        if item["participant_id"] and item["link"] and not item["status"]:
+            grouped[item["participant_id"]].append((item, _submission_time(source)))
+    for entries in grouped.values():
+        if len({item["link"] for item, _ in entries}) < 2:
+            continue
+        if all(stamp is not None for _, stamp in entries):
+            winner, _ = max(entries, key=lambda entry: (entry[1], entry[0]["row"]))
+        else:
+            winner, _ = max(entries, key=lambda entry: entry[0]["row"])
+        for item, _ in entries:
+            if item["link"] != winner["link"]:
+                item["status"] = "superseded"
+
+
 def import_attestation_resubmissions(db, event_id, content, filename, user_id):
     rows = parse_resubmission_csv(content)
     # Serialize uploads for this Event. Review updates also lock the participant
@@ -138,10 +178,7 @@ def import_attestation_resubmissions(db, event_id, content, filename, user_id):
            (event_id, filename, report_json, created_by_user_id) VALUES (?, ?, '{}', ?)""",
         (event_id, filename[:255], user_id),
     ).lastrowid
-    links_by_person = defaultdict(set)
-    for item in matches:
-        if item["participant_id"] and item["link"]:
-            links_by_person[item["participant_id"]].add(item["link"])
+    _select_latest_submissions(matches, rows)
     counts = Counter()
     for item in matches:
         participant = item["participant_id"]
@@ -149,8 +186,6 @@ def import_attestation_resubmissions(db, event_id, content, filename, user_id):
         status = item["status"]
         if not link:
             status = "missing_or_invalid_link"
-        if not status and len(links_by_person[participant]) > 1:
-            status = "conflicting_links"
         if not status:
             db.execute(
                 "SELECT id FROM attestation_participants WHERE id = ? AND event_id = ?" + lock,
