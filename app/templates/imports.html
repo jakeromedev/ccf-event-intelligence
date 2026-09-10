@@ -65,6 +65,41 @@
     </div>
 </form>
 
+<section class="panel import-validation-panel attestation-resubmission-panel" id="attestation-resubmissions" aria-labelledby="attestation-resubmission-title">
+    <header class="imports-section-heading">
+        <div class="attestation-resubmission-heading"><span class="attestation-resubmission-icon">{{ icon('document', 22) }}</span><div><h2 id="attestation-resubmission-title">Resubmitted Attestation Forms</h2><p>Send updated forms to Registration for review.</p></div></div>
+        <span class="attestation-resubmission-tag">Single CSV upload</span>
+    </header>
+    <div class="attestation-resubmission-body">
+    <div class="attestation-resubmission-layout">
+    {% if attestation_import_allowed and event_mutations_allowed and active_batch %}
+    <form method="post" enctype="multipart/form-data" action="{{ url_for('dashboard.upload_attestation_resubmissions', event_id=event.id) }}" class="attestation-resubmission-upload" id="attestation-resubmission-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label class="attestation-resubmission-picker" for="attestation-resubmission-file">
+            <span class="attestation-resubmission-file-heading">{{ icon('imports', 24) }}<span><strong>Choose your AF resubmission export</strong><small>CSV file · up to 8 MB · 5,000 rows</small></span></span>
+            <input id="attestation-resubmission-file" type="file" name="attestation_file" accept=".csv,text/csv" aria-describedby="attestation-resubmission-help" required>
+        </label>
+        <div class="attestation-resubmission-actions"><small id="attestation-resubmission-help">New form links are marked <strong>Re-verify</strong>.</small><button class="button primary" type="submit">{{ icon('imports', 16) }} Import Resubmitted Forms</button></div>
+    </form>
+    {% else %}<div class="attestation-resubmission-unavailable">{{ icon('info', 22) }}<div><strong>Upload unavailable</strong><p>An active registration import and permission to import and review attestation forms are required.</p></div></div>{% endif %}
+    <aside class="attestation-resubmission-guide"><h3>What happens after upload</h3><ul><li>Changed forms appear under <strong>Re-verify</strong> in Registration.</li><li>Repeated links are skipped and verified forms stay protected.</li><li>Unmatched or conflicting rows are listed in the import results.</li></ul><details><summary>How registrants are matched</summary><p>Matches use unique email or mobile details within this Event. Original registration identifiers are used only for exports from the same source Event.</p></details></aside>
+    </div>
+    {% if resubmission_report %}
+    {% set reasons = {'updated': 'Re-verify — new form', 'unchanged': 'Skipped — link already imported or unchanged', 'verified_protected': 'Skipped — already verified', 'unmatched': 'Skipped — no matching registrant in this Event', 'ambiguous': 'Skipped — identifiers match different registrants', 'conflicting_links': 'Skipped — multiple different links for the same registrant', 'missing_or_invalid_link': 'Skipped — missing or invalid form link'} %}
+    <section class="attestation-resubmission-results" aria-labelledby="attestation-results-title">
+    <header><div><h3 id="attestation-results-title">Import results</h3><p>{{ resubmission_report.filename }}</p></div><a class="button secondary compact" href="{{ url_for('dashboard.event_registrations', event_id=event.id) }}">Review in Registration {{ icon('arrow', 14) }}</a></header>
+    <div class="attestation-resubmission-totals"><div><span>Rows processed</span><strong>{{ resubmission_report.total|number }}</strong></div><div class="is-ready"><span>Forms set to Re-verify</span><strong>{{ resubmission_report.counts.get('updated', 0)|number }}</strong></div><div><span>Rows skipped</span><strong>{{ (resubmission_report.total - resubmission_report.counts.get('updated', 0))|number }}</strong></div></div>
+    <div class="table-wrap attestation-resubmission-table" tabindex="0" role="region" aria-label="Attestation import results"><table><thead><tr><th>CSV row</th><th>Registrant</th><th>Resubmission code</th><th>Result</th></tr></thead><tbody>
+        {% for row in resubmission_report.rows %}<tr><td>{{ row.row }}</td><td><strong>{{ row.name or 'Not provided' }}</strong></td><td>{{ row.registration_code }}</td><td><span class="attestation-resubmission-result {{ 'is-ready' if row.status == 'updated' else 'is-review' if row.status in ('unmatched', 'ambiguous', 'conflicting_links', 'missing_or_invalid_link') else '' }}">{{ reasons.get(row.status, row.status) }}</span></td></tr>{% endfor %}
+    </tbody></table></div>
+    </section>
+    {% endif %}
+    {% if attestation_import_history %}<details class="attestation-resubmission-history"><summary>Recent attestation uploads <span>{{ attestation_import_history|length }}</span></summary><ul>
+        {% for upload in attestation_import_history %}<li><a href="{{ url_for('dashboard.event_imports', event_id=event.id, attestation_import=upload.id) }}#attestation-resubmissions"><span>{{ icon('document', 16) }}<strong>{{ upload.filename }}</strong></span><small>{{ upload.created_at|datetime_short }}</small></a></li>{% endfor %}
+    </ul></details>{% endif %}
+    </div>
+</section>
+
 <section class="panel import-validation-panel">
     <header class="imports-section-heading">
         <div>
@@ -225,7 +260,7 @@
                                 </form>
                             {% endif %}
                             {% if can_manage_import_batches and batch['status'] not in ('active', 'processing', 'validating') %}
-                                <form action="{{ url_for('dashboard.delete_import', event_id=event['id'], batch_id=batch['id']) }}" method="post" onsubmit="return confirm('Permanently delete Batch #{{ batch['id'] }} and all of its stored data?');">
+                                <form action="{{ url_for('dashboard.delete_import', event_id=event['id'], batch_id=batch['id']) }}" method="post" data-confirm-message="Permanently delete Batch #{{ batch['id'] }} and all of its stored data?">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <button class="button danger compact" type="submit">Delete</button>
                                 </form>
@@ -265,6 +300,13 @@
 <script>
 const slots = [...document.querySelectorAll('[data-upload-slot]')];
 const button = document.getElementById('validate-button');
+const attestationUploadForm = document.getElementById('attestation-resubmission-form');
+attestationUploadForm?.addEventListener('submit', () => {
+    const submit = attestationUploadForm.querySelector('button[type="submit"]');
+    submit.disabled = true;
+    submit.textContent = 'Importing forms…';
+    attestationUploadForm.setAttribute('aria-busy', 'true');
+});
 function updateReadyState() {
     button.disabled = !slots.every(slot => slot.querySelector('input').files.length > 0);
 }

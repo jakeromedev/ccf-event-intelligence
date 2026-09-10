@@ -1,4 +1,5 @@
 import hmac
+import json
 import secrets
 from datetime import datetime
 from functools import wraps
@@ -43,10 +44,15 @@ from .admin_tables import (
     resolve_batch_scope,
 )
 from .db import get_db
+from .attestation_resubmissions import (
+    AttestationResubmissionError, MAX_RESUBMISSION_BYTES, import_attestation_resubmissions,
+)
 from .import_history import IMPORT_HISTORY_STATUSES, import_history
 from .importer import activate_batch, process_batch, stage_upload_set, store_validation, validate_batch
 from .models import hash_password
 from .registrations import (
+    UNSPECIFIED_FORM,
+    attestation_submission_history,
     create_registrant_remark,
     list_registrant_remarks,
     registrations_data,
@@ -598,6 +604,23 @@ def event_registrations_data(event_id):
     return jsonify(result)
 
 
+@bp.get("/events/<int:event_id>/registrations/<int:registrant_id>/attestation/history")
+@registrations_access_required
+def registration_attestation_history(event_id, registrant_id):
+    db = get_db()
+    get_event_or_404(event_id)
+    batch = active_batch(db, event_id)
+    try:
+        result = attestation_submission_history(
+            db, event_id, batch["id"] if batch else None, registrant_id, request.args.get("batch")
+        )
+    except AdminTableQueryError as exc:
+        return jsonify({"error": str(exc)}), 400
+    if result is None:
+        abort(404)
+    return jsonify(result)
+
+
 @bp.patch(
     "/events/<int:event_id>/registrations/<int:registrant_id>/facebook-group"
 )
@@ -654,10 +677,12 @@ def update_registration_attestation(event_id, registrant_id):
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         return jsonify({"error": "A JSON request body is required."}), 400
-    if "status" not in payload or not set(payload).issubset({"status", "remark"}):
+    if "status" not in payload or not set(payload).issubset({"status", "remark", "expected_form_url", "resolve_remarks"}):
         return jsonify(
-            {"error": "Only attestation status and an optional invalid-status remark may be supplied."}
+            {"error": "Only attestation status, the expected form URL, an optional invalid-status remark, and resolve_remarks may be supplied."}
         ), 400
+    if payload.get("resolve_remarks") is True and not can_edit_registrant_remarks():
+        abort(403)
     try:
         result = update_attestation_verification(
             db,
@@ -668,6 +693,8 @@ def update_registration_attestation(event_id, registrant_id):
             payload.get("status"),
             current_user.id,
             payload.get("remark"),
+            payload.get("expected_form_url", UNSPECIFIED_FORM),
+            resolve_remarks=payload.get("resolve_remarks", False),
         )
     except AdminTableQueryError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -685,6 +712,7 @@ def update_registration_attestation(event_id, registrant_id):
             "remark_id": (
                 result["remark"]["id"] if result.get("remark") else None
             ),
+            "resolved_remark_count": result["resolved_remark_count"],
         },
     )
     return jsonify(result)
@@ -1873,8 +1901,24 @@ def event_imports(event_id):
         ).fetchall()
         for issue in issue_counts:
             issue_totals[issue["severity"]] += issue["count"]
+    resubmission_report = None
+    report_id = request.args.get("attestation_import", type=int)
+    if report_id:
+        stored_report = db.execute(
+            "SELECT filename, report_json FROM attestation_resubmission_imports "
+            "WHERE id = ? AND event_id = ?", (report_id, event_id),
+        ).fetchone()
+        if stored_report:
+            resubmission_report = json.loads(stored_report["report_json"])
+            resubmission_report["filename"] = stored_report["filename"]
     return render_template(
         "imports.html",
+        attestation_import_allowed=can_edit_attestation_verification(),
+        resubmission_report=resubmission_report,
+        attestation_import_history=db.execute(
+            "SELECT id, filename, created_at FROM attestation_resubmission_imports "
+            "WHERE event_id = ? ORDER BY id DESC LIMIT 5", (event_id,),
+        ).fetchall(),
         event=event,
         active_batch=active_batch(db, event_id),
         history=history,
@@ -1887,6 +1931,33 @@ def event_imports(event_id):
             current_user.is_authenticated and current_user.is_admin
         ),
     )
+
+
+@bp.post("/events/<int:event_id>/imports/attestation-resubmissions")
+@event_mutation_required
+def upload_attestation_resubmissions(event_id):
+    if not can_edit_attestation_verification():
+        abort(403)
+    get_event_or_404(event_id)
+    db = get_db()
+    upload = request.files.get("attestation_file")
+    try:
+        if upload is None or not upload.filename:
+            raise AttestationResubmissionError("Choose an AF resubmission CSV file.")
+        import_id, report = import_attestation_resubmissions(
+            db, event_id, upload.stream.read(MAX_RESUBMISSION_BYTES + 1),
+            upload.filename, current_user.id,
+        )
+        db.commit()
+    except AttestationResubmissionError as exc:
+        db.rollback()
+        flash(str(exc), "error")
+        return redirect(url_for("dashboard.event_imports", event_id=event_id) + "#attestation-resubmissions")
+    flash("Attestation import complete: {} forms set to Re-verify; {} rows skipped.".format(
+        report["counts"].get("updated", 0), report["total"] - report["counts"].get("updated", 0)
+    ), "success")
+    return redirect(url_for("dashboard.event_imports", event_id=event_id,
+                            attestation_import=import_id) + "#attestation-resubmissions")
 
 
 @bp.post("/events/<int:event_id>/imports/validate")

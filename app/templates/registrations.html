@@ -17,6 +17,7 @@
     data-event-id="{{ event['id'] }}"
     data-data-url="{{ url_for('dashboard.event_registrations_data', event_id=event['id']) }}"
     data-update-url="{{ url_for('dashboard.update_registration_attestation', event_id=event['id'], registrant_id=0) }}"
+    data-attestation-history-url="{{ url_for('dashboard.registration_attestation_history', event_id=event['id'], registrant_id=0) }}"
     data-facebook-group-url="{{ url_for('dashboard.update_registration_facebook_group', event_id=event['id'], registrant_id=0) }}"
     data-remarks-url="{{ url_for('dashboard.registration_remarks', event_id=event['id'], registrant_id=0) }}"
     data-csrf-token="{{ csrf_token() }}"
@@ -52,6 +53,7 @@
         <div><span>Attestation Pending</span><strong data-summary="attestation_pending">—</strong></div>
         <div><span>Attestation Verified</span><strong data-summary="attestation_verified">—</strong></div>
         <div><span>Attestation Invalid</span><strong data-summary="attestation_invalid">—</strong></div>
+        <div><span>Attestation Re-verify</span><strong data-summary="attestation_to_verify">—</strong></div>
         <div><span>Payment Validated</span><strong data-summary="payment_validated">—</strong></div>
         <div><span>Joined FB Group</span><strong data-summary="facebook_group_joined">—</strong></div>
     </div>
@@ -62,6 +64,7 @@
         <button type="button" data-attestation-quick="pending">Pending <span data-attestation-quick-count="attestation_pending">—</span></button>
         <button type="button" data-attestation-quick="verified">Verified <span data-attestation-quick-count="attestation_verified">—</span></button>
         <button type="button" data-attestation-quick="invalid">Invalid <span data-attestation-quick-count="attestation_invalid">—</span></button>
+        <button type="button" data-attestation-quick="to_verify">Re-verify <span data-attestation-quick-count="attestation_to_verify">—</span></button>
     </div>
 
     <p class="registrations-update-feedback" data-update-feedback role="status" aria-live="polite" hidden></p>
@@ -234,7 +237,7 @@
 
             <section class="attestation-preview-panel" aria-labelledby="attestation-preview-heading">
                 <div class="attestation-section-heading">
-                    <div><p class="eyebrow">SUBMITTED DOCUMENT</p><h3 id="attestation-preview-heading">Attestation Form Preview</h3></div>
+                    <div><p class="eyebrow">SUBMITTED DOCUMENT</p><h3 id="attestation-preview-heading">Attestation Form Preview</h3><p class="attestation-selected-form" data-attestation-selected-form aria-live="polite"></p></div>
                 </div>
                 <div class="attestation-document-toolbar" data-attestation-toolbar aria-label="Attestation document controls">
                     <div class="attestation-zoom-controls" role="group" aria-label="Document zoom">
@@ -279,6 +282,7 @@
                         <option value="pending">Pending</option>
                         <option value="verified">Verified</option>
                         <option value="invalid">Invalid</option>
+                        <option value="to_verify" disabled>Re-verify (resubmitted)</option>
                     </select>
                 </label>
                 <p class="attestation-status-changed" data-attestation-status-changed aria-live="polite" hidden></p>
@@ -294,6 +298,16 @@
                 <p>You have read-only access to this review.</p>
                 {% endif %}
                 <p class="attestation-modal-feedback" data-attestation-feedback role="alert" hidden></p>
+                <section class="attestation-latest-remark" aria-labelledby="attestation-latest-remark-title" aria-live="polite">
+                    <header><h3 id="attestation-latest-remark-title">Latest remark</h3><span data-attestation-latest-remark-status hidden></span></header>
+                    <p data-attestation-latest-remark-text>Loading latest remark…</p>
+                    <small data-attestation-latest-remark-meta></small>
+                </section>
+                <section class="attestation-form-history" aria-labelledby="attestation-history-title">
+                    <header><h3 id="attestation-history-title">Form history</h3><span data-attestation-history-count></span></header>
+                    <p data-attestation-history-message role="status" aria-live="polite">Loading submitted forms…</p>
+                    <ol data-attestation-history-list aria-label="Submitted attestation forms"></ol>
+                </section>
             </aside>
         </div>
     </section>
@@ -358,5 +372,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='registrations.js', v='20260908-facebook-group-details-badge') }}" defer></script>
+<script src="{{ url_for('static', filename='registrations.js', v='20260910-swal') }}" defer></script>
 {% endblock %}

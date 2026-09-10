@@ -172,6 +172,7 @@
         const kind = trigger.dataset.kind;
         editForm.action = trigger.dataset.action;
         editForm.dataset.kind = kind;
+        delete editForm.dataset.moveConfirmed;
         editForm.dataset.initialParent = trigger.dataset.parentId;
         editForm.dataset.initialParentName = trigger.dataset.parentName;
         editForm.dataset.recordName = trigger.dataset.name;
@@ -189,6 +190,7 @@
     };
     document.querySelectorAll("[data-settings-edit-open]").forEach((trigger) => trigger.addEventListener("click", () => openEditDrawer(trigger)));
     editDrawer.querySelectorAll("[data-settings-edit-close]").forEach((button) => button.addEventListener("click", () => closeDialog(editDrawer)));
+    editDrawer.addEventListener("cancel", (event) => { if (window.Swal?.isVisible()) event.preventDefault(); });
     editDrawer.addEventListener("click", (event) => { if (event.target === editDrawer) closeDialog(editDrawer); });
 
     const updateMoveNotice = () => {
@@ -200,16 +202,25 @@
     };
     editForm.querySelector("[data-edit-group]").addEventListener("change", updateMoveNotice);
     editForm.querySelector("[data-edit-hub]").addEventListener("change", updateMoveNotice);
-    editForm.addEventListener("submit", (event) => {
+    editForm.addEventListener("submit", async (event) => {
+        if (editForm.dataset.moveConfirmed === "true") { setSubmitting(editForm); return; }
         const kind = editForm.dataset.kind;
         const select = editForm.querySelector(kind === "hub" ? "[data-edit-group]" : "[data-edit-hub]");
         if (select.value !== editForm.dataset.initialParent) {
             const destination = select.options[select.selectedIndex].text;
             const consequence = kind === "hub" ? "All Satellites assigned to this Hub will move with it." : "Its imported data and existing analytical relationships will be preserved.";
-            if (!window.confirm(`Move ${kind === "hub" ? "Hub" : "Satellite"}?\n\n${editForm.dataset.recordName} will move from:\n${editForm.dataset.initialParentName}\n→ ${destination}\n\n${consequence}`)) {
-                event.preventDefault();
-                return;
+            event.preventDefault();
+            const result = await window.confirmAction({
+                target: editDrawer,
+                titleText: `Move ${kind === "hub" ? "Hub" : "Satellite"}?`,
+                text: `${editForm.dataset.recordName} will move from ${editForm.dataset.initialParentName} to ${destination}. ${consequence}`,
+                confirmButtonText: "Move",
+            });
+            if (result.isConfirmed) {
+                editForm.dataset.moveConfirmed = "true";
+                editForm.requestSubmit(event.submitter);
             }
+            return;
         }
         setSubmitting(editForm);
     });

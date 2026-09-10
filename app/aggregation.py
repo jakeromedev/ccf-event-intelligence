@@ -257,6 +257,36 @@ def _distribution(categories, counts, total, include_segments=False):
     return {"total": total, "items": items}
 
 
+def participant_facebook_membership_metrics(db, batch_id):
+    """Count each active curated participant once using durable Facebook tags."""
+    total = joined = 0
+    if batch_id is not None:
+        row = db.execute(
+            """
+            SELECT COUNT(*) total, COALESCE(SUM(CASE WHEN EXISTS (
+                SELECT 1 FROM curated_registrant_sources source
+                JOIN attestation_participant_registrants owner
+                  ON owner.event_id = source.event_id AND owner.batch_id = source.batch_id
+                 AND owner.registrant_id = source.registrant_id
+                JOIN registrant_facebook_group_memberships membership
+                  ON membership.event_id = owner.event_id
+                 AND membership.attestation_participant_id = owner.attestation_participant_id
+                 AND membership.joined = 1
+                WHERE source.curated_registrant_id = participant.id
+                  AND source.event_id = participant.event_id
+                  AND source.batch_id = participant.batch_id
+            ) THEN 1 ELSE 0 END), 0) joined
+            FROM curated_registrants participant
+            WHERE participant.batch_id = ? AND participant.registration_type = 'participant'
+            """, (batch_id,),
+        ).fetchone()
+        total, joined = int(row["total"]), int(row["joined"])
+    return _distribution(
+        (("joined", "Joined"), ("not_joined", "Not Joined")),
+        {"joined": joined, "not_joined": total - joined}, total, include_segments=True,
+    )
+
+
 def participant_profile_metrics(db, batch_id, event_date=None):
     """Aggregate Phase 1 demographics for participants in one import batch."""
     rows = db.execute(
@@ -1216,7 +1246,7 @@ def dashboard_operational_status_metrics(db, batch_id):
         return {
             "total_registrations": 0,
             "payment": {"validated": 0, "for_validation": 0, "total": 0},
-            "attestation": {"pending": 0, "verified": 0, "invalid": 0, "total": 0},
+            "attestation": {"pending": 0, "verified": 0, "invalid": 0, "to_verify": 0, "total": 0},
         }
 
     row = db.execute(
@@ -1238,7 +1268,9 @@ def dashboard_operational_status_metrics(db, batch_id):
             COUNT(CASE WHEN verification.status = 'verified' THEN 1 END)
                 AS attestation_verified,
             COUNT(CASE WHEN verification.status = 'invalid' THEN 1 END)
-                AS attestation_invalid
+                AS attestation_invalid,
+            COUNT(CASE WHEN verification.status = 'to_verify' THEN 1 END)
+                AS attestation_to_verify
         FROM registrants record
         JOIN import_batches batch ON batch.id = record.batch_id
         LEFT JOIN tickets ticket
@@ -1260,6 +1292,7 @@ def dashboard_operational_status_metrics(db, batch_id):
     attestation_pending = row["attestation_pending"] or 0
     attestation_verified = row["attestation_verified"] or 0
     attestation_invalid = row["attestation_invalid"] or 0
+    attestation_to_verify = row["attestation_to_verify"] or 0
     return {
         "total_registrations": row["total_registrations"] or 0,
         "payment": {
@@ -1271,7 +1304,8 @@ def dashboard_operational_status_metrics(db, batch_id):
             "pending": attestation_pending,
             "verified": attestation_verified,
             "invalid": attestation_invalid,
-            "total": attestation_pending + attestation_verified + attestation_invalid,
+            "to_verify": attestation_to_verify,
+            "total": attestation_pending + attestation_verified + attestation_invalid + attestation_to_verify,
         },
     }
 
@@ -1317,6 +1351,7 @@ def event_dashboard_metrics(db, event_id, satellite_query="", satellite_page=1):
         if batch
         else participant_profile_metrics_empty(event["event_date"])
     )
+    profile["facebook"] = participant_facebook_membership_metrics(db, batch["id"] if batch else None)
     participant_details = participant_ministry_and_shirt_metrics(
         db, batch["id"] if batch else None
     )

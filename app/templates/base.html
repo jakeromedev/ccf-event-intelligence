@@ -5,7 +5,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}{{ app_name }}{% endblock %}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v='20260910-compact-downlines') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/sweetalert2/sweetalert2.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v='20260910-swal') }}">
 </head>
 <body>
     <aside class="sidebar" id="application-sidebar">
@@ -122,6 +123,8 @@
 
         {% block content %}{% endblock %}
     </main>
+    <script src="{{ url_for('static', filename='vendor/sweetalert2/sweetalert2.min.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='confirmations.js', v='20260910-swal') }}" defer></script>
     {% block scripts %}{% endblock %}
     <script src="{{ url_for('static', filename='shell.js', v='20260822-admin-nav-2') }}" defer></script>
 </body>

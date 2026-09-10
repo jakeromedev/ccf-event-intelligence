@@ -20,14 +20,16 @@ from .time_utils import format_operational_datetime, utc_now
 from .url_safety import safe_external_url
 
 
-ATTESTATION_STATUSES = ("pending", "verified", "invalid")
+ATTESTATION_STATUSES = ("pending", "verified", "invalid", "to_verify")
 REMARK_STATUSES = ("pending", "resolved")
 MAX_REMARK_LENGTH = 4000
 MAX_REGISTRATION_FILTERS = 20
+UNSPECIFIED_FORM = object()
 ATTESTATION_STATUS_LABELS = {
     "pending": "Pending",
     "verified": "Verified",
     "invalid": "Invalid",
+    "to_verify": "Re-verify",
 }
 FACEBOOK_GROUP_STATUS_LABELS = {
     "joined": "Joined",
@@ -126,7 +128,7 @@ def registration_columns(db):
         _registration_column(
             "attestation_form",
             "Actions",
-            _source_expression(db, "attestation_form"),
+            "COALESCE(verification.form_url, {})".format(_source_expression(db, "attestation_form")),
             group="Attestation & Payment",
             renderer="actions",
         ),
@@ -484,6 +486,8 @@ def registrations_data(db, event_id, active_batch_id, args):
                 AS attestation_verified,
             COUNT(CASE WHEN verification.status = 'invalid' THEN 1 END)
                 AS attestation_invalid,
+            COUNT(CASE WHEN verification.status = 'to_verify' THEN 1 END)
+                AS attestation_to_verify,
             COUNT(CASE
                 WHEN LOWER(TRIM(ticket.payment_status)) = 'payment validated' THEN 1
             END) AS payment_validated,
@@ -503,7 +507,9 @@ def registrations_data(db, event_id, active_batch_id, args):
             COUNT(CASE WHEN verification.status = 'verified' THEN 1 END)
                 AS attestation_verified,
             COUNT(CASE WHEN verification.status = 'invalid' THEN 1 END)
-                AS attestation_invalid
+                AS attestation_invalid,
+            COUNT(CASE WHEN verification.status = 'to_verify' THEN 1 END)
+                AS attestation_to_verify
         {base} WHERE {where}
         """.format(base=base_sql, where=quick_filter_where_sql),
         quick_filter_params,
@@ -575,6 +581,8 @@ def update_attestation_verification(
     status,
     reviewer_user_id,
     remark_text=None,
+    expected_form_url=UNSPECIFIED_FORM,
+    resolve_remarks=False,
 ):
     """Update current verification state after enforcing Event and batch ownership."""
     batch_scope = resolve_batch_scope(
@@ -595,8 +603,12 @@ def update_attestation_verification(
         or (batch_scope != "all" and registration["batch_id"] != batch_scope)
     ):
         return None
-    if status not in ATTESTATION_STATUSES:
+    if status not in ("pending", "verified", "invalid"):
         raise AdminTableQueryError("Attestation status is invalid.")
+    if not isinstance(resolve_remarks, bool):
+        raise AdminTableQueryError("Resolve remarks must be true or false.")
+    if resolve_remarks and status != "verified":
+        raise AdminTableQueryError("Remarks can only be resolved together with a Verified status.")
     if remark_text is not None:
         if status != "invalid":
             raise AdminTableQueryError("Remarks may only accompany an Invalid status.")
@@ -616,6 +628,23 @@ def update_attestation_verification(
     if participant_id is None:
         return None
 
+    db.execute(
+        "SELECT id FROM attestation_participants WHERE id = ? AND event_id = ?"
+        + (" FOR UPDATE" if db.is_mysql else ""), (participant_id, event_id),
+    ).fetchone()
+    if expected_form_url is not UNSPECIFIED_FORM:
+        current_form = db.execute(
+            "SELECT form_url FROM attestation_verifications WHERE event_id = ? "
+            "AND attestation_participant_id = ?" + (" FOR UPDATE" if db.is_mysql else ""),
+            (event_id, participant_id),
+        ).fetchone()
+        current_url = safe_external_url(current_form["form_url"]) if current_form else None
+        if not current_url:
+            original = db.execute("SELECT source_data_json FROM registrants WHERE id = ?", (registrant_id,)).fetchone()
+            source = json.loads(original["source_data_json"] or "{}")
+            current_url = safe_external_url(source.get(SOURCE_HEADERS["attestation_form"][0])) if isinstance(source, dict) else None
+        if expected_form_url != current_url:
+            raise AdminTableQueryError("The current AF has changed. Reopen the review to load the latest form before saving.")
     reviewed_at = utc_now()
     updated = db.execute(
         """
@@ -668,11 +697,25 @@ def update_attestation_verification(
                 reviewed_at,
             ),
         ).lastrowid
+    resolved_count = 0
+    if resolve_remarks:
+        resolved_count = db.execute(
+            """UPDATE registrant_remarks
+               SET status = 'resolved', resolved_by_user_id = ?, resolved_at = ?, updated_at = ?
+               WHERE event_id = ? AND attestation_participant_id = ? AND status = 'pending'""",
+            (reviewer_user_id, reviewed_at, reviewed_at, event_id, participant_id),
+        ).rowcount
     db.commit()
     reviewer = db.execute(
         "SELECT username FROM users WHERE id = ?", (reviewer_user_id,)
     ).fetchone()
+    history = attestation_submission_history(
+        db, event_id, active_batch_id, registrant_id, batch_argument,
+    )
     result = {
+        "resolved_remark_count": resolved_count,
+        "pending_remark_count": history["pending_remark_count"],
+        "latest_remark": history["latest_remark"],
         "batch_id": registration["batch_id"],
         "status": status,
         "label": ATTESTATION_STATUS_LABELS[status],
@@ -774,6 +817,88 @@ def _scoped_registration_participant(
     if participant_id is None:
         return None
     return registration, participant_id
+
+
+def attestation_submission_history(db, event_id, active_batch_id, registrant_id, batch_argument):
+    """Return distinct original and re-uploaded forms for one durable participant."""
+    ownership = _scoped_registration_participant(
+        db, event_id, active_batch_id, registrant_id, batch_argument
+    )
+    if ownership is None:
+        return None
+    registration, participant_id = ownership
+    source_rows = db.execute(
+        """SELECT record.id, record.source_data_json, batch.created_at
+           FROM attestation_participant_registrants owner
+           JOIN registrants record ON record.id = owner.registrant_id AND record.batch_id = owner.batch_id
+           JOIN import_batches batch ON batch.id = record.batch_id AND batch.event_id = owner.event_id
+           WHERE owner.event_id = ? AND owner.attestation_participant_id = ?
+           ORDER BY batch.created_at, record.id""", (event_id, participant_id),
+    ).fetchall()
+    verification = db.execute(
+        "SELECT form_url, status FROM attestation_verifications "
+        "WHERE event_id = ? AND attestation_participant_id = ?", (event_id, participant_id),
+    ).fetchone()
+    current_url = safe_external_url(verification["form_url"]) if verification else None
+    forms = []
+    seen = set()
+    for row in source_rows:
+        try:
+            source = json.loads(row["source_data_json"] or "{}")
+        except (ValueError, TypeError):
+            source = {}
+        url = safe_external_url(source.get(SOURCE_HEADERS["attestation_form"][0])) if isinstance(source, dict) else None
+        if row["id"] == registrant_id and not current_url:
+            current_url = url
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        forms.append({
+            "id": "original:{}".format(row["id"]), "url": url,
+            "label": "Original AF", "kind": "original",
+            "imported_at": format_operational_datetime(row["created_at"]),
+            "sort_at": str(row["created_at"] or ""),
+        })
+    for row in db.execute(
+        """SELECT id, form_url, created_at FROM attestation_resubmissions
+           WHERE event_id = ? AND attestation_participant_id = ? ORDER BY created_at, id""",
+        (event_id, participant_id),
+    ).fetchall():
+        url = safe_external_url(row["form_url"])
+        if not url:
+            continue
+        # If a later full export repeats this link, retain its re-upload provenance.
+        forms = [form for form in forms if form["url"] != url]
+        forms.append({
+            "id": "resubmission:{}".format(row["id"]), "url": url,
+            "label": "Re-uploaded AF", "kind": "resubmission",
+            "imported_at": format_operational_datetime(row["created_at"]),
+            "sort_at": str(row["created_at"] or ""),
+        })
+    forms.sort(key=lambda form: (form["sort_at"], form["kind"] == "resubmission",
+                                 int(form["id"].split(":")[1])), reverse=True)
+    for form in forms:
+        form["is_current"] = form["url"] == current_url
+        form.pop("sort_at")
+    latest_remark = db.execute(
+        """SELECT id FROM registrant_remarks
+           WHERE event_id = ? AND attestation_participant_id = ?
+           ORDER BY created_at DESC, id DESC LIMIT 1""",
+        (event_id, participant_id),
+    ).fetchone()
+    return {
+        "pending_remark_count": db.execute(
+            "SELECT COUNT(*) AS count FROM registrant_remarks "
+            "WHERE event_id = ? AND attestation_participant_id = ? AND status = 'pending'",
+            (event_id, participant_id),
+        ).fetchone()["count"],
+        "latest_remark": _remark_payload(
+            _select_remark(db, event_id, participant_id, latest_remark["id"])
+        ) if latest_remark else None,
+        "registrant_id": registrant_id, "batch_id": registration["batch_id"],
+        "current_url": current_url, "status": verification["status"] if verification else "pending",
+        "forms": forms,
+    }
 
 
 def _remark_payload(row):

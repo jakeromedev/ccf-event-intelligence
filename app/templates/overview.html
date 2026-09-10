@@ -16,11 +16,11 @@
 </article>
 {%- endmacro %}
 
-{% macro donut_panel(title, distribution, palette) -%}
+{% macro donut_panel(title, distribution, palette, note='Unknown values remain in the participant population.') -%}
 <section class="phase1-profile-card">
     <header class="phase1-card-heading">
         <h3>{{ title }}</h3>
-        <span class="phase1-inline-info" title="Unknown values remain in the participant population.">i</span>
+        <span class="phase1-inline-info" title="{{ note }}">i</span>
     </header>
     {% if distribution.total %}
         <div class="phase1-donut-layout">
@@ -225,6 +225,7 @@
             {% endif %}
             <footer><span>Total Participants</span><strong>{{ profile.age.total|number }}</strong></footer>
         </section>
+        {{ donut_panel('FB Page Membership', profile.facebook, 'phase1-facebook', 'Based on Facebook membership tags in Registration. Counts unique participants in the active import; untagged participants count as Not Joined.') }}
     </div>
 </section>
 
@@ -246,10 +247,11 @@
         </article>
         <article class="dashboard-workflow-card attestation">
             <header><span>{{ icon('document', 19) }}</span><div><h3>Attestation Forms</h3><p>Current verification status</p></div><strong>{{ dashboard.operational_status.attestation.total|number }}<small>registrations</small></strong></header>
-            <div class="dashboard-workflow-statuses three-column">
+            <div class="dashboard-workflow-statuses two-column">
                 <div class="dashboard-workflow-status pending"><span><i></i>Pending</span><strong>{{ dashboard.operational_status.attestation.pending|number }}</strong></div>
                 <div class="dashboard-workflow-status verified"><span><i></i>Verified</span><strong>{{ dashboard.operational_status.attestation.verified|number }}</strong></div>
                 <div class="dashboard-workflow-status invalid"><span><i></i>Invalid</span><strong>{{ dashboard.operational_status.attestation.invalid|number }}</strong></div>
+                <div class="dashboard-workflow-status to-verify"><span><i></i>Re-verify</span><strong>{{ dashboard.operational_status.attestation.to_verify|number }}</strong></div>
             </div>
         </article>
     </div>

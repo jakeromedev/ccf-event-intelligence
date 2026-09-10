@@ -472,7 +472,7 @@ class AttestationVerification(Base):
     __tablename__ = "attestation_verifications"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('pending','verified','invalid')",
+            "status IN ('pending','verified','invalid','to_verify')",
             name="ck_attestation_verifications_status",
         ),
         ForeignKeyConstraint(
@@ -500,6 +500,7 @@ class AttestationVerification(Base):
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, server_default=text("'pending'")
     )
+    form_url: Mapped[Optional[str]] = mapped_column(Text)
     updated_by_user_id: Mapped[Optional[int]] = mapped_column(
         ID_TYPE,
         ForeignKey("users.id", ondelete="SET NULL"),
@@ -516,6 +517,49 @@ class AttestationVerification(Base):
     )
     updated_by: Mapped[Optional[User]] = relationship(
         foreign_keys=[updated_by_user_id]
+    )
+
+
+class AttestationResubmissionImport(Base):
+    __tablename__ = "attestation_resubmission_imports"
+    __table_args__ = (MYSQL_TABLE_OPTIONS,)
+
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ID_TYPE, ForeignKey("events.id", ondelete="CASCADE"))
+    filename: Mapped[str] = mapped_column(String(255))
+    report_json: Mapped[str] = mapped_column(mysql.LONGTEXT().with_variant(Text(), "sqlite"))
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ID_TYPE, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+
+class AttestationResubmission(Base):
+    """Previously accepted links prevent repeat uploads from resetting reviews."""
+
+    __tablename__ = "attestation_resubmissions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["event_id", "attestation_participant_id"],
+            ["attestation_participants.event_id", "attestation_participants.id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("event_id", "attestation_participant_id", "link_hash",
+                         name="uq_attestation_resubmission_link"),
+        MYSQL_TABLE_OPTIONS,
+    )
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    attestation_participant_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    import_id: Mapped[int] = mapped_column(
+        ID_TYPE, ForeignKey("attestation_resubmission_imports.id", ondelete="CASCADE")
+    )
+    link_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    form_url: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
     )
 
 

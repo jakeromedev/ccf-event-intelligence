@@ -51,6 +51,13 @@
     const modalSave = modal.querySelector("[data-attestation-save]");
     const modalFeedback = modal.querySelector("[data-attestation-feedback]");
     const modalStatusChanged = modal.querySelector("[data-attestation-status-changed]");
+    const latestRemarkText = modal.querySelector("[data-attestation-latest-remark-text]");
+    const latestRemarkStatus = modal.querySelector("[data-attestation-latest-remark-status]");
+    const latestRemarkMeta = modal.querySelector("[data-attestation-latest-remark-meta]");
+    const formHistoryList = modal.querySelector("[data-attestation-history-list]");
+    const formHistoryMessage = modal.querySelector("[data-attestation-history-message]");
+    const formHistoryCount = modal.querySelector("[data-attestation-history-count]");
+    const selectedFormCaption = modal.querySelector("[data-attestation-selected-form]");
     const previousButton = modal.querySelector("[data-attestation-previous]");
     const nextButton = modal.querySelector("[data-attestation-next]");
     const queuePosition = modal.querySelector("[data-attestation-position]");
@@ -101,8 +108,8 @@
     const columnGroupOrder = ["Attestation & Payment", "Registrant Details", "Logistics"];
     const groupPreferenceVersion = 1;
     const groupVisibility = Object.fromEntries(columnGroupOrder.map((group) => [group, true]));
-    const allowedStatuses = ["pending", "verified", "invalid"];
-    const statusLabels = {pending: "Pending", verified: "Verified", invalid: "Invalid"};
+    const allowedStatuses = ["pending", "verified", "invalid", "to_verify"];
+    const statusLabels = {pending: "Pending", verified: "Verified", invalid: "Invalid", to_verify: "Re-verify"};
     const registrationDetailGroups = [
         {
             label: "Registration",
@@ -209,6 +216,9 @@
     let previewLoaded = false;
     let previewLoadTimer = null;
     let previewSourceUrl = null;
+    let historyRequestSession = 0;
+    let historyViewingCurrent = true;
+    let historyLoading = false;
     let activeQueuePosition = -1;
     let queuePageNumber = 1;
     let queuePageRows = [];
@@ -827,7 +837,7 @@
     };
 
     const hasUnsavedModalChange = () => Boolean(
-        canEditAttestation && activeRow && modalStatus
+        canEditAttestation && activeRow && modalStatus && historyViewingCurrent && !historyLoading
         && (
             modalStatus.value !== normalizeStatus(activeRow.attestation_status)
             || (modalStatus.value === "invalid" && invalidRemarkText?.value.trim())
@@ -842,7 +852,9 @@
         const hasRemark = selected === "invalid" && Boolean(invalidRemarkText?.value.trim());
         modalStatus.parentElement.dataset.status = selected;
         invalidRemarkField.hidden = selected !== "invalid";
-        modalSave.disabled = savePending || (!changed && !hasRemark);
+        modalStatus.disabled = savePending || historyLoading || !historyViewingCurrent;
+        if (invalidRemarkText) invalidRemarkText.disabled = modalStatus.disabled;
+        modalSave.disabled = savePending || historyLoading || !historyViewingCurrent || (!changed && !hasRemark);
         modalStatusChanged.hidden = !changed;
         modalStatusChanged.textContent = changed ? `Changed from ${statusLabels[persisted]}` : "";
         updateQueueNavigation();
@@ -870,6 +882,109 @@
         return params;
     };
 
+    const confirmDiscardAttestation = async () => (await window.confirmAction({
+        titleText: "Discard unsaved changes?",
+        text: "Your unsaved attestation status and remark changes will be lost.",
+        icon: "warning",
+        confirmButtonText: "Discard changes",
+        cancelButtonText: "Keep editing",
+    })).isConfirmed;
+
+    const selectAttestationForm = async (form) => {
+        if (!activeRow || savePending) return;
+        if (hasUnsavedModalChange() && !await confirmDiscardAttestation()) return;
+        historyViewingCurrent = Boolean(form?.is_current);
+        if (modalStatus) modalStatus.value = normalizeStatus(activeRow.attestation_status);
+        if (invalidRemarkText) invalidRemarkText.value = "";
+        if (invalidRemarkCount) invalidRemarkCount.textContent = "0";
+        formHistoryList?.querySelectorAll("button[data-form-id]").forEach((button) => {
+            button.setAttribute("aria-pressed", String(button.dataset.formId === form?.id));
+        });
+        selectedFormCaption.textContent = form
+            ? `${form.label}${form.is_current ? " · Current" : " · Previous version"} · Imported ${form.imported_at || "date unavailable"}`
+            : "No current attestation form";
+        formHistoryMessage.textContent = historyViewingCurrent
+            ? "Select a submitted form to preview it."
+            : "Viewing a previous version. Select the Current form to update its status.";
+        const name = [activeRow.first_name, activeRow.last_name].filter(Boolean).join(" ");
+        const session = preparePreview(name);
+        updateStatusEditor();
+        window.requestAnimationFrame(() => loadPreview(form?.url, session));
+    };
+
+    const renderLatestAttestationRemark = (remark, message = "No remarks yet.") => {
+        latestRemarkText.textContent = remark?.remark || message;
+        latestRemarkStatus.hidden = !remark;
+        latestRemarkStatus.textContent = remark?.status === "resolved" ? "Solved" : "Unresolved";
+        latestRemarkStatus.dataset.status = remark?.status || "";
+        latestRemarkMeta.textContent = remark
+            ? [remark.created_by, remark.created_at,
+                remark.status === "resolved" && remark.resolved_at
+                    ? `Solved ${remark.resolved_at}${remark.resolved_by ? ` by ${remark.resolved_by}` : ""}` : null,
+            ].filter(Boolean).join(" · ")
+            : "";
+    };
+
+    const loadAttestationHistory = (row) => {
+        const requestSession = ++historyRequestSession;
+        historyLoading = true;
+        renderLatestAttestationRemark(null, "Loading latest remark…");
+        formHistoryList.replaceChildren();
+        formHistoryCount.textContent = "";
+        formHistoryMessage.textContent = "Loading submitted forms…";
+        selectedFormCaption.textContent = "Loading current form…";
+        updateStatusEditor();
+        const url = root.dataset.attestationHistoryUrl.replace("/0/attestation/history", `/${row.id}/attestation/history`);
+        fetch(`${url}?${new URLSearchParams({batch: batchSelect.value})}`, {
+            credentials: "same-origin", headers: {Accept: "application/json"},
+        })
+            .then((response) => responsePayload(response, "Submitted forms could not be loaded."))
+            .then((payload) => {
+                if (requestSession !== historyRequestSession || modal.hidden || activeRow !== row) return;
+                historyLoading = false;
+                renderLatestAttestationRemark(payload.latest_remark);
+                row.pending_remark_count = payload.pending_remark_count;
+                row.attestation_form = payload.current_url;
+                row.attestation_status = payload.status;
+                setStatusBadge(modalCurrentStatus, row.attestation_status);
+                if (modalStatus) modalStatus.value = normalizeStatus(row.attestation_status);
+                formHistoryCount.textContent = String(payload.forms.length);
+                payload.forms.forEach((form) => {
+                    const item = document.createElement("li");
+                    const button = document.createElement("button");
+                    button.type = "button";
+                    button.dataset.formId = form.id;
+                    button.setAttribute("aria-pressed", "false");
+                    const title = document.createElement("strong");
+                    title.textContent = `${form.label}${form.is_current ? " · Current" : ""}`;
+                    const date = document.createElement("small");
+                    date.textContent = `Imported ${form.imported_at || "date unavailable"}`;
+                    button.append(title, date);
+                    button.addEventListener("click", () => selectAttestationForm(form));
+                    item.append(button);
+                    formHistoryList.append(item);
+                });
+                selectAttestationForm(payload.forms.find((form) => form.is_current) || null);
+                if (!payload.forms.length) formHistoryMessage.textContent = "No submitted forms are available.";
+            })
+            .catch((error) => {
+                if (requestSession !== historyRequestSession || modal.hidden || activeRow !== row) return;
+                historyLoading = false;
+                historyViewingCurrent = false;
+                renderLatestAttestationRemark(null, "Latest remark could not be loaded.");
+                formHistoryMessage.textContent = error.message || "Submitted forms could not be loaded.";
+                const retry = document.createElement("button");
+                retry.type = "button";
+                retry.className = "button secondary compact";
+                retry.textContent = "Retry loading forms";
+                retry.addEventListener("click", () => loadAttestationHistory(row));
+                formHistoryMessage.append(" ", retry);
+                selectedFormCaption.textContent = "Current form could not be confirmed";
+                showPreviewFailure(previewSession);
+                updateStatusEditor();
+            });
+    };
+
     const showAttestationRow = (row, {focusNavigation = false} = {}) => {
         activeRow = row;
         const name = [row.first_name, row.last_name].filter(Boolean).join(" ");
@@ -882,19 +997,19 @@
         if (invalidRemarkText) invalidRemarkText.value = "";
         if (invalidRemarkCount) invalidRemarkCount.textContent = "0";
         setModalFeedback("");
-        const session = preparePreview(name);
+        preparePreview(name);
         updateStatusEditor();
         updateQueueNavigation();
         window.requestAnimationFrame(() => {
             if (focusNavigation) queuePosition.focus?.();
-            window.requestAnimationFrame(() => loadPreview(row.attestation_form, session));
+            loadAttestationHistory(row);
         });
     };
 
-    const navigateAttestationQueue = (directionToMove) => {
+    const navigateAttestationQueue = async (directionToMove) => {
         if (savePending || activeQueuePosition < 0) return;
         if (hasUnsavedModalChange()
-            && !window.confirm("Discard the unsaved Attestation Status change?")) return;
+            && !await confirmDiscardAttestation()) return;
         const targetPosition = activeQueuePosition + directionToMove;
         const total = Number(latestPayload?.pagination?.total || 0);
         if (targetPosition < 0 || targetPosition >= total) return;
@@ -938,13 +1053,14 @@
             });
     };
 
-    const closeAttestationModal = (force = false) => {
+    const closeAttestationModal = async (force = false) => {
         if (modal.hidden || savePending) return false;
-        if (!force && hasUnsavedModalChange() && !window.confirm("Discard the unsaved Attestation Status change?")) return false;
+        if (!force && hasUnsavedModalChange() && !await confirmDiscardAttestation()) return false;
         modal.hidden = true;
         document.body.classList.remove("registrant-modal-open");
         resetPreview();
         queueRequestSession += 1;
+        historyRequestSession += 1;
         activeRow = null;
         activeQueuePosition = -1;
         queuePageRows = [];
@@ -1000,13 +1116,27 @@
         .then((payload) => renderSummary(payload.summary, payload.quick_filter_counts))
         .catch(() => {});
 
-    const saveAttestationStatus = () => {
-        if (!canEditAttestation || !activeRow || !modalStatus || !modalSave) return;
+    const saveAttestationStatus = async () => {
+        if (savePending || !canEditAttestation || !activeRow || !modalStatus || !modalSave || historyLoading || !historyViewingCurrent) return;
         const status = modalStatus.value;
         const remark = status === "invalid" ? invalidRemarkText?.value.trim() || "" : "";
         if (status === normalizeStatus(activeRow.attestation_status) && !remark) {
             updateStatusEditor();
             return;
+        }
+        let resolveRemarks = false;
+        if (status === "verified" && canEditRemarks && Number(activeRow.pending_remark_count || 0) > 0) {
+            const row = activeRow;
+            const result = await window.confirmAction({
+                titleText: "Also resolve the remarks?",
+                text: "Choose whether to resolve this registrant's unresolved remarks when verifying the AF.",
+                showDenyButton: true,
+                confirmButtonText: "Verify & resolve remarks",
+                denyButtonText: "Verify only",
+                cancelButtonText: "Cancel",
+            });
+            if (result.isDismissed || row !== activeRow || modal.hidden || savePending) return;
+            resolveRemarks = result.isConfirmed;
         }
         const updateUrl = root.dataset.updateUrl.replace("/0/attestation", `/${activeRow.id}/attestation`);
         const params = new URLSearchParams({batch: batchSelect.value});
@@ -1025,7 +1155,7 @@
                 "Content-Type": "application/json",
                 "X-CSRFToken": root.dataset.csrfToken,
             },
-            body: JSON.stringify(remark ? {status, remark} : {status}),
+            body: JSON.stringify({status, ...(remark ? {remark} : {}), expected_form_url: activeRow.attestation_form, resolve_remarks: resolveRemarks}),
         })
             .then((response) => response.ok
                 ? response.json()
@@ -1036,15 +1166,19 @@
                 activeRow.attestation_status = payload.status;
                 activeRow.last_reviewed_by = payload.updated_by;
                 activeRow.last_reviewed_at = payload.updated_at;
+                activeRow.pending_remark_count = payload.pending_remark_count;
+                activeRow.resolved_remark_count = Number(activeRow.resolved_remark_count || 0) + Number(payload.resolved_remark_count || 0);
+                renderLatestAttestationRemark(payload.latest_remark);
                 if (payload.remark) {
-                    activeRow.pending_remark_count = Number(activeRow.pending_remark_count || 0) + 1;
                     invalidRemarkText.value = "";
                     invalidRemarkCount.textContent = "0";
                 }
                 setStatusBadge(modalCurrentStatus, payload.status);
                 updateVisibleAttestationRow(activeRow);
                 showUpdateFeedback(`Attestation Status changed to ${payload.label}.`);
-                setModalFeedback(payload.remark
+                setModalFeedback(payload.resolved_remark_count
+                    ? `Attestation verified. ${payload.resolved_remark_count} remark(s) resolved.`
+                    : payload.remark
                     ? `Attestation Status saved as ${payload.label}, with a Pending remark.`
                     : `Attestation Status saved as ${payload.label}.`);
                 refreshAttestationCounts();
@@ -1894,6 +2028,7 @@
         if (!columnsMenu.hidden && !event.target.closest(".admin-column-control")) setColumnsMenuOpen(false);
     });
     document.addEventListener("keydown", (event) => {
+        if (window.Swal?.isVisible()) return;
         if (actionsMenu && !actionsMenu.hidden && event.key === "Escape") {
             event.preventDefault();
             closeActionsMenu(true);

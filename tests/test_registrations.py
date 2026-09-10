@@ -14,16 +14,22 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 
 from app import create_app
+from app.attestation_resubmissions import (
+    LINK_HEADER, AttestationResubmissionError, import_attestation_resubmissions,
+    match_resubmissions, parse_resubmission_csv,
+)
 from app.attestation_identity import (
     AttestationIdentityConflict,
     resolve_attestation_participant,
 )
-from app.admin_tables import _categorical_options
+from app.admin_tables import AdminTableQueryError, _categorical_options
 from app.db import get_db, get_engine
 from app.importer import process_batch, store_validation, validate_batch
 from app.models import Base, User
 from app.observability import JsonLogFormatter
-from app.registrations import update_attestation_verification
+from app.registrations import (
+    create_registrant_remark, resolve_registrant_remark, update_attestation_verification,
+)
 from app.url_safety import safe_external_url, safe_internal_path
 
 
@@ -308,6 +314,191 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         self.assertEqual(200, response.status_code, response.get_data(as_text=True))
         return response.get_json()
 
+    @staticmethod
+    def _resubmission_csv(*rows):
+        output = io.StringIO()
+        fields = ["ID", "Event Slug", "Registration Code", "Ticket Code", "First Name",
+                  "Last Name", "Email Address", "Mobile Number", LINK_HEADER]
+        writer = csv.DictWriter(output, fieldnames=fields)
+        writer.writeheader()
+        for values in rows:
+            writer.writerow({"ID": "RESUB-1", "Event Slug": "af-resubmission",
+                             "First Name": "Jane", "Last Name": "Alpha", **values})
+        return output.getvalue().encode("utf-8-sig")
+
+    def test_verifying_optionally_resolves_only_this_participants_pending_remarks(self):
+        batch_id = self._process(self.event_a)
+        rows = self._data(per_page=50)["rows"]
+        row, other = rows[:2]
+        with self.app.app_context():
+            db = get_db()
+            for person in (row, row, other):
+                create_registrant_remark(
+                    db, self.event_a, batch_id, person["id"], None, "Review required", None,
+                )
+            db.commit()
+            args = (db, self.event_a, batch_id, row["id"], None)
+            for bad in ("true", 1, None):
+                with self.assertRaises(AdminTableQueryError):
+                    update_attestation_verification(*args, "verified", None, resolve_remarks=bad)
+            with self.assertRaises(AdminTableQueryError):
+                update_attestation_verification(*args, "invalid", None, resolve_remarks=True)
+            result = update_attestation_verification(*args, "verified", None, resolve_remarks=False)
+            self.assertEqual(2, result["pending_remark_count"])
+            self.assertEqual(0, result["resolved_remark_count"])
+            result = update_attestation_verification(*args, "verified", None, resolve_remarks=True)
+            self.assertEqual(0, result["pending_remark_count"])
+            self.assertEqual(2, result["resolved_remark_count"])
+            self.assertEqual("resolved", result["latest_remark"]["status"])
+            self.assertTrue(result["latest_remark"]["resolved_at"])
+            result = update_attestation_verification(*args, "verified", None, resolve_remarks=True)
+            self.assertEqual(0, result["resolved_remark_count"])
+        history_url = "/events/{}/registrations/{}/attestation/history".format(self.event_a, other["id"])
+        self.assertEqual(1, self.app.test_client().get(history_url).get_json()["pending_remark_count"])
+
+    def test_attestation_preview_returns_latest_remark_even_when_solved(self):
+        batch_id = self._process(self.event_a)
+        row = self._data(per_page=50)["rows"][0]
+        url = "/events/{}/registrations/{}/attestation/history".format(self.event_a, row["id"])
+        client = self.app.test_client()
+        self.assertIsNone(client.get(url).get_json()["latest_remark"])
+        with self.app.app_context():
+            db = get_db()
+            create_registrant_remark(
+                db, self.event_a, batch_id, row["id"], None, "Older unresolved remark", None,
+            )
+            latest = create_registrant_remark(
+                db, self.event_a, batch_id, row["id"], None, "Latest review remark", None,
+            )["remark"]
+            db.commit()
+        payload = client.get(url).get_json()["latest_remark"]
+        self.assertEqual(latest["id"], payload["id"])
+        self.assertEqual("Latest review remark", payload["remark"])
+        self.assertEqual("pending", payload["status"])
+        with self.app.app_context():
+            db = get_db()
+            resolve_registrant_remark(
+                db, self.event_a, batch_id, row["id"], None, latest["id"], "resolved", None,
+            )
+            db.commit()
+        payload = client.get(url).get_json()["latest_remark"]
+        self.assertEqual(latest["id"], payload["id"])
+        self.assertEqual("resolved", payload["status"])
+        self.assertTrue(payload["resolved_at"])
+
+    def test_resubmitted_form_is_durable_idempotent_and_preserves_reviews(self):
+        batch_id = self._process(self.event_a)
+        original = next(r for r in self._data(per_page=50)["rows"] if r["registration_code"] == "R-001")
+        link = "https://files.example.com/replacement-1.pdf"
+        content = self._resubmission_csv({"Email Address": " PERSON001@EXAMPLE.COM ", LINK_HEADER: link})
+        with self.app.app_context():
+            db = get_db()
+            update_attestation_verification(db, self.event_a, batch_id, original["id"], None, "invalid", None)
+            import_id, report = import_attestation_resubmissions(db, self.event_a, content, "af.csv", None)
+            db.commit()
+            self.assertEqual({"updated": 1}, report["counts"])
+            _, repeat = import_attestation_resubmissions(db, self.event_a, content, "af.csv", None)
+            db.commit()
+            self.assertEqual({"unchanged": 1}, repeat["counts"])
+        filters = json.dumps([{"field": "attestation_status", "operator": "equals", "value": "to_verify"}])
+        data = self._data(filters=filters)
+        self.assertEqual(1, data["pagination"]["total"])
+        self.assertEqual(link, data["rows"][0]["attestation_form"])
+        self.assertEqual(1, data["summary"]["attestation_to_verify"])
+        history = self.app.test_client().get(
+            f"/events/{self.event_a}/registrations/{original['id']}/attestation/history"
+        ).get_json()
+        self.assertEqual(link, history["current_url"])
+        self.assertEqual(2, len(history["forms"]))
+        self.assertEqual({"https://files.example.com/form-1.pdf", link}, {form["url"] for form in history["forms"]})
+        self.assertEqual([link], [form["url"] for form in history["forms"] if form["is_current"]])
+        self.assertTrue(all(form["imported_at"] for form in history["forms"]))
+        result_page = self.app.test_client().get(
+            f"/events/{self.event_a}/imports?attestation_import={import_id}"
+        )
+        self.assertEqual(200, result_page.status_code)
+        self.assertIn(b"Re-verify", result_page.data)
+
+        # Rejecting the new document must survive repeats of the same upload.
+        with self.app.app_context():
+            db = get_db()
+            update_attestation_verification(db, self.event_a, batch_id, original["id"], None, "invalid", None)
+            _, repeat = import_attestation_resubmissions(db, self.event_a, content, "af.csv", None)
+            db.commit()
+            self.assertEqual({"unchanged": 1}, repeat["counts"])
+        replacement_batch = self._process(self.event_a)
+        current = next(r for r in self._data(per_page=50)["rows"] if r["registration_code"] == "R-001")
+        self.assertEqual("invalid", current["attestation_status"])
+        self.assertEqual(link, current["attestation_form"])
+        newer = self._resubmission_csv({"Email Address": "person001@example.com",
+                                        LINK_HEADER: "https://files.example.com/replacement-2.pdf"})
+        with self.app.app_context():
+            db = get_db()
+            _, changed = import_attestation_resubmissions(db, self.event_a, newer, "newer.csv", None)
+            db.commit()
+            self.assertEqual({"updated": 1}, changed["counts"])
+            with self.assertRaisesRegex(AdminTableQueryError, "current AF has changed"):
+                update_attestation_verification(
+                    db, self.event_a, replacement_batch, current["id"], None, "verified", None,
+                    expected_form_url=link,
+                )
+            _, old = import_attestation_resubmissions(db, self.event_a, content, "old.csv", None)
+            db.commit()
+            self.assertEqual({"unchanged": 1}, old["counts"])
+            update_attestation_verification(db, self.event_a, replacement_batch, current["id"], None, "verified", None)
+            third = self._resubmission_csv({"Email Address": "person001@example.com",
+                                           LINK_HEADER: "https://files.example.com/replacement-3.pdf"})
+            _, protected = import_attestation_resubmissions(db, self.event_a, third, "third.csv", None)
+            db.commit()
+            self.assertEqual({"verified_protected": 1}, protected["counts"])
+        current = next(r for r in self._data(per_page=50)["rows"] if r["registration_code"] == "R-001")
+        self.assertEqual("verified", current["attestation_status"])
+        self.assertEqual("https://files.example.com/replacement-2.pdf", current["attestation_form"])
+        history = self.app.test_client().get(
+            f"/events/{self.event_a}/registrations/{current['id']}/attestation/history"
+        ).get_json()
+        self.assertEqual(3, len(history["forms"]))
+        self.assertEqual("https://files.example.com/replacement-2.pdf", history["current_url"])
+        self.assertEqual(1, sum(form["is_current"] for form in history["forms"]))
+        self.assertNotIn("https://files.example.com/replacement-3.pdf", [form["url"] for form in history["forms"]])
+        self.assertEqual(404, self.app.test_client().get(
+            f"/events/{self.event_b}/registrations/{current['id']}/attestation/history"
+        ).status_code)
+        self.assertEqual(404, self.app.test_client().get(
+            f"/events/{self.event_a}/registrations/{original['id']}/attestation/history"
+        ).status_code)
+        historical = self.app.test_client().get(
+            f"/events/{self.event_a}/registrations/{original['id']}/attestation/history?batch={batch_id}"
+        )
+        self.assertEqual(200, historical.status_code)
+        self.assertEqual(3, len(historical.get_json()["forms"]))
+
+    def test_resubmission_matching_rejects_ambiguous_unmatched_and_conflicting_links(self):
+        self._process(self.event_a)
+        with self.app.app_context():
+            db = get_db()
+            rows = parse_resubmission_csv(self._resubmission_csv(
+                {"Email Address": "missing@example.com", "Registration Code": "R-001", LINK_HEADER: "https://files.example.com/a.pdf"},
+                {"Email Address": "person001@example.com", LINK_HEADER: "https://files.example.com/a.pdf"},
+                {"Email Address": "person001@example.com", LINK_HEADER: "https://files.example.com/b.pdf"},
+                {"Email Address": "person002@example.com", LINK_HEADER: "javascript:alert(1)"},
+            ))
+            content = self._resubmission_csv(*rows)
+            _, report = import_attestation_resubmissions(db, self.event_a, content, "conflicts.csv", None)
+            db.commit()
+            self.assertEqual({"unmatched": 1, "conflicting_links": 2, "missing_or_invalid_link": 1}, report["counts"])
+            self.assertEqual(0, db.execute("SELECT COUNT(*) FROM attestation_resubmissions").fetchone()[0])
+            # Same email on two distinct durable registrants is not safe to match.
+            source = db.execute("SELECT id, source_data_json FROM registrants WHERE registration_code = 'R-002'").fetchone()
+            values = json.loads(source["source_data_json"])
+            values["Email Address"] = "person001@example.com"
+            db.execute("UPDATE registrants SET source_data_json = ? WHERE id = ?", (json.dumps(values), source["id"]))
+            _, _, matched = match_resubmissions(db, self.event_a, [rows[1]])
+            self.assertEqual("ambiguous", matched[0]["status"])
+            db.rollback()
+        with self.assertRaises(AttestationResubmissionError):
+            parse_resubmission_csv(b"not,the,expected,headers\n")
+
     def test_page_and_composed_registration_rows(self):
         batch_id = self._process(self.event_a)
         client = self.app.test_client()
@@ -411,7 +602,7 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         self.assertIsNone(row["last_reviewed_at"])
         self.assertEqual("Payment Validated", row["payment_status"])
         self.assertEqual(
-            ["pending", "verified", "invalid"],
+            ["pending", "verified", "invalid", "to_verify"],
             [item["value"] for item in payload["column_options"]["attestation_status"]],
         )
         self.assertEqual(
@@ -431,6 +622,7 @@ class RegistrationsIntegrationTests(unittest.TestCase):
                 "attestation_pending": 30,
                 "attestation_verified": 0,
                 "attestation_invalid": 0,
+                "attestation_to_verify": 0,
                 "payment_validated": 15,
                 "facebook_group_joined": 0,
             },
@@ -442,6 +634,7 @@ class RegistrationsIntegrationTests(unittest.TestCase):
                 "attestation_pending": 30,
                 "attestation_verified": 0,
                 "attestation_invalid": 0,
+                "attestation_to_verify": 0,
             },
             payload["quick_filter_counts"],
         )
@@ -1185,7 +1378,7 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         self.assertIn('previewImage.onerror', script)
         self.assertIn('method: "PATCH"', script)
         self.assertIn('"X-CSRFToken": root.dataset.csrfToken', script)
-        self.assertIn('const allowedStatuses = ["pending", "verified", "invalid"]', script)
+        self.assertIn('const allowedStatuses = ["pending", "verified", "invalid", "to_verify"]', script)
         self.assertIn('filters.filter((item) => item.field !== "attestation_status")', script)
         self.assertIn("window.localStorage.setItem", script)
         self.assertIn("hasUnsavedModalChange", script)
@@ -1225,9 +1418,13 @@ class RegistrationsIntegrationTests(unittest.TestCase):
             open_flow.index("modal.hidden = false"),
             open_flow.index("showAttestationRow(row)"),
         )
-        self.assertIn("const session = preparePreview(name)", open_flow)
-        self.assertIn("loadPreview(row.attestation_form, session)", open_flow)
+        self.assertIn("preparePreview(name)", open_flow)
+        self.assertIn("loadAttestationHistory(row)", open_flow)
         self.assertIn("window.requestAnimationFrame", open_flow)
+        self.assertIn('data-attestation-history-list', page)
+        self.assertIn('data-attestation-selected-form', page)
+        self.assertIn('Form history', page)
+        self.assertIn('Re-verify', page)
 
         self.assertIn('aria-busy="true"', page)
         self.assertIn('role="status" aria-live="polite"', page)
@@ -1283,7 +1480,7 @@ class RegistrationsIntegrationTests(unittest.TestCase):
 
         self.assertIn("const navigateAttestationQueue", script)
         self.assertIn("registrationsQueryParams(targetPage)", script)
-        self.assertIn('window.confirm("Discard the unsaved Attestation Status change?")', script)
+        self.assertIn('await confirmDiscardAttestation()', script)
         self.assertIn("previousButton.disabled = savePending", script)
         self.assertIn("nextButton.disabled = savePending", script)
         self.assertIn("updateVisibleAttestationRow(activeRow)", script)
@@ -1822,6 +2019,7 @@ class RegistrationsIntegrationTests(unittest.TestCase):
                     "attestation_pending": 25,
                     "attestation_verified": 2,
                     "attestation_invalid": 3,
+                    "attestation_to_verify": 0,
                 },
                 payload["quick_filter_counts"],
             )
@@ -1937,6 +2135,46 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
                 ),
             ),
         ).lastrowid
+
+    def test_resubmission_upload_requires_auth_csrf_and_sets_system_only_status(self):
+        url = f"/events/{self.event_id}/imports/attestation-resubmissions"
+        content = RegistrationsIntegrationTests._resubmission_csv({
+            "Email Address": "protected@example.test",
+            LINK_HEADER: "https://files.example.test/resubmitted.pdf",
+        })
+        self.assertIn(self.client.post(url).status_code, (302, 400, 403))
+        self._login("admin", "Admin-Registrations-Password-1!")
+        token = self._csrf_token()
+        status_url = f"/events/{self.event_id}/registrations/{self.registrant_id}/attestation"
+        self.assertEqual(400, self.client.patch(
+            status_url, json={"status": "to_verify"}, headers={"X-CSRFToken": token}
+        ).status_code)
+        self.assertEqual(200, self.client.patch(
+            status_url, json={"status": "invalid"}, headers={"X-CSRFToken": token}
+        ).status_code)
+        self.assertEqual(400, self.client.post(url, data={
+            "attestation_file": (io.BytesIO(content), "resubmission.csv"),
+        }).status_code)
+        response = self.client.post(url, data={
+            "csrf_token": token,
+            "attestation_file": (io.BytesIO(content), "resubmission.csv"),
+        }, follow_redirects=True)
+        self.assertEqual(200, response.status_code)
+        self.assertIn(b"1 forms set to Re-verify", response.data)
+        data = self.client.get(f"/events/{self.event_id}/registrations/data").get_json()
+        self.assertEqual("to_verify", data["rows"][0]["attestation_status"])
+        self.assertEqual("https://files.example.test/resubmitted.pdf", data["rows"][0]["attestation_form"])
+        self.assertEqual(200, self.client.patch(
+            status_url, json={"status": "verified"}, headers={"X-CSRFToken": token}
+        ).status_code)
+        repeated = self.client.post(url, data={
+            "csrf_token": token,
+            "attestation_file": (io.BytesIO(content), "resubmission.csv"),
+        }, follow_redirects=True)
+        self.assertIn(b"already verified", repeated.data)
+        self.assertEqual("verified", self.client.get(
+            f"/events/{self.event_id}/registrations/data"
+        ).get_json()["rows"][0]["attestation_status"])
 
     def test_page_data_and_navigation_require_registration_capability(self):
         page_url = "/events/{}/registrations".format(self.event_id)
@@ -2400,6 +2638,20 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
         )
         self.assertEqual(404, response.status_code)
 
+    def test_verify_and_resolve_remarks_request(self):
+        self._login("admin", "Admin-Registrations-Password-1!")
+        url = "/events/{}/registrations/{}/attestation".format(self.event_id, self.registrant_id)
+        headers = {"X-CSRFToken": self._csrf_token()}
+        response = self.client.patch(url, json={"status": "invalid", "remark": "Please resubmit"}, headers=headers)
+        self.assertEqual(200, response.status_code)
+        response = self.client.patch(url, json={"status": "verified", "resolve_remarks": True}, headers=headers)
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json()
+        self.assertEqual(1, payload["resolved_remark_count"])
+        self.assertEqual(0, payload["pending_remark_count"])
+        self.assertEqual("resolved", payload["latest_remark"]["status"])
+        self.assertEqual("admin", payload["latest_remark"]["resolved_by"])
+
     def test_attestation_workflow_is_csrf_protected_attributed_and_reconciled(self):
         self._login("admin", "Admin-Registrations-Password-1!")
         page_url = "/events/{}/registrations".format(self.event_id)
@@ -2429,7 +2681,8 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
                 self.assertEqual("admin", payload["updated_by"])
                 self.assertTrue(payload["updated_at"])
                 self.assertEqual(
-                    {"batch_id", "status", "label", "updated_by", "updated_at"},
+                    {"batch_id", "status", "label", "updated_by", "updated_at",
+                     "latest_remark", "pending_remark_count", "resolved_remark_count"},
                     set(payload),
                 )
 
