@@ -271,7 +271,7 @@
                     <td class="import-history-action">
                         <div class="import-history-actions">
                             <a class="button secondary compact" href="{{ url_for('dashboard.event_imports', event_id=event['id'], batch=batch['id'], q=history.filters.query, status=history.filters.status, page=history.pagination.page, per_page=history.pagination.per_page, sort=history.filters.sort, direction=history.filters.direction) }}">View</a>
-                            {% if batch['status'] == 'inactive' and import_mutations_allowed %}
+                            {% if batch['status'] == 'inactive' and import_mutations_allowed and can_manage_import_batches %}
                                 <form action="{{ url_for('dashboard.activate_import', event_id=event['id'], batch_id=batch['id']) }}" method="post">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <button class="button primary compact" type="submit">Activate</button>
