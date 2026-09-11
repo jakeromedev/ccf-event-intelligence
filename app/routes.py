@@ -18,6 +18,7 @@ from .auth import (
     can_view_admin_tables,
     can_view_registrations,
     event_mutation_required,
+    import_mutation_required,
     password_policy_error,
     satellite_settings_management_required,
 )
@@ -1934,7 +1935,7 @@ def event_imports(event_id):
 
 
 @bp.post("/events/<int:event_id>/imports/attestation-resubmissions")
-@event_mutation_required
+@import_mutation_required
 def upload_attestation_resubmissions(event_id):
     if not can_edit_attestation_verification():
         abort(403)
@@ -1961,7 +1962,7 @@ def upload_attestation_resubmissions(event_id):
 
 
 @bp.post("/events/<int:event_id>/imports/validate")
-@event_mutation_required
+@import_mutation_required
 def validate_import(event_id):
     get_event_or_404(event_id)
     required = ("tickets", "buyers", "registrants")
@@ -2018,7 +2019,7 @@ def validate_import(event_id):
 
 
 @bp.post("/events/<int:event_id>/imports/<int:batch_id>/process")
-@event_mutation_required
+@import_mutation_required
 def process_import(event_id, batch_id):
     get_event_or_404(event_id)
     db = get_db()
@@ -2108,7 +2109,7 @@ def process_import(event_id, batch_id):
 
 
 @bp.post("/events/<int:event_id>/imports/<int:batch_id>/activate")
-@event_mutation_required
+@import_mutation_required
 def activate_import(event_id, batch_id):
     get_event_or_404(event_id)
     db = get_db()

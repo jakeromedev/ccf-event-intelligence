@@ -37,7 +37,7 @@
                 ('registrants', 'Registrants', 'users', 'Registration Code, Ticket Code, Ticket Status, affiliation responses')
             ] %}
                 <label class="import-upload-card" data-upload-slot>
-                    <input type="file" name="{{ slot }}" accept=".csv,text/csv" required {{ 'disabled' if not event_mutations_allowed else '' }}>
+                    <input type="file" name="{{ slot }}" accept=".csv,text/csv" required {{ 'disabled' if not import_mutations_allowed else '' }}>
                     <span class="slot-status not-uploaded">Not uploaded</span>
                     <span class="import-upload-card-head">
                         <span class="import-upload-card-icon">{{ icon(icon_name, 28) }}</span>
@@ -60,7 +60,7 @@
                 <li>Only supported CSV exports are accepted.</li>
                 <li>File type is detected from headers, not filenames.</li>
             </ul>
-            <button class="button primary import-validate-button" type="submit" id="validate-button" disabled>{{ icon('imports', 16) }} {{ 'Upload & Validate Files' if event_mutations_allowed else 'Administrator approval required' }}</button>
+            <button class="button primary import-validate-button" type="submit" id="validate-button" disabled>{{ icon('imports', 16) }} {{ 'Upload & Validate Files' if import_mutations_allowed else 'Administrator approval required' }}</button>
         </aside>
     </div>
 </form>
@@ -72,7 +72,7 @@
     </header>
     <div class="attestation-resubmission-body">
     <div class="attestation-resubmission-layout">
-    {% if attestation_import_allowed and event_mutations_allowed and active_batch %}
+    {% if attestation_import_allowed and import_mutations_allowed and active_batch %}
     <form method="post" enctype="multipart/form-data" action="{{ url_for('dashboard.upload_attestation_resubmissions', event_id=event.id) }}" class="attestation-resubmission-upload" id="attestation-resubmission-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <label class="attestation-resubmission-picker" for="attestation-resubmission-file">
@@ -194,7 +194,7 @@
 
             <aside class="validation-action-card {{ 'ready' if selected['status'] == 'validated' else selected['status'] }}">
                 <span class="validation-action-icon">{{ icon('info' if selected['status'] != 'validated' else 'active', 23) }}</span>
-                {% if selected['status'] == 'validated' and event_mutations_allowed %}
+                {% if selected['status'] == 'validated' and import_mutations_allowed %}
                     <div><strong>Ready to activate</strong><p>Activating replaces this Event's current active dataset and automatically syncs registration Satellites. History is preserved.</p></div>
                     <form action="{{ url_for('dashboard.process_import', event_id=event['id'], batch_id=selected['id']) }}" method="post" data-import-process><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button primary" type="submit">Process and Activate</button></form>
                 {% elif selected['status'] == 'invalid' %}
@@ -202,7 +202,7 @@
                     <button class="button" type="button" disabled>Cannot process</button>
                 {% elif selected['status'] == 'active' %}
                     <div><strong>Active dataset</strong><p>This batch currently drives the selected Event's dashboard.</p></div>
-                {% elif selected['status'] == 'inactive' and event_mutations_allowed %}
+                {% elif selected['status'] == 'inactive' and import_mutations_allowed %}
                     <div><strong>Available dataset</strong><p>This processed batch can be made active again without re-uploading its files.</p></div>
                     <form action="{{ url_for('dashboard.activate_import', event_id=event['id'], batch_id=selected['id']) }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button primary" type="submit">Make Active</button></form>
                 {% elif selected['status'] == 'failed' %}
@@ -271,7 +271,7 @@
                     <td class="import-history-action">
                         <div class="import-history-actions">
                             <a class="button secondary compact" href="{{ url_for('dashboard.event_imports', event_id=event['id'], batch=batch['id'], q=history.filters.query, status=history.filters.status, page=history.pagination.page, per_page=history.pagination.per_page, sort=history.filters.sort, direction=history.filters.direction) }}">View</a>
-                            {% if batch['status'] == 'inactive' and event_mutations_allowed %}
+                            {% if batch['status'] == 'inactive' and import_mutations_allowed %}
                                 <form action="{{ url_for('dashboard.activate_import', event_id=event['id'], batch_id=batch['id']) }}" method="post">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <button class="button primary compact" type="submit">Activate</button>

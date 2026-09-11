@@ -2234,11 +2234,11 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
         for label in (
             b">Analytics</span>",
             b">Data Quality</span>",
-            b">Imports</span>",
             b">Admin Tables</span>",
             b">Users</a>",
         ):
             self.assertNotIn(label, standard_page.data)
+        self.assertIn(b">Imports</a>", standard_page.data)
         csrf_token = self._csrf_token()
         standard_update = self.client.patch(
             update_url,
@@ -2256,7 +2256,7 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
             ).status_code,
         )
         self.assertEqual(
-            403,
+            200,
             self.client.get("/events/{}/imports".format(self.event_id)).status_code,
         )
         self.client.post("/logout", data={"csrf_token": self._csrf_token()})

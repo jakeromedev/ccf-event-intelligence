@@ -1,4 +1,5 @@
 import os
+import io
 import re
 import tempfile
 import unittest
@@ -907,7 +908,7 @@ class AuthenticationTests(unittest.TestCase):
         imports_path = "/events/{}/imports".format(event_id)
         self.login("normal-operator", "StrongPassword12!")
         normal_page = self.client.get(imports_path)
-        self.assertEqual(403, normal_page.status_code)
+        self.assertEqual(200, normal_page.status_code)
         self.assertNotIn(b">Delete</button>", normal_page.data)
         token = self.csrf("/events/{}".format(event_id))
         denied = self.client.post(
@@ -948,6 +949,70 @@ class AuthenticationTests(unittest.TestCase):
                 ).fetchone()
             )
 
+    def test_standard_user_can_upload_process_and_reactivate_imports(self):
+        from test_phase1 import EventIntegrationTests
+
+        self.create_user("import-operator")
+        self.app.config["STANDARD_USER_MUTATIONS_ALLOWED"] = False
+        with self.app.app_context():
+            db = get_db()
+            event_id = db.execute("INSERT INTO events (name) VALUES ('Import Access')").lastrowid
+            db.commit()
+        self.login("import-operator", "StrongPassword12!")
+        imports_path = "/events/{}/imports".format(event_id)
+        page = self.client.get(imports_path)
+        self.assertEqual(200, page.status_code)
+        self.assertIn(b">Imports</a>", page.data)
+        self.assertNotIn(b"Administrator approval required", page.data)
+        token = self.csrf(imports_path)
+
+        fixture = EventIntegrationTests()
+        fixture.paths = {slot: Path(self.temp.name) / (slot + ".csv")
+                         for slot in ("tickets", "buyers", "registrants")}
+        fixture._write_fixture()
+        batches = []
+        for _ in range(2):
+            uploads = {slot: (io.BytesIO(path.read_bytes()), path.name)
+                       for slot, path in fixture.paths.items()}
+            uploads["csrf_token"] = token
+            uploaded = self.client.post(imports_path + "/validate", data=uploads)
+            self.assertEqual(302, uploaded.status_code)
+            with self.app.app_context():
+                batch = get_db().execute(
+                    "SELECT id, status FROM import_batches WHERE event_id = ? ORDER BY id DESC LIMIT 1",
+                    (event_id,),
+                ).fetchone()
+                self.assertEqual("validated", batch["status"])
+                batches.append(batch["id"])
+            processed = self.client.post(imports_path + "/{}/process".format(batches[-1]),
+                                         data={"csrf_token": token})
+            self.assertEqual(302, processed.status_code)
+            with self.app.app_context():
+                self.assertEqual("active", get_db().execute(
+                    "SELECT status FROM import_batches WHERE id = ?", (batches[-1],)
+                ).fetchone()["status"])
+
+        activated = self.client.post(imports_path + "/{}/activate".format(batches[0]),
+                                     data={"csrf_token": token})
+        self.assertEqual(302, activated.status_code)
+        with self.app.app_context():
+            self.assertEqual("active", get_db().execute(
+                "SELECT status FROM import_batches WHERE id = ?", (batches[0],)
+            ).fetchone()["status"])
+        rejected = self.client.post(imports_path + "/validate")
+        self.assertEqual(400, rejected.status_code)
+        self.logout()
+        self.create_user("registration-import-denied", role="registration")
+        self.login("registration-import-denied", "StrongPassword12!")
+        self.assertEqual(403, self.client.get(imports_path).status_code)
+        token = self.csrf("/events/{}".format(event_id))
+        for suffix in ("/validate", "/attestation-resubmissions",
+                       "/{}/process".format(batches[0]),
+                       "/{}/activate".format(batches[0])):
+            self.assertEqual(403, self.client.post(
+                imports_path + suffix, data={"csrf_token": token}
+            ).status_code)
+
     def test_undecided_standard_user_event_mutations_fail_closed(self):
         _, admin_password = self.initialize_admin()
         self.create_user("read-only-operator")
@@ -963,7 +1028,7 @@ class AuthenticationTests(unittest.TestCase):
         self.assertEqual(200, overview.status_code)
         self.assertNotIn(b"Manage Satellite Targets", overview.data)
         self.assertEqual(
-            403,
+            200,
             self.client.get("/events/{}/imports".format(event_id)).status_code,
         )
         self.assertEqual(
@@ -1012,7 +1077,7 @@ class AuthenticationTests(unittest.TestCase):
         )
         self.assertEqual(403, denied.status_code)
         self.assertEqual(
-            403,
+            302,
             self.client.post(
                 "/events/{}/imports/validate".format(event_id),
                 data={"csrf_token": token},

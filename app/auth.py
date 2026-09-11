@@ -51,6 +51,7 @@ CAPABILITY_VIEW_SATELLITES = "satellites.view"
 CAPABILITY_MANAGE_SATELLITE_SETTINGS = "satellites.settings.manage"
 CAPABILITY_VIEW_DATA_QUALITY = "data_quality.view"
 CAPABILITY_VIEW_IMPORTS = "imports.view"
+CAPABILITY_MANAGE_IMPORTS = "imports.manage"
 CAPABILITY_CREATE_EVENTS = "events.create"
 CAPABILITY_VIEW_EVENT_SETTINGS = "events.settings.view"
 CAPABILITY_VIEW_ADMIN_TABLES = "admin_tables.view"
@@ -76,6 +77,8 @@ STANDARD_USER_CAPABILITIES = frozenset(
         CAPABILITY_EDIT_FACEBOOK_GROUP,
         CAPABILITY_CREATE_EVENTS,
         CAPABILITY_VIEW_EVENT_SETTINGS,
+        CAPABILITY_VIEW_IMPORTS,
+        CAPABILITY_MANAGE_IMPORTS,
     }
 )
 
@@ -274,6 +277,21 @@ def can_view_data_quality() -> bool:
 
 def can_view_imports() -> bool:
     return has_capability(CAPABILITY_VIEW_IMPORTS)
+
+
+def import_mutations_allowed() -> bool:
+    return has_capability(CAPABILITY_MANAGE_IMPORTS)
+
+
+def import_mutation_required(view):
+    """Allow approved import operators independently of Event editing rights."""
+    @wraps(view)
+    def protected(*args, **kwargs):
+        if not import_mutations_allowed():
+            abort(403)
+        return view(*args, **kwargs)
+
+    return protected
 
 
 def can_view_admin_tables() -> bool:
@@ -659,6 +677,7 @@ def init_app(app) -> None:
             ),
             "data_quality_allowed": can_view_data_quality(),
             "imports_allowed": can_view_imports(),
+            "import_mutations_allowed": import_mutations_allowed(),
             "event_creation_allowed": can_create_events(),
             "event_settings_visible": can_view_event_settings(),
             "event_mutations_allowed": event_mutations_allowed(),
