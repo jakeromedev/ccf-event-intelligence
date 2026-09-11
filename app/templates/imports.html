@@ -100,11 +100,22 @@
     </div>
 </section>
 
+{% if selected %}
+<div class="import-summary-trigger"><button class="button secondary" type="button" data-validation-open>View Validation Summary · Batch #{{ selected['id'] }}</button></div>
+<dialog class="import-validation-dialog" aria-labelledby="validation-summary-title" aria-describedby="validation-summary-description" data-auto-open="{{ 'true' if request.args.get('batch') else 'false' }}">
 <section class="panel import-validation-panel">
     <header class="imports-section-heading">
         <div>
-            <h2><span>2.</span> Validation Summary{% if selected %} <small>Batch #{{ selected['id'] }}</small>{% endif %}</h2>
-            <p>Preview of file validation and cross-file checks.</p>
+            <p class="validation-eyebrow">IMPORT REVIEW · BATCH #{{ selected['id'] }}</p>
+            <h2 id="validation-summary-title" tabindex="-1">Validation Summary</h2>
+            <p id="validation-summary-description">Review your files before activating the dataset.</p>
+        </div>
+        <button class="validation-close-button" type="button" data-validation-close aria-label="Close validation summary">{{ icon('close', 20) }}</button>
+    </header>
+    <div class="validation-modal-body">
+        <div class="validation-result-overview">
+        <div>
+            <strong class="validation-event-name">{{ selected['event_name'] or event['name'] }}</strong>
             {% if selected %}
                 <div class="validation-heading-meta" aria-label="Validation issue totals">
                     <span>{{ issue_totals.error|number }} errors</span>
@@ -126,9 +137,10 @@
                 <span class="validation-overall success">{{ icon('active', 15) }} All validations passed</span>
             {% endif %}
         {% endif %}
-    </header>
+        </div>
 
     {% if selected %}
+        <div class="validation-section-label"><h3>Uploaded files</h3><span>{{ files|length }} files checked</span></div>
         <div class="validation-summary-grid">
             {% for file in files %}
                 {% set title = {'tickets':'Generated Tickets', 'buyers':'Buyers', 'registrants':'Registrants'}[file['export_type']] %}
@@ -141,13 +153,13 @@
                         <span>total rows</span>
                     </div>
                     <span class="slot-status {{ file['status'] }}">{{ file['status'] }}</span>
-                    <details class="validation-file-details">
-                        <summary>View metrics</summary>
+                    <details class="validation-file-details" open>
+                        <summary>Row breakdown</summary>
                         <dl>
                             <div><dt>Valid</dt><dd>{{ file['valid_rows']|number }}</dd></div>
                             <div><dt>Invalid</dt><dd>{{ file['invalid_rows']|number }}</dd></div>
                             <div><dt>Duplicates</dt><dd>{{ file['duplicate_records']|number }}</dd></div>
-                            <div><dt>Relations</dt><dd>{{ file['relationship_issues']|number }}</dd></div>
+                            <div><dt>Relationships</dt><dd>{{ file['relationship_issues']|number }}</dd></div>
                             <div><dt>Warnings</dt><dd>{{ file['warning_count']|number }}</dd></div>
                         </dl>
                     </details>
@@ -163,8 +175,8 @@
                     <span>relationship issues</span>
                 </div>
                 <span class="slot-status {{ 'valid' if not issue_totals.error else 'invalid' }}">{{ 'Valid' if not issue_totals.error else 'Invalid' }}</span>
-                <details class="validation-file-details">
-                    <summary>View metrics</summary>
+                <details class="validation-file-details" {{ 'open' if issue_counts else '' }}>
+                    <summary>{{ 'Review validation issues' if issue_counts else 'View check details' }}</summary>
                     <dl>
                         <div><dt>Errors</dt><dd>{{ issue_totals.error|number }}</dd></div>
                         <div><dt>Warnings</dt><dd>{{ issue_totals.warning|number }}</dd></div>
@@ -172,17 +184,19 @@
                     </dl>
                     {% if issue_counts %}
                         <ul class="validation-issue-list">
-                            {% for issue in issue_counts %}<li><span>{{ issue['category']|replace('_', ' ') }}</span><strong>{{ issue['count']|number }}</strong></li>{% endfor %}
+                            {% for issue in issue_counts %}<li><span class="validation-issue-severity {{ issue['severity'] }}">{{ issue['severity']|title }}</span><span>{{ issue['category']|replace('_', ' ') }}</span><strong>{{ issue['count']|number }}</strong></li>{% endfor %}
                         </ul>
                     {% endif %}
                 </details>
             </article>
+        </div>
+    </div>
 
             <aside class="validation-action-card {{ 'ready' if selected['status'] == 'validated' else selected['status'] }}">
                 <span class="validation-action-icon">{{ icon('info' if selected['status'] != 'validated' else 'active', 23) }}</span>
                 {% if selected['status'] == 'validated' and event_mutations_allowed %}
-                    <div><strong>Ready to activate</strong><p>Activating replaces only this Event's current active dataset. History is preserved.</p></div>
-                    <form action="{{ url_for('dashboard.process_import', event_id=event['id'], batch_id=selected['id']) }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button primary" type="submit">Process and Activate</button></form>
+                    <div><strong>Ready to activate</strong><p>Activating replaces this Event's current active dataset and automatically syncs registration Satellites. History is preserved.</p></div>
+                    <form action="{{ url_for('dashboard.process_import', event_id=event['id'], batch_id=selected['id']) }}" method="post" data-import-process><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button primary" type="submit">Process and Activate</button></form>
                 {% elif selected['status'] == 'invalid' %}
                     <div><strong>Blocking issues found</strong><p>Correct the errors and upload a new complete set.</p></div>
                     <button class="button" type="button" disabled>Cannot process</button>
@@ -197,19 +211,23 @@
                     <div><strong>{{ selected['status']|replace('_', ' ')|title }}</strong><p>This batch is not currently eligible for activation.</p></div>
                 {% endif %}
             </aside>
-        </div>
-
-    {% else %}
-        <div class="imports-empty-summary">
-            <span>{{ icon('document', 28) }}</span>
-            <div><strong>No batch has been validated yet.</strong><p>Select all three required exports above to create the first validation summary.</p></div>
-        </div>
     {% endif %}
 </section>
 
+</dialog>
+{% endif %}
+
+<dialog class="import-loading-dialog" aria-labelledby="import-loading-title" aria-describedby="import-loading-description">
+    <div role="status" aria-live="polite" aria-atomic="true">
+        <span class="import-loading-spinner" aria-hidden="true"></span>
+        <h2 id="import-loading-title">Validating files…</h2>
+        <p id="import-loading-description">Please wait while your files are uploaded and checked.</p>
+    </div>
+</dialog>
+
 <section class="panel import-history-panel" id="import-history">
     <header class="imports-section-heading import-history-heading">
-        <div><h2><span>3.</span> Import History</h2><p>All import batches for this event.</p></div>
+        <div><h2><span>2.</span> Import History</h2><p>All import batches for this event.</p></div>
         <form class="import-history-filters" method="get" action="{{ url_for('dashboard.event_imports', event_id=event['id']) }}#import-history">
             {% if selected %}<input type="hidden" name="batch" value="{{ selected['id'] }}">{% endif %}
             <input type="hidden" name="sort" value="{{ history.filters.sort }}">
@@ -329,7 +347,39 @@ slots.forEach(slot => {
         updateReadyState();
     });
 });
-document.getElementById('import-form').addEventListener('submit', () => {
+const validationDialog = document.querySelector('.import-validation-dialog');
+const loadingDialog = document.querySelector('.import-loading-dialog');
+function openValidation() {
+    validationDialog.showModal();
+    document.getElementById('validation-summary-title').focus();
+}
+document.querySelector('[data-validation-open]')?.addEventListener('click', openValidation);
+document.querySelector('[data-validation-close]')?.addEventListener('click', () => validationDialog.close());
+if (validationDialog?.dataset.autoOpen === 'true') openValidation();
+loadingDialog.addEventListener('cancel', event => event.preventDefault());
+let importBusy = false;
+function showImportLoading(event, processing) {
+    if (importBusy) {
+        event.preventDefault();
+        return false;
+    }
+    importBusy = true;
+    if (validationDialog?.open) validationDialog.close();
+    if (processing) {
+        document.getElementById('import-loading-title').textContent = 'Processing and syncing registration Satellites…';
+        document.getElementById('import-loading-description').textContent = 'Please wait while the dataset is activated and registration Satellites are synchronized.';
+    }
+    event.target.setAttribute('aria-busy', 'true');
+    event.target.querySelectorAll('button[type="submit"]').forEach(submit => { submit.disabled = true; });
+    loadingDialog.showModal();
+    return true;
+}
+document.querySelector('[data-import-process]')?.addEventListener('submit', event => showImportLoading(event, true));
+window.addEventListener('pageshow', event => {
+    if (event.persisted) window.location.reload();
+});
+document.getElementById('import-form').addEventListener('submit', event => {
+    if (!showImportLoading(event, false)) return;
     slots.forEach(slot => {
         const status = slot.querySelector('.slot-status');
         status.textContent = 'Validating';

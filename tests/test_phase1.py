@@ -5,6 +5,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from sqlalchemy import create_engine, event as sqlalchemy_event, inspect, text
 from sqlalchemy.engine import make_url
@@ -3502,6 +3503,43 @@ class EventIntegrationTests(unittest.TestCase):
                 "invalid",
                 get_db().execute("SELECT status FROM import_batches WHERE id = ?", (batch_id,)).fetchone()["status"],
             )
+
+    def test_import_processing_automatically_syncs_the_new_active_batch(self):
+        from app.satellite_sync import execute_event_satellite_sync
+
+        staged = {key: (str(path), path.name) for key, path in self.paths.items()}
+        with self.app.app_context():
+            batch_id = store_validation(get_db(), validate_batch(staged), self.event_a)
+        client = self.app.test_client()
+        with patch("app.routes.execute_event_satellite_sync", wraps=execute_event_satellite_sync) as sync:
+            response = client.post("/events/{}/imports/{}/process".format(self.event_a, batch_id))
+        self.assertEqual(302, response.status_code)
+        self.assertEqual(1, sync.call_count)
+        self.assertEqual(self.event_a, sync.call_args.args[1])
+        with self.app.app_context():
+            self.assertEqual(batch_id, active_batch(get_db(), self.event_a)["id"])
+        with client.session_transaction() as state:
+            self.assertTrue(any("Satellite sync complete" in message for _, message in state["_flashes"]))
+
+    def test_import_sync_failure_preserves_activated_import_and_reports_retry(self):
+        staged = {key: (str(path), path.name) for key, path in self.paths.items()}
+        with self.app.app_context():
+            batch_id = store_validation(get_db(), validate_batch(staged), self.event_a)
+        client = self.app.test_client()
+        with patch("app.routes.execute_event_satellite_sync", side_effect=RuntimeError("sync unavailable")):
+            response = client.post("/events/{}/imports/{}/process".format(self.event_a, batch_id))
+        self.assertEqual(302, response.status_code)
+        with self.app.app_context():
+            self.assertEqual(batch_id, active_batch(get_db(), self.event_a)["id"])
+        with client.session_transaction() as state:
+            self.assertTrue(any("Retry Sync Registration Satellites" in message for _, message in state["_flashes"]))
+
+    def test_rejected_import_does_not_run_satellite_sync(self):
+        batch_id = self._process(self.event_a)
+        with patch("app.routes.execute_event_satellite_sync") as sync:
+            response = self.app.test_client().post("/events/{}/imports/{}/process".format(self.event_a, batch_id))
+        self.assertEqual(302, response.status_code)
+        sync.assert_not_called()
 
     def test_imports_page_does_not_expose_registrant_pii(self):
         self._process(self.event_a)

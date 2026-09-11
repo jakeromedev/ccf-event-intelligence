@@ -2078,6 +2078,31 @@ def process_import(event_id, batch_id):
         },
     )
 
+    try:
+        sync_result = execute_event_satellite_sync(db, event_id)
+        db.commit()
+    except Exception:
+        db.rollback()
+        current_app.logger.exception(
+            "Automatic registration Satellite synchronization failed for Event %s, Batch %s.",
+            event_id, batch_id,
+        )
+        flash(
+            "The import is active, but registration Satellites could not be synchronized. "
+            "Retry Sync Registration Satellites in Satellite Settings.",
+            "error",
+        )
+    else:
+        flash(
+            "Registration Satellite sync complete: {} newly synchronized, {} already synced, "
+            "{} require review in Satellite Settings.".format(
+                sync_result["synchronized_count"],
+                sync_result["already_synced_count"],
+                sync_result["not_synced_count"],
+            ),
+            "warning" if sync_result["not_synced_count"] else "success",
+        )
+
     flash("Import processed successfully and is now this event's active dataset.", "success")
     return redirect(url_for("dashboard.event_overview", event_id=event_id))
 
