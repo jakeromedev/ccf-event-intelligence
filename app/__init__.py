@@ -40,6 +40,8 @@ def create_app(test_config=None):
     init_auth_app(app)
     csrf.init_app(app)
     app.register_blueprint(bp)
+    from .failed_payments import bp as failed_payments_bp
+    app.register_blueprint(failed_payments_bp)
 
     if app.config["REQUIRE_SCHEMA_CURRENT"]:
         from .db import check_database_readiness

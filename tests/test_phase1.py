@@ -1902,7 +1902,7 @@ class EventIntegrationTests(unittest.TestCase):
         )
         page = client.get("/events/{}/imports".format(self.event_a))
         self.assertIn(b'<span class="batch-status inactive">inactive</span>', page.data)
-        self.assertIn(b">Activate</button>", page.data)
+        self.assertNotIn(b">Activate</button>", page.data)
         self.assertNotIn(b"superseded", page.data.lower())
 
     def test_failed_event_a_processing_keeps_both_previous_active_batches(self):

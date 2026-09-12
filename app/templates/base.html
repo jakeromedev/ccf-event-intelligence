@@ -7,6 +7,7 @@
     <title>{% block title %}{{ app_name }}{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/sweetalert2/sweetalert2.min.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v='20260910-swal') }}">
+    {% block styles %}{% endblock %}
 </head>
 <body>
     <aside class="sidebar" id="application-sidebar">
@@ -23,6 +24,7 @@
                     <a class="nav-link {% if request.endpoint in ('dashboard.event_registrations', 'dashboard.event_registrations_data') %}active{% endif %}" href="{{ url_for('dashboard.event_registrations', event_id=event['id']) }}">{{ icon('registrations') }}<span>Registrations</span></a>
                 {% endif %}
                 {% if satellites_allowed %}<a class="nav-link {% if request.endpoint in ('dashboard.event_satellites', 'dashboard.event_satellite_registrants', 'dashboard.satellite_settings') %}active{% endif %}" href="{{ url_for('dashboard.event_satellites', event_id=event['id']) }}">{{ icon('satellites') }}<span>Satellites</span></a>{% endif %}
+                {% if failed_payments_allowed %}<a class="nav-link {{ 'active' if request.endpoint == 'failed_payments.event_failed_payments' else '' }}" href="{{ url_for('failed_payments.event_failed_payments', event_id=event['id']) }}">{{ icon('warning') }}<span>Failed Payments</span></a>{% endif %}
                 {% if data_quality_allowed or imports_allowed or admin_tables_allowed or user_management_allowed %}
                     {% set data_quality_active = request.endpoint in ('dashboard.event_quality', 'dashboard.event_quality_issues', 'dashboard.event_curated_registrant_detail', 'dashboard.event_satellite_curation_detail') %}
                     {% set imports_active = request.endpoint in ('dashboard.event_imports', 'dashboard.validate_import', 'dashboard.process_import', 'dashboard.activate_import', 'dashboard.delete_import') %}

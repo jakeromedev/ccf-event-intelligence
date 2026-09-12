@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% from "_page_header.html" import render_application_header %}
+{% block title %}Failed Payments · {{ app_name }}{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ url_for('static', filename='failed_payments.css', v='1') }}">{% endblock %}
+{% block application_header_page %}{{ render_application_header('Failed Payments', 'Find failed payment attempts without a later paid registration.') }}{% endblock %}
+{% block page_header %}{% endblock %}
+{% block content %}
+<div class="failed-payments-workspace">
+    <section class="panel failed-payments-intro">
+        <div><p class="eyebrow">REGISTRATION FOLLOW-UP</p><h2>Failed Payments</h2><p>People to review after a failed payment attempt.</p></div>
+        <span class="dataset-pill {{ 'active' if active_batch else 'empty' }}">{{ 'Active import · Batch #' ~ active_batch.id if active_batch else 'No active import' }}</span>
+    </section>
+    <div class="failed-payments-stats" aria-label="Failed payment summary">
+        <article><span>People listed</span><strong>{{ total_people|number }}</strong><small>Without a confirmed later paid registration</small></article>
+        <article><span>Failed attempts</span><strong>{{ report.failed_attempts|number }}</strong><small>In this event’s active import</small></article>
+        <article><span>Recovered attempts</span><strong>{{ report.recovered_attempts|number }}</strong><small>Excluded after a later paid registration</small></article>
+        <article><span>Matching review excluded</span><strong>{{ report.review_count|number }}</strong><small>Not shown in the follow-up list</small></article>
+    </div>
+    <details class="failed-payments-method">
+        <summary>{{ icon('info', 16) }} How this list is matched</summary>
+        <p>Failed attempts come from the Buyers export because unsuccessful payments may never create a Registrant record. Only <strong>Payment Failed</strong> or <strong>Failed</strong> statuses are included; cancelled and pending payments are excluded.</p>
+        <p>A later registration with <strong>Payment Validated</strong> is matched by the same name and email or mobile number. When names are missing, both email and mobile must match. Dates use the original Created At values, not the time the files were imported. Only entries labeled <strong>No later paid registration</strong> appear below. Uncertain matches, incomplete identities, and existing paid registrations requiring review are excluded.</p>
+        <p>Only the active import for this event is compared. Repeat failed attempts with the same name and contact details are grouped; the latest failure is shown. Upload a fresh complete export to refresh the list.</p>
+    </details>
+    <section class="panel failed-payments-list" aria-labelledby="failed-payments-list-title">
+        <header><div><h3 id="failed-payments-list-title">Payment follow-up list</h3><p>Most recent failures first · {{ total|number }} {{ 'result' if total == 1 else 'results' }}</p></div>
+            <form method="get" role="search">
+                <label><span class="visually-hidden">Search name, email, mobile, reference or reason</span><input name="q" type="search" value="{{ query }}" maxlength="100" placeholder="Search name, contact or reference"></label>
+                <label><span class="visually-hidden">Rows per page</span><select name="per_page">{% for size in (25, 50, 100) %}<option value="{{ size }}" {{ 'selected' if per_page == size else '' }}>{{ size }} rows</option>{% endfor %}</select></label>
+                <button class="button secondary" type="submit">Search</button>
+                {% if query %}<a href="{{ url_for('failed_payments.event_failed_payments', event_id=event.id) }}">Clear</a>{% endif %}
+            </form>
+        </header>
+        {% if rows %}
+        <div class="failed-payments-table-wrap" role="region" aria-label="Failed payment results" tabindex="0">
+            <table><thead><tr><th scope="col">Name & contact</th><th scope="col">Latest failed attempt</th><th scope="col">Failure reason</th><th scope="col">Attempts</th><th scope="col">Registration check</th></tr></thead><tbody>
+            {% for row in rows %}<tr>
+                <td><strong>{{ row.name }}</strong><span>{{ row.email or 'Email unavailable' }}</span><span>{{ row.mobile or 'Mobile unavailable' }}</span></td>
+                <td><strong>{{ row.reference }}</strong><span>{{ row.failed_at.strftime('%d %b %Y · %I:%M %p') if row.failed_at else 'Failure date unavailable' }}</span></td>
+                <td>{{ row.reason }}</td><td><span class="failed-attempt-count">{{ row.attempts|number }}</span></td>
+                <td><span class="failed-match-status">No later paid registration</span></td>
+            </tr>{% endfor %}
+            </tbody></table>
+        </div>
+        {% else %}
+        <div class="failed-payments-empty">{{ icon('document', 32) }}
+            <h3>{{ 'No active import yet' if not active_batch else 'No matches found' if query else 'No matching failed payments' }}</h3>
+            <p>{{ 'Upload and activate a complete export set to see failed payments.' if not active_batch else 'Try a different name, email, mobile number or reference.' if query else 'No entries are labeled No later paid registration in the active export.' }}</p>
+            {% if not active_batch and imports_allowed %}<a class="button primary" href="{{ url_for('dashboard.event_imports', event_id=event.id) }}">Open Imports</a>{% endif %}
+        </div>
+        {% endif %}
+        <footer><span>Page {{ page }} of {{ pages }}</span><nav aria-label="Failed payments pages">
+            {% if page > 1 %}<a class="button secondary" href="{{ url_for('failed_payments.event_failed_payments', event_id=event.id, q=query, per_page=per_page, page=page-1) }}">Previous</a>{% endif %}
+            {% if page < pages %}<a class="button secondary" href="{{ url_for('failed_payments.event_failed_payments', event_id=event.id, q=query, per_page=per_page, page=page+1) }}">Next</a>{% endif %}
+        </nav></footer>
+    </section>
+</div>
+{% endblock %}

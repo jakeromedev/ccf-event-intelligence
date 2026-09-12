@@ -52,6 +52,7 @@ CAPABILITY_MANAGE_SATELLITE_SETTINGS = "satellites.settings.manage"
 CAPABILITY_VIEW_DATA_QUALITY = "data_quality.view"
 CAPABILITY_VIEW_IMPORTS = "imports.view"
 CAPABILITY_MANAGE_IMPORTS = "imports.manage"
+CAPABILITY_VIEW_FAILED_PAYMENTS = "failed_payments.view"
 CAPABILITY_CREATE_EVENTS = "events.create"
 CAPABILITY_VIEW_EVENT_SETTINGS = "events.settings.view"
 CAPABILITY_VIEW_ADMIN_TABLES = "admin_tables.view"
@@ -79,6 +80,7 @@ STANDARD_USER_CAPABILITIES = frozenset(
         CAPABILITY_VIEW_EVENT_SETTINGS,
         CAPABILITY_VIEW_IMPORTS,
         CAPABILITY_MANAGE_IMPORTS,
+        CAPABILITY_VIEW_FAILED_PAYMENTS,
     }
 )
 
@@ -677,6 +679,7 @@ def init_app(app) -> None:
             ),
             "data_quality_allowed": can_view_data_quality(),
             "imports_allowed": can_view_imports(),
+            "failed_payments_allowed": has_capability(CAPABILITY_VIEW_FAILED_PAYMENTS),
             "import_mutations_allowed": import_mutations_allowed(),
             "event_creation_allowed": can_create_events(),
             "event_settings_visible": can_view_event_settings(),

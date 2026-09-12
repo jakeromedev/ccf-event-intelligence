@@ -1,0 +1,43 @@
+.failed-payments-workspace { display: grid; gap: 18px; }
+.failed-payments-workspace .panel { margin: 0; }
+.failed-payments-intro { padding: 24px; display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+.failed-payments-intro h2 { margin: 7px 0; font-size: 24px; }
+.failed-payments-intro p { margin: 0; color: var(--b1g-text-muted); font-size: 13px; }
+.failed-payments-intro .eyebrow { color: var(--b1g-red); font-size: 10px; letter-spacing: .1em; font-weight: 800; }
+.failed-payments-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.failed-payments-stats article { padding: 20px; border: 1px solid var(--b1g-border); border-radius: 12px; background: #fff; }
+.failed-payments-stats span, .failed-payments-stats strong, .failed-payments-stats small { display: block; }
+.failed-payments-stats span { font-size: 12px; font-weight: 700; }
+.failed-payments-stats strong { margin: 10px 0 6px; font-size: 32px; }
+.failed-payments-stats small { color: var(--b1g-text-muted); font-size: 11px; line-height: 1.5; }
+.failed-payments-stats article:first-child strong { color: var(--b1g-red); }
+.failed-payments-method { padding: 15px 18px; border: 1px solid var(--b1g-border); border-radius: 10px; background: var(--b1g-off-white); font-size: 12px; }
+.failed-payments-method summary { cursor: pointer; font-weight: 700; }
+.failed-payments-method summary svg { vertical-align: middle; margin-right: 6px; }
+.failed-payments-method p { margin: 12px 0 0; color: var(--b1g-text-muted); line-height: 1.7; max-width: 1000px; }
+.failed-payments-list > header { padding: 20px 24px; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.failed-payments-list h3 { margin: 0; font-size: 16px; }
+.failed-payments-list header p { margin: 6px 0 0; color: var(--b1g-text-muted); font-size: 12px; }
+.failed-payments-list form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.failed-payments-list input, .failed-payments-list select { min-height: 38px; padding: 8px 10px; border: 1px solid var(--b1g-border); border-radius: 7px; font: inherit; font-size: 12px; background: #fff; }
+.failed-payments-list input { width: 260px; max-width: 100%; }
+.failed-payments-table-wrap { overflow-x: auto; }
+.failed-payments-list table { width: 100%; min-width: 900px; border-collapse: collapse; table-layout: fixed; }
+.failed-payments-list th { padding: 12px 18px; background: var(--b1g-off-white); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; text-align: left; }
+.failed-payments-list th:first-child { width: 25%; }
+.failed-payments-list th:nth-child(2) { width: 23%; }
+.failed-payments-list th:nth-child(4) { width: 8%; }
+.failed-payments-list td { padding: 16px 18px; border-top: 1px solid var(--b1g-border); vertical-align: top; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.failed-payments-list td > strong, .failed-payments-list td > span, .failed-payments-list td > small { display: block; }
+.failed-payments-list td > strong { font-size: 13px; }
+.failed-payments-list td > span:not([class]), .failed-payments-list td > small { color: var(--b1g-text-muted); }
+.failed-payments-list td > small { margin-top: 6px; font-size: 11px; }
+.failed-match-status { width: fit-content; padding: 4px 8px; border-radius: 6px; color: #8f302b; background: #fff0ed; font-size: 10px; font-weight: 700; }
+.failed-match-status.needs-review { color: #825a11; background: #fff6dd; }
+.failed-payments-empty { padding: 56px 24px; text-align: center; border-top: 1px solid var(--b1g-border); }
+.failed-payments-empty > svg { color: var(--b1g-text-muted); margin-bottom: 16px; }
+.failed-payments-empty p { color: var(--b1g-text-muted); margin: 12px 0 20px; font-size: 13px; }
+.failed-payments-list footer { padding: 16px 24px; border-top: 1px solid var(--b1g-border); display: flex; align-items: center; justify-content: space-between; font-size: 12px; }
+.failed-payments-list footer nav { display: flex; gap: 8px; }
+@media (max-width: 1000px) { .failed-payments-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .failed-payments-list > header { align-items: flex-start; flex-direction: column; } }
+@media (max-width: 600px) { .failed-payments-intro { align-items: flex-start; flex-direction: column; } .failed-payments-stats { gap: 10px; } .failed-payments-stats article { padding: 14px; } .failed-payments-list form, .failed-payments-list form label:first-child, .failed-payments-list input { width: 100%; } }
