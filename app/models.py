@@ -200,6 +200,11 @@ class ImportBatch(Base):
     activated_at: Mapped[Optional[object]] = mapped_column(DateTime)
     error_message: Mapped[Optional[str]] = mapped_column(Text)
 
+    imported_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ID_TYPE, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    imported_by_username: Mapped[Optional[str]] = mapped_column(String(64))
+
     event: Mapped[Event] = relationship(back_populates="batches")
 
 

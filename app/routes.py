@@ -2005,7 +2005,10 @@ def validate_import(event_id):
     try:
         staged = stage_upload_set(uploads, current_app.config["STAGING_DIR"])
         validation = validate_batch(staged)
-        batch_id = store_validation(get_db(), validation, event_id)
+        batch_id = store_validation(
+            get_db(), validation, event_id,
+            imported_by_user_id=current_user.id if current_user.is_authenticated else None,
+        )
     except Exception as error:
         current_app.logger.error(
             "import_validation_failed",

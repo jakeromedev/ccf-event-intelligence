@@ -249,6 +249,7 @@
             <thead><tr>
                 <th><a href="{{ sort_url('batch_id') }}">Batch ID {{ sort_indicator('batch_id') }}</a></th>
                 <th><a href="{{ sort_url('created_at') }}">Created At {{ sort_indicator('created_at') }}</a></th>
+                <th>Imported By</th>
                 <th>Source Event</th>
                 <th>File Set</th>
                 <th>Records <small>Tickets / Buyers / Registrants</small></th>
@@ -262,6 +263,7 @@
                 <tr class="{{ 'selected-batch-row' if selected and selected['id'] == batch['id'] else '' }}">
                     <td><a class="batch-id-link" href="{{ url_for('dashboard.event_imports', event_id=event['id'], batch=batch['id'], q=history.filters.query, status=history.filters.status, page=history.pagination.page, per_page=history.pagination.per_page, sort=history.filters.sort, direction=history.filters.direction) }}">#{{ batch['id'] }}</a></td>
                     <td>{{ batch['created_at']|datetime_short }}</td>
+                    <td class="import-history-operator">{{ batch['imported_by_username'] or 'Not recorded' }}</td>
                     <td><strong>{{ batch['event_name'] or 'Unverified source' }}</strong><small>{{ batch['event_slug'] or 'No source slug' }}</small></td>
                     <td><span class="file-set-icons" aria-label="Tickets, Buyers, and Registrants files"><span title="Generated Tickets">{{ icon('ticket', 14) }}</span><span title="Buyers">{{ icon('person', 14) }}</span><span title="Registrants">{{ icon('users', 14) }}</span></span></td>
                     <td class="record-counts">{{ batch['tickets_rows']|number }} / {{ batch['buyers_rows']|number }} / {{ batch['registrants_rows']|number }}</td>
@@ -287,7 +289,7 @@
                     </td>
                 </tr>
             {% else %}
-                <tr><td colspan="9" class="empty-table">
+                <tr><td colspan="10" class="empty-table">
                     {% if history.event_total %}
                         <strong>No import batches match the current filters.</strong><a class="text-link" href="{{ url_for('dashboard.event_imports', event_id=event['id'], batch=selected['id'] if selected else none) }}#import-history">Clear filters</a>
                     {% else %}

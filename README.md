@@ -30,6 +30,9 @@ isolated tests and reading the retained historical source during one-time transf
 - Deterministic, batch-scoped unique-person curation with complete raw-source traceability
 - Conservative satellite normalization with source-variation auditing and multi-satellite support
 - Event management with isolated import history and one active batch per Event
+- Import History records the signed-in uploader for new batches; historical
+  imports without attribution show "Not recorded". The recorded username is
+  preserved if the account is renamed or removed and is searchable in history.
 - Switchable processed import batches with administrator-controlled batch deletion
 - Event-scoped Event Date and Participant Target settings
 - Unique participant, unique volunteer, raw-registration, target, progress, and remaining-slot metrics

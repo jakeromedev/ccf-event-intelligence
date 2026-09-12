@@ -47,6 +47,7 @@ def import_history(
                 CAST(b.id AS TEXT) LIKE ?
                 OR LOWER(COALESCE(b.event_name, '')) LIKE ?
                 OR LOWER(COALESCE(b.event_slug, '')) LIKE ?
+                OR LOWER(COALESCE(b.imported_by_username, '')) LIKE ?
                 OR EXISTS (
                     SELECT 1 FROM import_files search_file
                     WHERE search_file.batch_id = b.id
@@ -55,7 +56,7 @@ def import_history(
             )
             """
         )
-        params.extend([pattern, pattern, pattern, pattern])
+        params.extend([pattern, pattern, pattern, pattern, pattern])
 
     where_sql = " AND ".join(conditions)
     matching = db.execute(

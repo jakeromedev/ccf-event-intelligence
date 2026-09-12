@@ -975,14 +975,17 @@ class AuthenticationTests(unittest.TestCase):
             uploads = {slot: (io.BytesIO(path.read_bytes()), path.name)
                        for slot, path in fixture.paths.items()}
             uploads["csrf_token"] = token
+            uploads["imported_by_user_id"] = "999999"
             uploaded = self.client.post(imports_path + "/validate", data=uploads)
             self.assertEqual(302, uploaded.status_code)
             with self.app.app_context():
                 batch = get_db().execute(
-                    "SELECT id, status FROM import_batches WHERE event_id = ? ORDER BY id DESC LIMIT 1",
+                    "SELECT id, status, imported_by_user_id, imported_by_username FROM import_batches WHERE event_id = ? ORDER BY id DESC LIMIT 1",
                     (event_id,),
                 ).fetchone()
                 self.assertEqual("validated", batch["status"])
+                self.assertEqual("import-operator", batch["imported_by_username"])
+                self.assertIsNotNone(batch["imported_by_user_id"])
                 batches.append(batch["id"])
             processed = self.client.post(imports_path + "/{}/process".format(batches[-1]),
                                          data={"csrf_token": token})
@@ -992,6 +995,9 @@ class AuthenticationTests(unittest.TestCase):
                     "SELECT status FROM import_batches WHERE id = ?", (batches[-1],)
                 ).fetchone()["status"])
 
+        history_page = self.client.get(imports_path, query_string={"q": "import-operator"})
+        self.assertIn(b"Imported By", history_page.data)
+        self.assertEqual(2, history_page.data.count(b'class="import-history-operator">import-operator</td>'))
         activated = self.client.post(imports_path + "/{}/activate".format(batches[0]),
                                      data={"csrf_token": token})
         self.assertEqual(302, activated.status_code)

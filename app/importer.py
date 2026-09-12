@@ -513,14 +513,22 @@ def validate_batch(staged):
     )
 
 
-def store_validation(db, validation, event_id):
+def store_validation(db, validation, event_id, imported_by_user_id=None):
     event = db.execute("SELECT id FROM events WHERE id = ?", (event_id,)).fetchone()
     if not event:
         raise ValueError("The selected event does not exist.")
+    imported_by_username = None
+    if imported_by_user_id is not None:
+        operator = db.execute("SELECT username FROM users WHERE id = ?", (imported_by_user_id,)).fetchone()
+        if operator is None:
+            raise ValueError("The importing user does not exist.")
+        imported_by_username = operator["username"]
     status = "validated" if validation.valid else "invalid"
     cursor = db.execute(
-        "INSERT INTO import_batches (event_id, event_slug, event_name, status) VALUES (?, ?, ?, ?)",
-        (event_id, validation.event_slug, validation.event_name, status),
+        "INSERT INTO import_batches (event_id, event_slug, event_name, status, "
+        "imported_by_user_id, imported_by_username) VALUES (?, ?, ?, ?, ?, ?)",
+        (event_id, validation.event_slug, validation.event_name, status,
+         imported_by_user_id, imported_by_username),
     )
     batch_id = cursor.lastrowid
 
