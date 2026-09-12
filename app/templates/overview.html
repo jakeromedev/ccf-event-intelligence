@@ -225,7 +225,7 @@
             {% endif %}
             <footer><span>Total Participants</span><strong>{{ profile.age.total|number }}</strong></footer>
         </section>
-        {{ donut_panel('FB Page Membership', profile.facebook, 'phase1-facebook', 'Based on Facebook membership tags in Registration. Counts unique participants in the active import; untagged participants count as Not Joined.') }}
+        {{ donut_panel('FB Page Membership', profile.facebook, 'phase1-facebook', 'Current Facebook status in Registration, counted once per unique participant in the active import. Joined takes priority over Reached Out; untagged participants count as Not Joined. Repeated follow-ups do not increase the participant count.') }}
     </div>
 </section>
 

@@ -1598,7 +1598,7 @@ button.quality-summary-card:focus-visible { outline: 3px solid rgba(0, 166, 178,
 .profile-heading { padding: 0 5px; }
 .profile-heading > span:last-child { min-width: 0; margin-left: 4px; color: #728198; font-size: 9px; }
 .phase1-profile-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-.phase1-profile { --phase1-facebook-joined: #1877f2; --phase1-facebook-not_joined: #cbd5e1; }
+.phase1-profile { --phase1-facebook-joined: #1877f2; --phase1-facebook-reached_out: #d99724; --phase1-facebook-not_joined: #cbd5e1; }
 .phase1-profile-card { min-width: 0; min-height: 255px; padding: 17px; display: flex; flex-direction: column; border: 1px solid #dfe6ef; border-radius: 9px; background: #fff; }
 .phase1-donut-layout { flex: 1; display: grid; grid-template-columns: 135px 1fr; align-items: center; gap: 16px; }
 .phase1-donut { width: 132px; height: 132px; display: grid; place-items: center; border-radius: 50%; }

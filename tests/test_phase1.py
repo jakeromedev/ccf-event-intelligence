@@ -978,21 +978,44 @@ class EventIntegrationTests(unittest.TestCase):
             dashboard = event_dashboard_metrics(db, self.event_a)
             facebook = dashboard["participant_profile"]["facebook"]
             self.assertEqual(dashboard["overview"]["participants"], facebook["total"])
-            self.assertEqual([1, facebook["total"] - 1], [item["count"] for item in facebook["items"]])
+            self.assertEqual([1, 0, facebook["total"] - 1], [item["count"] for item in facebook["items"]])
+            self.assertAlmostEqual(100, sum(item["percentage"] for item in facebook["items"]))
+            second = next(row for row in identities if row["registration_type"] == "participant"
+                          and row["id"] != first["id"])
+            db.execute(
+                "INSERT INTO registrant_facebook_group_memberships "
+                "(event_id, attestation_participant_id, joined, reached_out) VALUES (?, ?, 0, 1)",
+                (self.event_a, second["attestation_participant_id"]),
+            )
+            # Joined takes precedence, including where imported duplicates map
+            # to several membership tags. Follow-up attempts never multiply people.
+            db.execute("UPDATE registrant_facebook_group_memberships SET reached_out = 1 WHERE joined = 1")
+            for _ in range(2):
+                db.execute(
+                    "INSERT INTO registrant_facebook_group_outreach (event_id, attestation_participant_id) VALUES (?, ?)",
+                    (self.event_a, second["attestation_participant_id"]),
+                )
+            db.commit()
+            facebook = event_dashboard_metrics(db, self.event_a)["participant_profile"]["facebook"]
+            self.assertEqual([1, 1, facebook["total"] - 2], [item["count"] for item in facebook["items"]])
             self.assertAlmostEqual(100, sum(item["percentage"] for item in facebook["items"]))
         page = self.app.test_client().get(f"/events/{self.event_a}")
         self.assertEqual(200, page.status_code)
         self.assertIn(b"FB Page Membership", page.data)
         self.assertIn(b"phase1-facebook", page.data)
+        self.assertIn(b"Reached Out", page.data)
+        self.assertIn(b"--phase1-facebook-reached_out", page.data)
         self._process(self.event_a)
         self._process(self.event_b)
         with self.app.app_context():
             db = get_db()
             self.assertEqual(1, event_dashboard_metrics(db, self.event_a)["participant_profile"]["facebook"]["items"][0]["count"])
+            self.assertEqual(1, event_dashboard_metrics(db, self.event_a)["participant_profile"]["facebook"]["items"][1]["count"])
             self.assertEqual(0, event_dashboard_metrics(db, self.event_b)["participant_profile"]["facebook"]["items"][0]["count"])
             db.execute("UPDATE registrant_facebook_group_memberships SET joined = 0 WHERE event_id = ?", (self.event_a,))
             db.commit()
             self.assertEqual(0, event_dashboard_metrics(db, self.event_a)["participant_profile"]["facebook"]["items"][0]["count"])
+            self.assertEqual(2, event_dashboard_metrics(db, self.event_a)["participant_profile"]["facebook"]["items"][1]["count"])
 
     def test_dashboard_dgroup_leadership_years_and_shirt_size_sections(self):
         self._process(self.event_a)

@@ -259,31 +259,38 @@ def _distribution(categories, counts, total, include_segments=False):
 
 def participant_facebook_membership_metrics(db, batch_id):
     """Count each active curated participant once using durable Facebook tags."""
-    total = joined = 0
+    total = joined = reached_out = 0
     if batch_id is not None:
         row = db.execute(
             """
-            SELECT COUNT(*) total, COALESCE(SUM(CASE WHEN EXISTS (
-                SELECT 1 FROM curated_registrant_sources source
-                JOIN attestation_participant_registrants owner
+            SELECT COUNT(*) total, COALESCE(SUM(joined), 0) joined,
+                   COALESCE(SUM(CASE WHEN joined = 0 AND reached_out = 1 THEN 1 ELSE 0 END), 0) reached_out
+            FROM (
+                SELECT participant.id,
+                       MAX(COALESCE(membership.joined, 0)) joined,
+                       MAX(COALESCE(membership.reached_out, 0)) reached_out
+                FROM curated_registrants participant
+                LEFT JOIN curated_registrant_sources source
+                  ON source.curated_registrant_id = participant.id
+                 AND source.event_id = participant.event_id
+                 AND source.batch_id = participant.batch_id
+                LEFT JOIN attestation_participant_registrants owner
                   ON owner.event_id = source.event_id AND owner.batch_id = source.batch_id
                  AND owner.registrant_id = source.registrant_id
-                JOIN registrant_facebook_group_memberships membership
+                LEFT JOIN registrant_facebook_group_memberships membership
                   ON membership.event_id = owner.event_id
                  AND membership.attestation_participant_id = owner.attestation_participant_id
-                 AND membership.joined = 1
-                WHERE source.curated_registrant_id = participant.id
-                  AND source.event_id = participant.event_id
-                  AND source.batch_id = participant.batch_id
-            ) THEN 1 ELSE 0 END), 0) joined
-            FROM curated_registrants participant
-            WHERE participant.batch_id = ? AND participant.registration_type = 'participant'
+                WHERE participant.batch_id = ? AND participant.registration_type = 'participant'
+                GROUP BY participant.id
+            ) membership_totals
             """, (batch_id,),
         ).fetchone()
         total, joined = int(row["total"]), int(row["joined"])
+        reached_out = int(row["reached_out"])
     return _distribution(
-        (("joined", "Joined"), ("not_joined", "Not Joined")),
-        {"joined": joined, "not_joined": total - joined}, total, include_segments=True,
+        (("joined", "Joined"), ("reached_out", "Reached Out"), ("not_joined", "Not Joined")),
+        {"joined": joined, "reached_out": reached_out, "not_joined": total - joined - reached_out},
+        total, include_segments=True,
     )
 
 
