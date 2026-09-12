@@ -47,20 +47,55 @@
 .payment-outreach-tag:hover { border-color: #277862; }
 .payment-remark-button { border: 0; padding: 5px 0; background: transparent; color: #8a1317; font: inherit; font-weight: 700; cursor: pointer; }
 .payment-remark-preview { margin: 0 0 4px; color: #526b73; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; }
-.payment-followup-dialog { width: min(540px, calc(100vw - 32px)); }
+.payment-followup-dialog { width: min(920px, calc(100vw - 32px)); }
 .payment-followup-dialog[open] { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; overflow: hidden; }
-.payment-followup-dialog .facebook-status-body { padding-top: 10px; overflow-y: auto; }
+.payment-followup-dialog .facebook-status-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); align-items: start; gap: 0 28px; padding-top: 24px; overflow-y: auto; }
+.payment-followup-dialog .facebook-status-person { background: #f7f5f1; border: 1px solid #eee8e0; }
+.payment-followup-dialog .facebook-status-person strong { font-size: 16px; }
+.payment-followup-dialog .facebook-status-person { justify-content: space-between; }
+.payment-history-jump { display: none; border: 0; padding: 6px 0; background: transparent; color: #277862; font: inherit; font-size: 11px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+[data-payment-history-section]:focus { outline: none; }
+.payment-followup-dialog[data-can-edit="false"] .payment-followup-history { grid-column: 1 / -1; border-left: 0; padding-left: 0; }
+.payment-section-title { margin: 0; font-size: 16px; }
+.payment-section-description { margin: 7px 0 18px; color: #657981; font-size: 12px; line-height: 1.5; }
+.payment-action-options { grid-template-columns: 1fr 1fr; gap: 8px; }
+.payment-action-options .facebook-status-card { position: relative; display: block; padding: 13px 12px; min-height: 78px; }
+.payment-action-options .facebook-choice-icon { display: none; }
+.payment-action-options .facebook-status-card strong { font-size: 13px; }
+.payment-action-options .facebook-status-card small { font-size: 11px; line-height: 1.5; }
+.payment-action-options .facebook-choice-check { position: absolute; top: 10px; right: 9px; font-size: 11px; }
 .payment-followup-dialog [data-payment-title]:focus { outline: none; }
 .payment-remark-label { display: grid; gap: 8px; margin-top: 20px; font-size: 13px; font-weight: 700; }
-.payment-remark-label textarea { width: 100%; resize: vertical; min-height: 90px; border: 1px solid #ccdadd; border-radius: 10px; padding: 12px; font: inherit; font-weight: 400; line-height: 1.5; }
+.payment-remark-label textarea { width: 100%; resize: vertical; min-height: 160px; max-height: 300px; border: 1px solid #ccdadd; border-radius: 12px; padding: 15px; background: #fcfdfd; font: inherit; font-size: 14px; font-weight: 400; line-height: 1.7; }
 .payment-remark-label textarea:focus { outline: 2px solid #73b6a4; outline-offset: 2px; }
-.payment-remark-help { color: #657981; font-size: 12px; line-height: 1.5; }
-.payment-followup-history { border-top: 1px solid #e6ecee; padding-top: 18px; margin-top: 24px; }
-.payment-followup-history h3 { margin: 0 0 15px; font-size: 15px; }
-.payment-history-entry { border-left: 2px solid #d7e9e3; padding: 0 0 16px 14px; margin-left: 3px; }
-.payment-history-entry strong { font-size: 13px; }
-.payment-history-entry p { margin: 6px 0; font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
-.payment-history-entry small, .payment-history-empty { color: #657981; font-size: 12px; line-height: 1.5; }
-[data-payment-feedback] { font-size: 13px; line-height: 1.5; color: #277862; }
-[data-payment-feedback].is-error { color: #a51f25; }
+.payment-composer-caption { display: flex; justify-content: space-between; margin-top: 9px; color: #657981; font-size: 11px; }
+.payment-remark-help { margin-top: 18px; padding: 12px 14px; border-radius: 10px; background: #f5f7f8; color: #657981; font-size: 12px; line-height: 1.65; }
+.payment-followup-history { border-left: 1px solid #e6ecee; padding-left: 28px; min-width: 0; }
+.payment-history-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 16px; }
+.payment-history-heading h3 { margin: 0; font-size: 16px; }
+.payment-history-heading > span { color: #72848a; font-size: 11px; white-space: nowrap; }
+.payment-history-filters { display: flex; gap: 5px; padding: 4px; background: #f2f5f6; border-radius: 10px; margin-bottom: 18px; }
+.payment-history-filters button { flex: 1; border: 0; border-radius: 7px; padding: 8px 6px; color: #647980; background: transparent; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.payment-history-filters button[aria-pressed="true"] { color: #23463d; background: #fff; box-shadow: 0 1px 4px #1c393118; }
+.payment-history-filters button span { display: inline-block; margin-left: 4px; padding: 1px 5px; border-radius: 5px; font-size: 10px; background: #e9eef0; }
+[data-payment-history] { display: grid; gap: 12px; }
+.payment-history-entry { padding: 16px; border: 1px solid #e0e7e9; border-radius: 13px; background: #fff; box-shadow: 0 2px 4px #1e3c4504; }
+.payment-history-entry header { display: flex; align-items: center; gap: 10px; margin-bottom: 13px; }
+.payment-history-avatar { display: grid; place-items: center; flex: 0 0 32px; height: 32px; border-radius: 50%; background: #edf1f7; color: #536980; font-size: 10px; font-weight: 800; }
+.payment-history-entry header > div { min-width: 0; }
+.payment-history-entry header strong { display: block; font-size: 12px; overflow-wrap: anywhere; }
+.payment-history-date { display: block; margin-top: 3px; font-size: 10px; color: #72848a; }
+.payment-history-kind { display: inline-block; padding: 4px 8px; background: #eef2f8; color: #536980; border-radius: 5px; font-size: 10px; font-weight: 700; }
+.payment-history-entry.is-outreach .payment-history-kind { background: #fff4dc; color: #8b641d; }
+.payment-history-entry p { margin: 10px 0 0; font-size: 13px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.payment-history-entry p.payment-history-no-note { color: #72848a; }
+.payment-history-empty { text-align: center; padding: 34px 20px; border: 1px dashed #d9e3e5; border-radius: 13px; background: #fafcfc; color: #657981; font-size: 12px; line-height: 1.7; }
+.payment-history-empty strong { font-size: 15px; color: #304951; }
+.payment-history-empty p { margin: 10px 0 0; }
+[data-payment-feedback] { grid-column: 1 / -1; margin: 0 0 18px; padding: 12px 14px; border-radius: 9px; background: #eef8f3; font-size: 13px; line-height: 1.5; color: #277862; }
+[data-payment-feedback].is-error { color: #a51f25; background: #fff0ef; }
+[data-payment-retry] { grid-column: 1 / -1; justify-self: start; margin-bottom: 16px; }
 .payment-followup-dialog button:disabled { opacity: .55; cursor: wait; }
+@media (min-width: 761px) { .payment-followup-dialog .facebook-status-body { min-height: 390px; } .payment-compose { position: sticky; top: 0; } }
+@media (max-width: 760px) { .payment-followup-dialog { width: min(540px, calc(100vw - 24px)); } .payment-followup-dialog .facebook-status-body { display: block; padding-top: 20px; } .payment-followup-dialog .facebook-status-header h2 { font-size: 22px; } .payment-followup-history { border-left: 0; border-top: 1px solid #e6ecee; margin-top: 24px; padding: 22px 0 0; } .payment-remark-label textarea { min-height: 120px; } }
+@media (max-width: 760px) { .payment-history-jump { display: block; } }

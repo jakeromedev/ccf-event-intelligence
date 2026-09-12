@@ -18,8 +18,17 @@
     let saving = false;
     let ready = false;
     let loadVersion = 0;
+    let historyFilter = 'all';
+    let historyEntries = [];
+    const historyFilters = [...dialog.querySelectorAll('[data-payment-history-filter]')];
+    find('show-history').addEventListener('click', () => {
+        const history = find('history-section');
+        history.scrollIntoView({block: 'start', behavior: 'instant'});
+        history.focus({preventScroll: true});
+    });
     const message = (text, error = false) => {
         feedback.textContent = text;
+        feedback.hidden = !text;
         feedback.classList.toggle('is-error', error);
     };
     const renderEditor = () => {
@@ -27,11 +36,12 @@
         editor.hidden = confirming;
         confirmation.hidden = !confirming;
         back.hidden = !confirming;
-        title.textContent = confirming ? 'Confirm follow-up' : 'Keep in touch';
+        title.textContent = confirming ? 'Confirm follow-up' : 'Remarks & follow-ups';
         save.textContent = saving ? 'Saving…' : confirming ? 'Yes, save follow-up' : action === 'outreach' ? 'Continue' : 'Save remark';
         save.disabled = saving || !ready;
         back.disabled = saving;
         remark.disabled = saving;
+        find('character-count').textContent = `${remark.value.length.toLocaleString()} / 4,000`;
         find('remark-label').textContent = action === 'outreach' ? 'Remarks (optional)' : 'Remarks';
         cards.forEach((card) => {
             card.disabled = saving;
@@ -39,15 +49,36 @@
         });
         dialog.querySelectorAll('[data-payment-close]').forEach((button) => { button.disabled = saving; });
     };
-    const renderHistory = (payload) => {
-        const count = payload.outreach_count;
-        find('count').textContent = count ? `Reached out ${count} ${count === 1 ? 'time' : 'times'} so far` : 'No outreach yet';
+    const paintHistory = () => {
         const history = find('history');
         history.replaceChildren();
-        payload.history.forEach((entry) => {
+        const matches = (entry, filter) => filter === 'all' || (filter === 'remark' ? Boolean(entry.remark) : entry.kind === 'outreach');
+        historyFilters.forEach((button) => {
+            const filter = button.dataset.paymentHistoryFilter;
+            button.setAttribute('aria-pressed', String(filter === historyFilter));
+            button.querySelector('[data-payment-filter-count]').textContent = historyEntries.filter((entry) => matches(entry, filter)).length;
+        });
+        const visible = historyEntries.filter((entry) => matches(entry, historyFilter));
+        visible.forEach((entry) => {
             const item = document.createElement('article');
-            item.className = 'payment-history-entry';
+            item.className = `payment-history-entry is-${entry.kind}`;
+            const header = document.createElement('header');
+            const avatar = document.createElement('span');
+            avatar.className = 'payment-history-avatar';
+            avatar.setAttribute('aria-hidden', 'true');
+            const author = entry.created_by || 'Former team member';
+            avatar.textContent = author.split(/[\s._-]+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
+            const attribution = document.createElement('div');
+            const authorName = document.createElement('strong');
+            authorName.textContent = author;
+            const date = document.createElement('span');
+            date.className = 'payment-history-date';
+            date.textContent = entry.created_at;
+            attribution.append(authorName, date);
+            header.append(avatar, attribution);
+            item.append(header);
             const heading = document.createElement('strong');
+            heading.className = 'payment-history-kind';
             heading.textContent = entry.kind === 'outreach' ? 'Reached out' : 'Remark added';
             item.append(heading);
             if (entry.remark) {
@@ -55,17 +86,34 @@
                 note.textContent = entry.remark;
                 item.append(note);
             }
-            const meta = document.createElement('small');
-            meta.textContent = `${entry.created_by || 'Former team member'} · ${entry.created_at}`;
-            item.append(meta);
+            if (!entry.remark) {
+                const note = document.createElement('p');
+                note.className = 'payment-history-no-note';
+                note.textContent = 'Contacted about their payment.';
+                item.append(note);
+            }
             history.append(item);
         });
-        if (!payload.history.length) {
-            const empty = document.createElement('p');
+        if (!visible.length) {
+            const empty = document.createElement('div');
             empty.className = 'payment-history-empty';
-            empty.textContent = 'No follow-ups yet. Start with a message or leave a note for the team.';
+            const heading = document.createElement('strong');
+            heading.textContent = historyFilter === 'remark' ? 'No remarks yet' : historyFilter === 'outreach' ? 'No outreach yet' : 'A fresh start';
+            const caption = document.createElement('p');
+            caption.textContent = 'Your team’s updates will appear here, so the next person can pick up where you left off.';
+            empty.append(heading, caption);
             history.append(empty);
         }
+    };
+    historyFilters.forEach((button) => button.addEventListener('click', () => {
+        historyFilter = button.dataset.paymentHistoryFilter;
+        paintHistory();
+    }));
+    const renderHistory = (payload) => {
+        const count = payload.outreach_count;
+        find('count').textContent = count ? `Reached out ${count} ${count === 1 ? 'time' : 'times'} so far` : 'No outreach yet';
+        historyEntries = payload.history;
+        paintHistory();
         const tag = row.querySelector('[data-payment-open="outreach"]');
         tag.textContent = count > 1 ? `Reached-out (${count})` : count ? 'Reached-out' : 'Not reached out';
         tag.classList.toggle('is-reached-out', count > 0);
@@ -109,7 +157,10 @@
             saving = false;
             ready = false;
             if (remark) remark.value = '';
-            title.textContent = 'Keep in touch';
+            title.textContent = 'Remarks & follow-ups';
+            historyFilter = 'all';
+            historyEntries = [];
+            paintHistory();
             find('name').textContent = row.dataset.name;
             find('count').textContent = '';
             find('history').replaceChildren();
@@ -123,6 +174,9 @@
         action = card.dataset.paymentAction;
         renderEditor();
     }));
+    remark?.addEventListener('input', () => {
+        find('character-count').textContent = `${remark.value.length.toLocaleString()} / 4,000`;
+    });
     back?.addEventListener('click', () => { confirming = false; renderEditor(); remark.focus(); });
     retry.addEventListener('click', loadHistory);
     dialog.querySelectorAll('[data-payment-close]').forEach((button) => button.addEventListener('click', () => {

@@ -2,7 +2,7 @@
 {% from "_icons.html" import icon %}
 {% from "_page_header.html" import render_application_header %}
 {% block title %}Failed Payments · {{ app_name }}{% endblock %}
-{% block styles %}<link rel="stylesheet" href="{{ url_for('static', filename='failed_payments.css', v='20260912-followups') }}">{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ url_for('static', filename='failed_payments.css', v='20260912-remarks-history') }}">{% endblock %}
 {% block application_header_page %}{{ render_application_header('Failed Payments', 'Find failed payment attempts without a later paid registration.') }}{% endblock %}
 {% block page_header %}{% endblock %}
 {% block content %}
@@ -58,29 +58,42 @@
 </div>
 <dialog class="facebook-status-dialog payment-followup-dialog" data-payment-dialog data-can-edit="{{ 'true' if followup_edit_allowed else 'false' }}" aria-labelledby="payment-followup-title" aria-describedby="payment-followup-name">
     <header class="facebook-status-header">
-        <div><p class="eyebrow">PAYMENT FOLLOW-UP</p><h2 id="payment-followup-title" data-payment-title tabindex="-1">Keep in touch</h2></div>
+        <div><p class="eyebrow">PAYMENT FOLLOW-UP</p><h2 id="payment-followup-title" data-payment-title tabindex="-1">Remarks & follow-ups</h2></div>
         <button type="button" class="registrant-modal-close" data-payment-close aria-label="Close payment follow-up">&times;</button>
     </header>
-    <div class="facebook-status-person"><div><strong id="payment-followup-name" data-payment-name></strong><p data-payment-count></p></div></div>
+    <div class="facebook-status-person"><div><strong id="payment-followup-name" data-payment-name></strong><p data-payment-count></p></div><button type="button" class="payment-history-jump" data-payment-show-history>View history ↓</button></div>
     <div class="facebook-status-body">
         <p data-payment-feedback role="status" aria-live="polite"></p>
         <button class="button secondary" type="button" data-payment-retry hidden>Try again</button>
         {% if followup_edit_allowed %}
+        <div class="payment-compose">
         <section data-payment-editor>
+            <h3 class="payment-section-title">Add an update</h3>
+            <p class="payment-section-description">Keep the team up to date on this payment.</p>
             <div class="facebook-status-options payment-action-options" aria-label="Choose a follow-up action">
                 <button type="button" class="facebook-status-card" data-payment-action="outreach" aria-pressed="false"><span class="facebook-choice-icon" aria-hidden="true">↗</span><span><strong>Reached Out</strong><small>Log a call or message</small></span><span class="facebook-choice-check" aria-hidden="true">✓</span></button>
                 <button type="button" class="facebook-status-card" data-payment-action="remark" aria-pressed="false"><span class="facebook-choice-icon" aria-hidden="true">✎</span><span><strong>Add a remark</strong><small>Leave a note for the team</small></span><span class="facebook-choice-check" aria-hidden="true">✓</span></button>
             </div>
-            <label class="payment-remark-label" for="payment-remark"><span data-payment-remark-label>Remarks (optional)</span><textarea id="payment-remark" rows="3" maxlength="4000" data-payment-remark placeholder="What should the team know?"></textarea></label>
-            <p class="payment-remark-help">For example: Asked for help with payment. Will try again tomorrow.</p>
+            <label class="payment-remark-label" for="payment-remark"><span data-payment-remark-label>Remarks (optional)</span><textarea id="payment-remark" rows="5" maxlength="4000" data-payment-remark aria-describedby="payment-remark-help" placeholder="What happened? What’s the next step?"></textarea></label>
+            <div class="payment-composer-caption"><span>Visible to your team</span><span data-payment-character-count>0 / 4,000</span></div>
+            <p class="payment-remark-help" id="payment-remark-help">A helpful note: “Sent payment instructions. Will follow up tomorrow.”</p>
         </section>
         <section class="facebook-followup-confirmation" data-payment-confirmation hidden>
             <span class="facebook-followup-icon" aria-hidden="true">↗</span><h3>Save this follow-up?</h3>
             <p>Have you contacted this person about their payment? Add this follow-up so the team knows you've reached out.</p>
             <small>Your remarks will be saved with this follow-up.</small>
         </section>
+        </div>
         {% endif %}
-        <section class="payment-followup-history" aria-labelledby="payment-history-title"><h3 id="payment-history-title">Follow-up history</h3><div data-payment-history></div></section>
+        <section class="payment-followup-history" data-payment-history-section tabindex="-1" aria-labelledby="payment-history-title">
+            <div class="payment-history-heading"><h3 id="payment-history-title">Follow-up history</h3><span>Newest first</span></div>
+            <div class="payment-history-filters" role="group" aria-label="Filter follow-up history">
+                <button type="button" data-payment-history-filter="all" aria-pressed="true">All <span data-payment-filter-count="all">0</span></button>
+                <button type="button" data-payment-history-filter="outreach" aria-pressed="false">Outreach <span data-payment-filter-count="outreach">0</span></button>
+                <button type="button" data-payment-history-filter="remark" aria-pressed="false">Remarks <span data-payment-filter-count="remark">0</span></button>
+            </div>
+            <div data-payment-history aria-live="polite"></div>
+        </section>
     </div>
     <footer class="facebook-status-footer">
         <button type="button" class="button secondary" data-payment-close>Close</button>
@@ -88,4 +101,4 @@
     </footer>
 </dialog>
 {% endblock %}
-{% block scripts %}<script src="{{ url_for('static', filename='failed_payments.js', v='20260912-followups') }}" defer></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='failed_payments.js', v='20260912-remarks-history') }}" defer></script>{% endblock %}
