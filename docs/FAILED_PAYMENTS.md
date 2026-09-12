@@ -2,7 +2,10 @@
 
 The Event sidebar links to `/events/<event_id>/failed-payments`. Approved standard
 users and administrators can view the page. Registration-only operators and
-unauthenticated visitors cannot access the list. The module is read-only.
+unauthenticated visitors cannot access the list. Approved standard users and
+administrators can record confirmed outreach and add remarks from each person's
+follow-up dialog. History records the operator and Manila timestamp, newest first.
+Opening a dialog or cancelling a confirmation does not create a follow-up.
 
 The list uses the Event's active import. Failed purchases appear in the Buyers
 export, often without a corresponding Registrant row, so Buyers are the source
@@ -29,9 +32,15 @@ These review cases are counted separately and excluded from the table.
 Import upload times are never used to infer registration order.
 
 Repeated failed attempts with the same normalized name, email, and mobile are
-grouped. Each row shows the latest failure and the number of remaining attempts.
+grouped. Each row shows the latest failure, outreach status, and latest remark.
 Rows without adequate identity remain separate. Counts of recovered attempts and
 listed people use different units and are labeled accordingly.
+
+Follow-up history is stored separately from imports, keyed by Event and the
+normalized name/contact identity. Re-importing the same identity preserves its
+outreach and remarks. Changed contact details may create a different identity.
+Writes require an authenticated, approved operator and CSRF validation; outreach
+also requires explicit confirmation. Remarks are limited to 4,000 characters.
 
 The module does not compare other Events or inactive imports, infer failure from
 missing payment data, or treat a buyer who purchased on someone else's behalf as

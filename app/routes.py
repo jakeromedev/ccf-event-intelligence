@@ -54,6 +54,7 @@ from .models import hash_password
 from .registrations import (
     UNSPECIFIED_FORM,
     attestation_submission_history,
+    facebook_group_outreach_history,
     create_registrant_remark,
     list_registrant_remarks,
     registrations_data,
@@ -622,6 +623,23 @@ def registration_attestation_history(event_id, registrant_id):
     return jsonify(result)
 
 
+@bp.get("/events/<int:event_id>/registrations/<int:registrant_id>/facebook-group/history")
+@registrations_access_required
+def registration_facebook_group_history(event_id, registrant_id):
+    db = get_db()
+    get_event_or_404(event_id)
+    batch = active_batch(db, event_id)
+    try:
+        result = facebook_group_outreach_history(
+            db, event_id, batch["id"] if batch else None, registrant_id, request.args.get("batch")
+        )
+    except AdminTableQueryError as exc:
+        return jsonify({"error": str(exc)}), 400
+    if result is None:
+        abort(404)
+    return jsonify(result)
+
+
 @bp.patch(
     "/events/<int:event_id>/registrations/<int:registrant_id>/facebook-group"
 )
@@ -635,8 +653,10 @@ def update_registration_facebook_group(event_id, registrant_id):
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         return jsonify({"error": "A JSON request body is required."}), 400
-    if set(payload) != {"joined"}:
-        return jsonify({"error": "Only the Facebook Group joined tag may be supplied."}), 400
+    if set(payload) not in ({"joined"}, {"status"}, {"status", "record_outreach"}):
+        return jsonify({"error": "Supply a Facebook Group status and optional outreach confirmation."}), 400
+    if "status" in payload and not isinstance(payload["status"], str):
+        return jsonify({"error": "Facebook Group status is invalid."}), 400
     try:
         result = update_facebook_group_membership(
             db,
@@ -646,6 +666,8 @@ def update_registration_facebook_group(event_id, registrant_id):
             request.args.get("batch"),
             payload.get("joined"),
             current_user.id,
+            status=payload.get("status"),
+            record_outreach=payload.get("record_outreach", False),
         )
     except AdminTableQueryError as exc:
         return jsonify({"error": str(exc)}), 400

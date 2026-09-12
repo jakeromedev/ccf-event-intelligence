@@ -19,6 +19,7 @@
     data-update-url="{{ url_for('dashboard.update_registration_attestation', event_id=event['id'], registrant_id=0) }}"
     data-attestation-history-url="{{ url_for('dashboard.registration_attestation_history', event_id=event['id'], registrant_id=0) }}"
     data-facebook-group-url="{{ url_for('dashboard.update_registration_facebook_group', event_id=event['id'], registrant_id=0) }}"
+    data-facebook-history-url="{{ url_for('dashboard.registration_facebook_group_history', event_id=event['id'], registrant_id=0) }}"
     data-remarks-url="{{ url_for('dashboard.registration_remarks', event_id=event['id'], registrant_id=0) }}"
     data-csrf-token="{{ csrf_token() }}"
     data-column-preference-key="ccf-registrations-column-groups"
@@ -369,8 +370,51 @@
         </footer>
     </section>
 </div>
+<dialog class="facebook-status-dialog" data-facebook-dialog aria-labelledby="facebook-status-title" aria-describedby="facebook-status-name">
+    <header class="facebook-status-header">
+        <div><p class="eyebrow">STAY CONNECTED</p><h2 id="facebook-status-title" data-facebook-title tabindex="-1">FB Group status</h2></div>
+        <button type="button" class="registrant-modal-close" data-facebook-close aria-label="Close FB Group status">&times;</button>
+    </header>
+    <div class="facebook-status-person">
+        <span class="facebook-person-icon" aria-hidden="true">f</span>
+        <div><strong id="facebook-status-name" data-facebook-name></strong><p data-facebook-count></p></div>
+    </div>
+    <div class="facebook-status-body">
+        <section data-facebook-choices aria-label="Choose FB Group status">
+            <button type="button" class="button secondary facebook-history-button" data-facebook-history-open aria-controls="facebook-outreach-history">View reach out history</button>
+            <p class="facebook-status-hint">Where are they in joining the group?</p>
+            <div class="facebook-status-options">
+                <button type="button" class="facebook-status-card" data-facebook-status="not_joined" aria-pressed="false">
+                    <span class="facebook-choice-icon" aria-hidden="true">−</span><span><strong>Not Joined</strong><small>Hasn't joined the group yet</small></span><span class="facebook-choice-check" aria-hidden="true">✓</span>
+                </button>
+                <button type="button" class="facebook-status-card" data-facebook-status="reached_out" aria-pressed="false">
+                    <span class="facebook-choice-icon" aria-hidden="true">↗</span><span><strong>Reached Out</strong><small>Sent an invite or a reminder</small></span><span class="facebook-choice-check" aria-hidden="true">✓</span>
+                </button>
+                <button type="button" class="facebook-status-card" data-facebook-status="joined" aria-pressed="false">
+                    <span class="facebook-choice-icon" aria-hidden="true">✓</span><span><strong>Joined</strong><small>Already a member of the group</small></span><span class="facebook-choice-check" aria-hidden="true">✓</span>
+                </button>
+            </div>
+        </section>
+        <section id="facebook-outreach-history" class="facebook-outreach-history" data-facebook-history hidden aria-label="Reach out history">
+            <p class="facebook-status-hint">Confirmed follow-ups, newest first. Times are shown in Manila time.</p>
+            <p data-facebook-history-message role="status" aria-live="polite"></p>
+            <ol data-facebook-history-list></ol>
+            <button type="button" class="button secondary" data-facebook-history-retry hidden>Try again</button>
+        </section>
+        <section class="facebook-followup-confirmation" data-facebook-confirmation hidden>
+            <span class="facebook-followup-icon" aria-hidden="true">↗</span>
+            <h3>Every follow-up counts</h3>
+            <p data-facebook-confirmation-copy></p>
+            <small>Only save after you've sent an invite or a reminder.</small>
+        </section>
+    </div>
+    <footer class="facebook-status-footer">
+        <button type="button" class="button secondary" data-facebook-close>Cancel</button>
+        <div><button type="button" class="button secondary" data-facebook-back hidden>Back</button><button type="button" class="button primary" data-facebook-save>Save status</button></div>
+    </footer>
+</dialog>
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='registrations.js', v='20260910-swal') }}" defer></script>
+<script src="{{ url_for('static', filename='registrations.js', v='20260912-facebook-dialog') }}" defer></script>
 {% endblock %}

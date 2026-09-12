@@ -2594,6 +2594,49 @@ body.admin-drawer-open { overflow: hidden; }
 .registration-facebook-group-tag:hover { color: #176b5c; border-color: #9fcfc1; background: #effaf6; }
 .registration-facebook-group-tag.is-joined { color: #176b5c; border-color: #b9ded3; background: #effaf6; }
 .registration-facebook-group-tag.is-joined::before { content: "✓ "; }
+.registration-facebook-group-tag.is-reached-out { color: #855b13; border-color: #ead6a9; background: #fff8e8; }
+.facebook-status-dialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid #dce5e7; border-radius: 22px; color: #243c43; background: #fff; box-shadow: 0 28px 90px #102a3b40; overflow: auto; }
+.facebook-status-dialog::backdrop { background: #10233399; backdrop-filter: blur(4px); }
+body:has(.facebook-status-dialog[open]) { overflow: hidden; }
+.facebook-status-dialog [hidden] { display: none !important; }
+.facebook-status-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 24px 24px 18px; }
+.facebook-status-header .eyebrow { margin: 0 0 8px; color: #62797f; font-size: 10px; letter-spacing: .14em; }
+.facebook-status-header h2 { margin: 0; font-size: 25px; letter-spacing: -.035em; }
+.facebook-status-person { display: flex; align-items: center; gap: 12px; margin: 0 24px; padding: 15px; background: #f4f7f8; border-radius: 12px; }
+.facebook-person-icon { display: grid; place-items: center; flex: 0 0 36px; height: 36px; color: #fff; background: #4267a9; border-radius: 10px; font: bold 30px Georgia, serif; }
+.facebook-status-person strong { font-size: 14px; overflow-wrap: anywhere; }
+.facebook-status-person p { margin: 5px 0 0; font-size: 12px; color: #657981; }
+.facebook-status-body { padding: 20px 24px 24px; }
+.facebook-status-hint { margin: 0 0 14px; font-size: 13px; color: #657981; }
+.facebook-status-options { display: grid; gap: 10px; }
+.facebook-status-card { display: flex; align-items: center; gap: 12px; width: 100%; padding: 15px; border: 1px solid #dce5e7; border-radius: 12px; background: #fff; text-align: left; font: inherit; color: #243c43; cursor: pointer; }
+.facebook-status-card:hover { background: #f6faf9; border-color: #9dbdb5; }
+.facebook-status-card[aria-pressed="true"] { background: #edf7f3; border-color: #277862; box-shadow: 0 0 0 1px #277862; }
+.facebook-choice-icon { display: grid; place-items: center; flex: 0 0 34px; height: 34px; border-radius: 9px; background: #f0f3f4; font-size: 22px; }
+[data-facebook-status="reached_out"] .facebook-choice-icon { color: #906219; background: #fff2d8; }
+[data-facebook-status="joined"] .facebook-choice-icon { color: #277862; background: #e2f3e9; }
+.facebook-status-card strong { display: block; font-size: 14px; }
+.facebook-status-card small { display: block; margin-top: 5px; font-size: 12px; color: #657981; }
+.facebook-choice-check { margin-left: auto; color: #277862; visibility: hidden; }
+.facebook-status-card[aria-pressed="true"] .facebook-choice-check { visibility: visible; }
+.facebook-status-dialog button:focus-visible { outline: 3px solid #73b6a4; outline-offset: 3px; }
+.facebook-status-footer { display: flex; justify-content: space-between; gap: 10px; padding: 18px 24px; border-top: 1px solid #e6ecee; }
+.facebook-status-footer > div { display: flex; gap: 8px; }
+.facebook-history-button { margin-bottom: 16px; font-size: 12px; }
+.facebook-outreach-history { max-height: 330px; overflow-y: auto; }
+.facebook-outreach-history[hidden] { display: none; }
+.facebook-outreach-history > p[role="status"] { color: var(--b1g-text-muted); font-size: 12px; }
+.facebook-outreach-history ol { margin: 16px 0 0; padding: 0; list-style: none; }
+.facebook-outreach-history li { display: grid; gap: 5px; padding: 14px 0 14px 14px; border-left: 3px solid var(--b1g-border); border-bottom: 1px solid var(--b1g-border); }
+.facebook-outreach-history li strong { font-size: 13px; }
+.facebook-outreach-history li span { color: var(--b1g-text-muted); font-size: 12px; }
+.facebook-status-footer .button { min-height: 42px; padding: 10px 16px; font-size: 13px; }
+.facebook-followup-confirmation { text-align: center; padding: 8px 4px 12px; }
+.facebook-followup-icon { display: inline-grid; place-items: center; width: 52px; height: 52px; border-radius: 16px; background: #fff2d8; color: #906219; font-size: 30px; }
+.facebook-followup-confirmation h3 { margin: 16px 0 10px; font-size: 19px; }
+.facebook-followup-confirmation p { margin: 0; font-size: 14px; line-height: 1.65; color: #546d74; }
+.facebook-followup-confirmation small { display: block; margin-top: 16px; font-size: 12px; line-height: 1.5; color: #657981; }
+@media (max-width: 420px) { .facebook-status-header, .facebook-status-body, .facebook-status-footer { padding-left: 18px; padding-right: 18px; } .facebook-status-person { margin: 0 18px; } .facebook-status-footer .button { padding: 10px 12px; } }
 .registration-facebook-group-tag:disabled { cursor: default; opacity: .72; }
 .registrations-column-actions { padding: 9px 12px; border-bottom: 1px solid #edf2f3; }
 .registrations-column-actions button { padding: 0; color: #058693; border: 0; background: transparent; cursor: pointer; font-size: 8px; font-weight: 750; }

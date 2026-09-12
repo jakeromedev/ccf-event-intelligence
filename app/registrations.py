@@ -34,6 +34,7 @@ ATTESTATION_STATUS_LABELS = {
 FACEBOOK_GROUP_STATUS_LABELS = {
     "joined": "Joined",
     "not_joined": "Not Joined",
+    "reached_out": "Reached-out",
 }
 
 
@@ -166,12 +167,20 @@ def registration_columns(db):
             "facebook_group_status",
             "FB Group",
             "CASE WHEN COALESCE(facebook_group.joined, 0) = 1 "
-            "THEN 'joined' ELSE 'not_joined' END",
+            "THEN 'joined' WHEN COALESCE(facebook_group.reached_out, 0) = 1 "
+            "THEN 'reached_out' ELSE 'not_joined' END",
             data_type="select",
             group="Registrant Details",
             filterable=True,
             sortable=True,
             renderer="facebook_group_status",
+        ),
+        _registration_column(
+            "facebook_group_outreach_count",
+            "Outreach Count",
+            "COALESCE(outreach_counts.outreach_count, 0)",
+            data_type="number",
+            hidden=True,
         ),
         _registration_column(
             "first_name",
@@ -363,6 +372,14 @@ def _base_sql():
              participant_mapping.attestation_participant_id
         LEFT JOIN users reviewer
           ON reviewer.id = verification.updated_by_user_id
+        LEFT JOIN (
+            SELECT event_id, attestation_participant_id, COUNT(*) AS outreach_count
+            FROM registrant_facebook_group_outreach
+            GROUP BY event_id, attestation_participant_id
+        ) outreach_counts
+          ON outreach_counts.event_id = batch.event_id
+         AND outreach_counts.attestation_participant_id =
+             participant_mapping.attestation_participant_id
         LEFT JOIN registrant_facebook_group_memberships facebook_group
           ON facebook_group.event_id = batch.event_id
          AND facebook_group.attestation_participant_id =
@@ -737,6 +754,8 @@ def update_facebook_group_membership(
     batch_argument,
     joined,
     updater_user_id,
+    status=None,
+    record_outreach=False,
 ):
     """Set a durable, event-scoped Facebook Group membership tag."""
     ownership = _scoped_registration_participant(
@@ -745,45 +764,73 @@ def update_facebook_group_membership(
     if ownership is None:
         return None
     registration, participant_id = ownership
-    if not isinstance(joined, bool):
-        raise AdminTableQueryError("Facebook Group joined must be true or false.")
+    if status is None:
+        if not isinstance(joined, bool):
+            raise AdminTableQueryError("Facebook Group joined must be true or false.")
+        status = "joined" if joined else "not_joined"
+    if not isinstance(status, str) or status not in FACEBOOK_GROUP_STATUS_LABELS:
+        raise AdminTableQueryError("Facebook Group status is invalid.")
+    if not isinstance(record_outreach, bool) or record_outreach != (status == "reached_out"):
+        raise AdminTableQueryError("Reached Out requires confirmation to save an outreach record.")
+    joined = status == "joined"
+    reached_out = status == "reached_out"
+    db.execute(
+        "SELECT id FROM attestation_participants WHERE id = ? AND event_id = ?"
+        + (" FOR UPDATE" if db.is_mysql else ""), (participant_id, event_id),
+    ).fetchone()
 
     updated_at = utc_now()
     updated = db.execute(
         """
         UPDATE registrant_facebook_group_memberships
-        SET joined = ?, updated_by_user_id = ?, updated_at = ?
+        SET joined = ?, reached_out = ?, updated_by_user_id = ?, updated_at = ?
         WHERE event_id = ? AND attestation_participant_id = ?
         """,
-        (joined, updater_user_id, updated_at, event_id, participant_id),
+        (joined, reached_out, updater_user_id, updated_at, event_id, participant_id),
     )
     if updated.rowcount == 0:
         db.execute(
             """
             INSERT INTO registrant_facebook_group_memberships (
-                event_id, attestation_participant_id, joined,
+                event_id, attestation_participant_id, joined, reached_out,
                 updated_by_user_id, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 event_id,
                 participant_id,
                 joined,
+                reached_out,
                 updater_user_id,
                 updated_at,
                 updated_at,
             ),
         )
+    if record_outreach:
+        db.execute(
+            """INSERT INTO registrant_facebook_group_outreach (
+                event_id, attestation_participant_id, created_by_user_id, created_at
+            ) VALUES (?, ?, ?, ?)""",
+            (event_id, participant_id, updater_user_id, updated_at),
+        )
+    count = db.execute(
+        "SELECT COUNT(*) FROM registrant_facebook_group_outreach "
+        "WHERE event_id = ? AND attestation_participant_id = ?",
+        (event_id, participant_id),
+    ).fetchone()[0]
     db.commit()
     updater = db.execute(
         "SELECT username FROM users WHERE id = ?", (updater_user_id,)
     ).fetchone()
-    status = "joined" if joined else "not_joined"
+    label = FACEBOOK_GROUP_STATUS_LABELS[status]
+    if reached_out and count > 1:
+        label += " ({})".format(count)
     return {
         "batch_id": registration["batch_id"],
         "joined": joined,
         "status": status,
-        "label": FACEBOOK_GROUP_STATUS_LABELS[status],
+        "label": label,
+        "outreach_count": count,
         "updated_by": updater["username"] if updater else None,
         "updated_at": format_operational_datetime(updated_at),
     }
@@ -817,6 +864,30 @@ def _scoped_registration_participant(
     if participant_id is None:
         return None
     return registration, participant_id
+
+
+def facebook_group_outreach_history(db, event_id, active_batch_id, registrant_id, batch_argument):
+    """Read confirmed outreach for the scoped registration's durable owner."""
+    ownership = _scoped_registration_participant(
+        db, event_id, active_batch_id, registrant_id, batch_argument
+    )
+    if ownership is None:
+        return None
+    registration, participant_id = ownership
+    rows = db.execute(
+        """SELECT outreach.id, outreach.created_at, operator.username
+           FROM registrant_facebook_group_outreach outreach
+           LEFT JOIN users operator ON operator.id = outreach.created_by_user_id
+           WHERE outreach.event_id = ? AND outreach.attestation_participant_id = ?
+           ORDER BY outreach.created_at DESC, outreach.id DESC""",
+        (event_id, participant_id),
+    ).fetchall()
+    return {"registrant_id": registrant_id, "batch_id": registration["batch_id"],
+            "total": len(rows), "entries": [
+                {"id": row["id"], "created_by": row["username"] or "Former operator",
+                 "created_at": format_operational_datetime(row["created_at"])}
+                for row in rows
+            ]}
 
 
 def attestation_submission_history(db, event_id, active_batch_id, registrant_id, batch_argument):

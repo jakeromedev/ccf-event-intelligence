@@ -117,6 +117,7 @@ REGISTRATION_ENDPOINT_CAPABILITIES = {
     "dashboard.registration_remarks": CAPABILITY_VIEW_REGISTRATIONS,
     "dashboard.resolve_registration_remark": CAPABILITY_EDIT_REMARKS,
     "dashboard.update_registration_facebook_group": CAPABILITY_EDIT_FACEBOOK_GROUP,
+    "dashboard.registration_facebook_group_history": CAPABILITY_VIEW_REGISTRATIONS,
 }
 
 # Checking this when a username does not exist reduces timing differences

@@ -546,15 +546,140 @@
         return badge;
     };
 
-    const updateFacebookGroupTag = (row, button) => {
+    const facebookGroupLabel = (row) => {
+        if (row.facebook_group_status === "joined") return "Joined";
+        if (row.facebook_group_status !== "reached_out") return "Not Joined";
+        const count = Number(row.facebook_group_outreach_count || 0);
+        return count > 1 ? `Reached-out (${count})` : "Reached-out";
+    };
+
+    const chooseFacebookGroupStatus = (row) => new Promise((resolve) => {
+        const dialog = document.querySelector("[data-facebook-dialog]");
+        if (dialog.open) { resolve(null); return; }
+        const title = dialog.querySelector("[data-facebook-title]");
+        const choices = dialog.querySelector("[data-facebook-choices]");
+        const confirmation = dialog.querySelector("[data-facebook-confirmation]");
+        const save = dialog.querySelector("[data-facebook-save]");
+        const back = dialog.querySelector("[data-facebook-back]");
+        const cards = [...dialog.querySelectorAll("[data-facebook-status]")];
+        const history = dialog.querySelector("[data-facebook-history]");
+        const historyList = dialog.querySelector("[data-facebook-history-list]");
+        const historyMessage = dialog.querySelector("[data-facebook-history-message]");
+        const historyRetry = dialog.querySelector("[data-facebook-history-retry]");
+        const historyOpen = dialog.querySelector("[data-facebook-history-open]");
+        const historyBatch = batchSelect.value;
+        let viewingHistory = false;
+        let historyController = null;
+        let selected = row.facebook_group_status || "not_joined";
+        let confirming = false;
+        let result = null;
+        const count = Number(row.facebook_group_outreach_count || 0);
+        dialog.querySelector("[data-facebook-name]").textContent =
+            [row.first_name, row.last_name].filter(Boolean).join(" ") || "Registrant";
+        dialog.querySelector("[data-facebook-count]").textContent = count
+            ? `Reached out ${count} ${count === 1 ? "time" : "times"} so far`
+            : "No outreach yet";
+        dialog.querySelector("[data-facebook-confirmation-copy]").textContent = count
+            ? "Have you reached out again? Save this follow-up to add it to their outreach history."
+            : "Have you reached out to this person? Save this follow-up to start their outreach history.";
+        const render = () => {
+            title.textContent = viewingHistory ? "Reach out history" : confirming ? "Save this follow-up?" : "FB Group status";
+            choices.hidden = confirming || viewingHistory;
+            confirmation.hidden = !confirming || viewingHistory;
+            history.hidden = !viewingHistory;
+            back.hidden = !confirming && !viewingHistory;
+            save.hidden = viewingHistory;
+            save.textContent = confirming ? "Yes, save follow-up" : selected === "reached_out" ? "Continue" : "Save status";
+            cards.forEach((card) => card.setAttribute("aria-pressed", String(card.dataset.facebookStatus === selected)));
+        };
+        cards.forEach((card) => {
+            card.onclick = () => { selected = card.dataset.facebookStatus; render(); };
+        });
+        const loadHistory = async () => {
+            historyController?.abort();
+            const controller = new AbortController();
+            historyController = controller;
+            viewingHistory = true;
+            historyList.replaceChildren();
+            historyMessage.textContent = "Loading reach out history…";
+            historyRetry.hidden = true;
+            history.setAttribute("aria-busy", "true");
+            render();
+            title.focus();
+            const url = root.dataset.facebookHistoryUrl.replace("/0/facebook-group/history", `/${row.id}/facebook-group/history`);
+            try {
+                const response = await fetch(`${url}?${new URLSearchParams({batch: historyBatch})}`, {
+                    credentials: "same-origin", headers: {Accept: "application/json"}, signal: controller.signal,
+                });
+                if (!response.ok) throw new Error("Reach out history could not be loaded. Please try again.");
+                const payload = await response.json();
+                if (controller.signal.aborted || !viewingHistory || !dialog.open) return;
+                if (!Array.isArray(payload.entries)) throw new Error("Reach out history could not be loaded. Please try again.");
+                historyMessage.textContent = payload.entries.length
+                    ? `${payload.total} confirmed ${payload.total === 1 ? "follow-up" : "follow-ups"}`
+                    : "No reach out history yet. Confirmed follow-ups will appear here.";
+                payload.entries.forEach((entry) => {
+                    const item = document.createElement("li");
+                    const who = document.createElement("strong");
+                    who.textContent = entry.created_by || "Former operator";
+                    const when = document.createElement("span");
+                    when.textContent = entry.created_at || "Date unavailable";
+                    item.append(who, when);
+                    historyList.append(item);
+                });
+            } catch (error) {
+                if (controller.signal.aborted || !viewingHistory || !dialog.open) return;
+                historyMessage.textContent = "Reach out history could not be loaded. Please try again.";
+                historyRetry.hidden = false;
+            } finally {
+                if (historyController === controller) history.setAttribute("aria-busy", "false");
+            }
+        };
+        historyOpen.onclick = loadHistory;
+        historyRetry.onclick = loadHistory;
+        back.onclick = () => {
+            const wasHistory = viewingHistory;
+            historyController?.abort();
+            viewingHistory = false;
+            confirming = false;
+            render();
+            if (wasHistory) historyOpen.focus();
+            else cards.find((card) => card.dataset.facebookStatus === selected)?.focus();
+        };
+        save.onclick = () => {
+            if (selected === "reached_out" && !confirming) {
+                confirming = true;
+                render();
+                title.focus();
+                return;
+            }
+            result = selected;
+            dialog.close();
+        };
+        dialog.querySelectorAll("[data-facebook-close]").forEach((control) => {
+            control.onclick = () => dialog.close();
+        });
+        dialog.addEventListener("close", () => {
+            historyController?.abort();
+            resolve(result);
+        }, {once: true});
+        render();
+        dialog.showModal();
+        cards.find((card) => card.dataset.facebookStatus === selected)?.focus();
+    });
+
+    const updateFacebookGroupTag = async (row, button) => {
         if (!canEditFacebookGroup || facebookGroupUpdates.has(row.id)) return;
-        const joined = row.facebook_group_status !== "joined";
         const name = [row.first_name, row.last_name].filter(Boolean).join(" ") || "Registrant";
+        const batch = batchSelect.value;
+        const status = await chooseFacebookGroupStatus(row);
+        if (!status) return;
+        if (!button.isConnected || batch !== batchSelect.value) return;
         const updateUrl = root.dataset.facebookGroupUrl.replace(
             "/0/facebook-group",
             `/${row.id}/facebook-group`,
         );
-        const params = new URLSearchParams({batch: batchSelect.value});
+        const params = new URLSearchParams({batch});
         facebookGroupUpdates.add(row.id);
         button.disabled = true;
         button.textContent = "Saving…";
@@ -566,7 +691,7 @@
                 "Content-Type": "application/json",
                 "X-CSRFToken": root.dataset.csrfToken,
             },
-            body: JSON.stringify({joined}),
+            body: JSON.stringify({status, record_outreach: status === "reached_out"}),
         })
             .then((response) => response.ok
                 ? response.json()
@@ -575,13 +700,14 @@
                 )))
             .then((payload) => {
                 row.facebook_group_status = payload.status;
+                row.facebook_group_outreach_count = payload.outreach_count;
                 return loadData(false).then(() => {
                     showUpdateFeedback(`${name}: FB Group tag changed to ${payload.label}.`);
                 });
             })
             .catch((error) => {
                 button.disabled = false;
-                button.textContent = joined ? "Not Joined" : "Joined";
+                button.textContent = facebookGroupLabel(row);
                 showUpdateFeedback(error.message || "FB Group tag could not be updated.", true);
             })
             .finally(() => facebookGroupUpdates.delete(row.id));
@@ -1386,7 +1512,7 @@
     const registrationDetailValue = (row, key) => {
         if (key === "attestation_status") return statusLabels[normalizeStatus(row[key])];
         if (key === "facebook_group_status") {
-            return row[key] === "joined" ? "Joined" : "Not Joined";
+            return facebookGroupLabel(row);
         }
         return displayValue(row[key]);
     };
@@ -1441,7 +1567,7 @@
         detailsName.textContent = [row.first_name, row.last_name].filter(Boolean).join(" ")
             || "this registrant";
         const joinedFacebookGroup = row.facebook_group_status === "joined";
-        detailsFacebookGroup.textContent = joinedFacebookGroup ? "FB Group · Joined" : "FB Group · Not Joined";
+        detailsFacebookGroup.textContent = `FB Group · ${facebookGroupLabel(row)}`;
         detailsFacebookGroup.classList.toggle("is-joined", joinedFacebookGroup);
         renderRegistrationDetails(row);
         detailsModal.hidden = false;
@@ -1664,13 +1790,13 @@
             const joined = value === "joined";
             const name = [row.first_name, row.last_name].filter(Boolean).join(" ") || "registrant";
             button.type = "button";
-            button.className = `registration-facebook-group-tag${joined ? " is-joined" : ""}`;
-            button.textContent = joined ? "Joined" : "Not Joined";
-            button.setAttribute("aria-pressed", String(joined));
+            button.className = `registration-facebook-group-tag${joined ? " is-joined" : value === "reached_out" ? " is-reached-out" : ""}`;
+            button.textContent = facebookGroupLabel(row);
+            button.setAttribute("aria-haspopup", "dialog");
             button.setAttribute(
                 "aria-label",
                 canEditFacebookGroup
-                    ? `${joined ? "Remove" : "Add"} FB Group tag for ${name}`
+                    ? `${name}: ${button.textContent}. Update FB Group status`
                     : `${name}: ${button.textContent} FB Group`,
             );
             button.disabled = !canEditFacebookGroup;
@@ -2028,6 +2154,7 @@
         if (!columnsMenu.hidden && !event.target.closest(".admin-column-control")) setColumnsMenuOpen(false);
     });
     document.addEventListener("keydown", (event) => {
+        if (document.querySelector("[data-facebook-dialog]")?.open) return;
         if (window.Swal?.isVisible()) return;
         if (actionsMenu && !actionsMenu.hidden && event.key === "Escape") {
             event.preventDefault();

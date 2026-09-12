@@ -563,6 +563,48 @@ class AttestationResubmission(Base):
     )
 
 
+class FailedPaymentFollowup(Base):
+    """Payment outreach and remarks survive replacement buyer exports."""
+
+    __tablename__ = "failed_payment_followups"
+    __table_args__ = (
+        CheckConstraint("kind IN ('outreach', 'remark')", name="ck_failed_payment_followup_kind"),
+        Index("idx_failed_payment_followup_person", "event_id", "person_key"),
+        MYSQL_TABLE_OPTIONS,
+    )
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ID_TYPE, ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
+    person_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    remark: Mapped[Optional[str]] = mapped_column(Text)
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(ID_TYPE, ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[object] = mapped_column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+
+
+class RegistrantFacebookGroupOutreach(Base):
+    """One confirmed outreach attempt, attributed to its operator."""
+
+    __tablename__ = "registrant_facebook_group_outreach"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["event_id", "attestation_participant_id"],
+            ["attestation_participants.event_id", "attestation_participants.id"],
+            ondelete="CASCADE",
+        ),
+        Index("idx_fb_outreach_participant", "event_id", "attestation_participant_id"),
+        MYSQL_TABLE_OPTIONS,
+    )
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    attestation_participant_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ID_TYPE, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+
 class RegistrantFacebookGroupMembership(Base):
     """Application-owned Facebook Group tag for one durable participant."""
 
@@ -593,6 +635,9 @@ class RegistrantFacebookGroupMembership(Base):
     id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
     event_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
     attestation_participant_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    reached_out: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("0")
+    )
     joined: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("0")
     )

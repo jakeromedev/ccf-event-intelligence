@@ -189,3 +189,99 @@ class FailedPaymentsTests(unittest.TestCase):
         self.assertIn(b"1 result", page.data)
         search = client.get(url, query_string={"q": "Uncertain"})
         self.assertIn(b"No matches found", search.data)
+
+    def followup_client(self, role="user"):
+        self.app.config["AUTHENTICATION_DISABLED"] = False
+        user = User(username="followup-operator", role=role, status="approved", approved_at=utc_now(),
+                    password_hash=hash_password("StrongPassword12!"), auth_version=1)
+        self.db.session.add(user)
+        self.db.commit()
+        self.ctx.pop()
+        self.ctx = self.app.app_context()
+        self.ctx.push()
+        self.db = get_db()
+        client = self.app.test_client()
+        client.post("/login", data={"username": "followup-operator", "password": "StrongPassword12!"})
+        return client
+
+    def followup_url(self):
+        return "/events/{}/failed-payments/{}/followups".format(
+            self.event, self.report()["rows"][0]["buyer_id"])
+
+    def test_outreach_and_remarks_are_confirmed_attributed_and_separate(self):
+        self.buyer()
+        client = self.followup_client()
+        url = self.followup_url()
+        for payload in ({"kind": "outreach"}, {"kind": "outreach", "confirmed": "yes"},
+                        {"kind": "remark", "remark": " "}, {"kind": "remark", "remark": None},
+                        {"kind": "remark", "remark": "x" * 4001}, {"kind": "joined"},
+                        {"kind": "remark", "remark": "note", "created_by_user_id": 99}):
+            self.assertEqual(400, client.post(url, json=payload).status_code)
+        self.assertEqual([], client.get(url).json["history"])
+        for count in (1, 2):
+            response = client.post(url, json={"kind": "outreach", "confirmed": True, "remark": "Called them"})
+            self.assertEqual(200, response.status_code)
+            self.assertEqual(count, response.json["outreach_count"])
+        response = client.post(url, json={"kind": "remark", "remark": "<script>note</script>"})
+        self.assertEqual(2, response.json["outreach_count"])
+        self.assertEqual(3, len(response.json["history"]))
+        for entry in response.json["history"]:
+            self.assertEqual("followup-operator", entry["created_by"])
+            self.assertTrue(entry["created_at"])
+        page = client.get("/events/{}/failed-payments".format(self.event))
+        self.assertIn(b"Reached-out (2)", page.data)
+        self.assertIn(b"&lt;script&gt;note&lt;/script&gt;", page.data)
+        table = page.data.split(b"<table>")[1].split(b"</table>")[0]
+        for technical in (b"BUY-", b"Bank declined", b"Registration check", b"Failure reason", b"No later paid registration"):
+            self.assertNotIn(technical, table)
+
+    def test_followup_history_survives_reimport_and_stays_with_person_and_event(self):
+        self.buyer()
+        client = self.followup_client()
+        old_url = self.followup_url()
+        client.post(old_url, json={"kind": "outreach", "confirmed": True})
+        self.db.execute("UPDATE import_batches SET status = 'inactive', active_event_id = NULL WHERE id = ?", (self.batch,))
+        self.batch = self.db.execute(
+            "INSERT INTO import_batches (event_id, status, active_event_id) VALUES (?, 'active', ?)",
+            (self.event, self.event),
+        ).lastrowid
+        self.db.commit()
+        self.buyer(name=" ALEX  SANTOS ", email=" ALEX@EXAMPLE.COM ", mobile="+63 917 123 4567")
+        self.assertEqual(1, client.get(self.followup_url()).json["outreach_count"])
+        self.assertEqual(404, client.post(old_url, json={"kind": "outreach", "confirmed": True}).status_code)
+        other_event = self.db.execute("INSERT INTO events (name) VALUES ('Other')").lastrowid
+        other_batch = self.db.execute(
+            "INSERT INTO import_batches (event_id, status, active_event_id) VALUES (?, 'active', ?)",
+            (other_event, other_event),
+        ).lastrowid
+        self.buyer(batch=other_batch)
+        other_buyer = failed_payment_report(self.db, other_batch)["rows"][0]["buyer_id"]
+        other_url = "/events/{}/failed-payments/{}/followups".format(other_event, other_buyer)
+        self.assertEqual(0, client.get(other_url).json["outreach_count"])
+        wrong_url = "/events/{}/failed-payments/{}/followups".format(self.event, other_buyer)
+        self.assertEqual(404, client.post(wrong_url, json={"kind": "outreach", "confirmed": True}).status_code)
+        self.buyer(name="Jamie Santos", created="2026-08-05 10:00:00")
+        self.assertEqual(0, client.get(self.followup_url()).json["outreach_count"])
+
+    def test_followup_access_requires_approved_payment_operator_and_csrf(self):
+        self.buyer()
+        url = self.followup_url()
+        self.assertEqual(403, self.app.test_client().post(url, json={"kind": "outreach", "confirmed": True}).status_code)
+        client = self.followup_client(role="registration")
+        self.assertEqual(403, client.get(url).status_code)
+        self.assertEqual(403, client.post(url, json={"kind": "outreach", "confirmed": True}).status_code)
+        self.db.execute("UPDATE users SET role = 'user' WHERE username = 'followup-operator'")
+        self.db.commit()
+        self.ctx.pop()
+        self.ctx = self.app.app_context()
+        self.ctx.push()
+        self.db = get_db()
+        self.app.config["WTF_CSRF_ENABLED"] = True
+        self.assertEqual(400, client.post(url, json={"kind": "outreach", "confirmed": True}).status_code)
+
+    def test_recovered_and_review_cases_cannot_receive_followups(self):
+        self.buyer()
+        client = self.followup_client()
+        url = self.followup_url()
+        self.registration()
+        self.assertEqual(404, client.post(url, json={"kind": "outreach", "confirmed": True}).status_code)

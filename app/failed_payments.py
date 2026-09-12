@@ -1,16 +1,19 @@
-"""Read-only failed-payment follow-up from the active Event export."""
+"""Failed-payment follow-up from the active Event export."""
 
 import json
+import hashlib
 import re
 import unicodedata
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-from flask import Blueprint, abort, render_template, request
+from flask import Blueprint, abort, jsonify, render_template, request
+from flask_login import current_user
 
 from .aggregation import active_batch
 from .auth import CAPABILITY_VIEW_FAILED_PAYMENTS, has_capability
 from .db import get_db
+from .time_utils import format_operational_datetime, utc_now
 
 
 bp = Blueprint("failed_payments", __name__)
@@ -129,6 +132,8 @@ def failed_payment_report(db, batch_id):
         if not identity["name"] or not _keys(identity):
             key = (buyer["id"],)
         entry = {
+            "buyer_id": buyer["id"],
+            "person_key": hashlib.sha256(json.dumps(key, ensure_ascii=True).encode()).hexdigest(),
             "name": name or "Name unavailable",
             "email": _text(source.get("Email Address")),
             "mobile": _text(source.get("Mobile Number")),
@@ -173,14 +178,88 @@ def event_failed_payments(event_id):
     total_people = len(rows)
     if query:
         rows = [row for row in rows if query.casefold() in " ".join(
-            str(row[key] or "") for key in ("name", "email", "mobile", "reference", "reason")
+            str(row[key] or "") for key in ("name", "email", "mobile")
         ).casefold()]
     per_page = request.args.get("per_page", 25, type=int)
     if per_page not in (25, 50, 100):
         per_page = 25
     pages = max(1, (len(rows) + per_page - 1) // per_page)
     page = min(pages, max(1, request.args.get("page", 1, type=int)))
+    page_rows = rows[(page - 1) * per_page:page * per_page]
+    if page_rows:
+        keys = [row["person_key"] for row in page_rows]
+        summaries = db.execute(
+            "SELECT person_key, SUM(CASE WHEN kind = 'outreach' THEN 1 ELSE 0 END) AS outreach_count, "
+            "COUNT(remark) AS remark_count, MAX(CASE WHEN remark IS NOT NULL THEN id END) AS latest_remark_id "
+            "FROM failed_payment_followups WHERE event_id = ? AND person_key IN ({}) GROUP BY person_key".format(
+                ",".join("?" for _ in keys)), [event_id] + keys,
+        ).fetchall()
+        summary_map = {row["person_key"]: dict(row) for row in summaries}
+        latest_ids = [row["latest_remark_id"] for row in summaries if row["latest_remark_id"]]
+        latest_remarks = {}
+        if latest_ids:
+            latest_remarks = {row["id"]: row["remark"] for row in db.execute(
+                "SELECT id, remark FROM failed_payment_followups WHERE event_id = ? AND id IN ({})".format(
+                    ",".join("?" for _ in latest_ids)), [event_id] + latest_ids,
+            ).fetchall()}
+        for row in page_rows:
+            summary = summary_map.get(row["person_key"], {})
+            row["outreach_count"] = int(summary.get("outreach_count", 0))
+            row["remark_count"] = int(summary.get("remark_count", 0))
+            row["latest_remark"] = latest_remarks.get(summary.get("latest_remark_id"), "")
     return render_template("failed_payments.html", event=event, active_batch=batch,
-                           report=report, rows=rows[(page - 1) * per_page:page * per_page],
+                           report=report, rows=page_rows, followup_edit_allowed=_can_edit_followups(),
                            total_people=total_people, total=len(rows), query=query,
                            page=page, pages=pages, per_page=per_page)
+
+
+def _can_edit_followups():
+    return (current_user.is_authenticated and current_user.status == "approved"
+            and has_capability(CAPABILITY_VIEW_FAILED_PAYMENTS))
+
+
+@bp.route("/events/<int:event_id>/failed-payments/<int:buyer_id>/followups", methods=["GET", "POST"])
+def payment_followups(event_id, buyer_id):
+    if not has_capability(CAPABILITY_VIEW_FAILED_PAYMENTS):
+        abort(403)
+    if request.method == "POST" and not _can_edit_followups():
+        abort(403)
+    db = get_db()
+    batch = active_batch(db, event_id)
+    if not batch:
+        abort(404)
+    person = next((row for row in failed_payment_report(db, batch["id"])["rows"]
+                   if row["buyer_id"] == buyer_id and not row["needs_review"]), None)
+    if person is None:
+        abort(404)
+    if request.method == "POST":
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or set(payload) - {"kind", "remark", "confirmed"}:
+            return jsonify(error="Please choose a follow-up or add a remark."), 400
+        kind = payload.get("kind")
+        if kind not in ("outreach", "remark"):
+            return jsonify(error="Please choose a follow-up or add a remark."), 400
+        if kind == "outreach" and payload.get("confirmed") is not True:
+            return jsonify(error="Please confirm that you reached out before saving."), 400
+        remark = payload.get("remark", "")
+        if not isinstance(remark, str) or len(remark.strip()) > 4000:
+            return jsonify(error="Remarks must be text with at most 4,000 characters."), 400
+        remark = remark.strip()
+        if kind == "remark" and not remark:
+            return jsonify(error="Please enter a remark."), 400
+        db.execute(
+            "INSERT INTO failed_payment_followups "
+            "(event_id, person_key, kind, remark, created_by_user_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (event_id, person["person_key"], kind, remark or None, current_user.id, utc_now()),
+        )
+        db.commit()
+    history = db.execute(
+        "SELECT followup.id, followup.kind, followup.remark, followup.created_at, users.username AS created_by "
+        "FROM failed_payment_followups followup LEFT JOIN users ON users.id = followup.created_by_user_id "
+        "WHERE followup.event_id = ? AND followup.person_key = ? ORDER BY followup.created_at DESC, followup.id DESC",
+        (event_id, person["person_key"]),
+    ).fetchall()
+    return jsonify(
+        outreach_count=sum(row["kind"] == "outreach" for row in history),
+        history=[{**dict(row), "created_at": format_operational_datetime(row["created_at"])} for row in history],
+    )

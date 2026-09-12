@@ -639,7 +639,7 @@ class RegistrationsIntegrationTests(unittest.TestCase):
             payload["column_options"]["remarks"],
         )
         self.assertEqual(
-            ["joined", "not_joined"],
+            ["joined", "not_joined", "reached_out"],
             [
                 item["value"]
                 for item in payload["column_options"]["facebook_group_status"]
@@ -768,6 +768,12 @@ class RegistrationsIntegrationTests(unittest.TestCase):
                 """,
                 (self.event_a, participant_id),
             )
+            for _ in range(2):
+                db.execute(
+                    "INSERT INTO registrant_facebook_group_outreach "
+                    "(event_id, attestation_participant_id) VALUES (?, ?)",
+                    (self.event_a, participant_id),
+                )
             db.commit()
 
         self._write_fixture(31, first_satellite="B1G Gen. Trias")
@@ -780,6 +786,7 @@ class RegistrationsIntegrationTests(unittest.TestCase):
         self.assertNotEqual(initial_batch_id, replacement_batch_id)
         self.assertNotEqual(initial_row["id"], replacement_row["id"])
         self.assertEqual("joined", replacement_row["facebook_group_status"])
+        self.assertEqual(2, replacement_row["facebook_group_outreach_count"])
 
     def test_reimport_reuses_stable_attestation_participant_ownership(self):
         initial_batch_id = self._process(self.event_a)
@@ -2485,6 +2492,68 @@ class RegistrationsAuthorizationTests(unittest.TestCase):
             ).fetchone()
             self.assertFalse(audit["joined"])
             self.assertEqual("registration-operator", audit["username"])
+
+    def test_outreach_requires_confirmation_and_preserves_each_attributed_attempt(self):
+        self._login("registration-operator", "Registration-Operator-Password-1!")
+        url = "/events/{}/registrations/{}/facebook-group".format(
+            self.event_id, self.registrant_id
+        )
+        headers = {"X-CSRFToken": self._csrf_token()}
+        for payload in (
+            {"status": "reached_out"},
+            {"status": "reached_out", "record_outreach": False},
+            {"status": "joined", "record_outreach": True},
+            {"status": "unknown"},
+            {"status": None},
+        ):
+            self.assertEqual(400, self.client.patch(url, json=payload, headers=headers).status_code)
+        for count in (1, 2):
+            response = self.client.patch(url, json={
+                "status": "reached_out", "record_outreach": True,
+            }, headers=headers)
+            self.assertEqual(200, response.status_code)
+            self.assertEqual(count, response.json["outreach_count"])
+            self.assertEqual("registration-operator", response.json["updated_by"])
+        self.assertEqual("Reached-out (2)", response.json["label"])
+        history_url = url + "/history"
+        history = self.client.get(history_url)
+        self.assertEqual(200, history.status_code)
+        self.assertEqual(2, history.json["total"])
+        self.assertEqual(["registration-operator", "registration-operator"],
+                         [entry["created_by"] for entry in history.json["entries"]])
+        self.assertGreater(history.json["entries"][0]["id"], history.json["entries"][1]["id"])
+        self.assertTrue(all(entry["created_at"] for entry in history.json["entries"]))
+        self.assertEqual(400, self.client.get(history_url, query_string={"batch": 999999}).status_code)
+        data_url = "/events/{}/registrations/data".format(self.event_id)
+        rows = self.client.get(data_url, query_string={"filters": json.dumps([
+            {"field": "facebook_group_status", "operator": "equals", "value": "reached_out"},
+        ])}).json["rows"]
+        self.assertEqual(1, len(rows))
+        self.assertEqual(2, rows[0]["facebook_group_outreach_count"])
+        for status in ("joined", "not_joined"):
+            response = self.client.patch(url, json={"status": status}, headers=headers)
+            self.assertEqual(200, response.status_code)
+            self.assertEqual(status, response.json["status"])
+            self.assertEqual(2, response.json["outreach_count"])
+        cross_event_url = "/events/{}/registrations/{}/facebook-group".format(
+            self.event_id, self.other_registrant_id
+        )
+        self.assertEqual(404, self.client.get(cross_event_url + "/history").status_code)
+        self.assertEqual(2, self.client.get(history_url).json["total"])
+        self.assertEqual(404, self.client.patch(cross_event_url, json={
+            "status": "reached_out", "record_outreach": True,
+        }, headers=headers).status_code)
+        with self.app.app_context():
+            attempts = get_db().execute(
+                """SELECT outreach.created_at, users.username
+                   FROM registrant_facebook_group_outreach outreach
+                   JOIN users ON users.id = outreach.created_by_user_id
+                   WHERE outreach.event_id = ? ORDER BY outreach.id""", (self.event_id,),
+            ).fetchall()
+            self.assertEqual(2, len(attempts))
+            for attempt in attempts:
+                self.assertEqual("registration-operator", attempt["username"])
+                self.assertIsNotNone(attempt["created_at"])
 
     def test_registrant_remarks_api_is_scoped_attributed_and_resolvable(self):
         self._login(

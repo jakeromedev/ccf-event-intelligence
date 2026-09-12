@@ -24,9 +24,10 @@
 .failed-payments-table-wrap { overflow-x: auto; }
 .failed-payments-list table { width: 100%; min-width: 900px; border-collapse: collapse; table-layout: fixed; }
 .failed-payments-list th { padding: 12px 18px; background: var(--b1g-off-white); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; text-align: left; }
-.failed-payments-list th:first-child { width: 25%; }
-.failed-payments-list th:nth-child(2) { width: 23%; }
-.failed-payments-list th:nth-child(4) { width: 8%; }
+.failed-payments-list th:first-child { width: 28%; }
+.failed-payments-list th:nth-child(2) { width: 22%; }
+.failed-payments-list th:nth-child(3) { width: 20%; }
+.failed-payments-list th:nth-child(4) { width: 30%; }
 .failed-payments-list td { padding: 16px 18px; border-top: 1px solid var(--b1g-border); vertical-align: top; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .failed-payments-list td > strong, .failed-payments-list td > span, .failed-payments-list td > small { display: block; }
 .failed-payments-list td > strong { font-size: 13px; }
@@ -41,3 +42,25 @@
 .failed-payments-list footer nav { display: flex; gap: 8px; }
 @media (max-width: 1000px) { .failed-payments-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .failed-payments-list > header { align-items: flex-start; flex-direction: column; } }
 @media (max-width: 600px) { .failed-payments-intro { align-items: flex-start; flex-direction: column; } .failed-payments-stats { gap: 10px; } .failed-payments-stats article { padding: 14px; } .failed-payments-list form, .failed-payments-list form label:first-child, .failed-payments-list input { width: 100%; } }
+.payment-outreach-tag { border: 1px solid #d4e1e3; border-radius: 20px; background: #f5f8f9; color: #526b73; padding: 7px 12px; font: inherit; font-weight: 700; cursor: pointer; }
+.payment-outreach-tag.is-reached-out { color: #855b13; border-color: #ead6a9; background: #fff8e8; }
+.payment-outreach-tag:hover { border-color: #277862; }
+.payment-remark-button { border: 0; padding: 5px 0; background: transparent; color: #8a1317; font: inherit; font-weight: 700; cursor: pointer; }
+.payment-remark-preview { margin: 0 0 4px; color: #526b73; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; }
+.payment-followup-dialog { width: min(540px, calc(100vw - 32px)); }
+.payment-followup-dialog[open] { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; overflow: hidden; }
+.payment-followup-dialog .facebook-status-body { padding-top: 10px; overflow-y: auto; }
+.payment-followup-dialog [data-payment-title]:focus { outline: none; }
+.payment-remark-label { display: grid; gap: 8px; margin-top: 20px; font-size: 13px; font-weight: 700; }
+.payment-remark-label textarea { width: 100%; resize: vertical; min-height: 90px; border: 1px solid #ccdadd; border-radius: 10px; padding: 12px; font: inherit; font-weight: 400; line-height: 1.5; }
+.payment-remark-label textarea:focus { outline: 2px solid #73b6a4; outline-offset: 2px; }
+.payment-remark-help { color: #657981; font-size: 12px; line-height: 1.5; }
+.payment-followup-history { border-top: 1px solid #e6ecee; padding-top: 18px; margin-top: 24px; }
+.payment-followup-history h3 { margin: 0 0 15px; font-size: 15px; }
+.payment-history-entry { border-left: 2px solid #d7e9e3; padding: 0 0 16px 14px; margin-left: 3px; }
+.payment-history-entry strong { font-size: 13px; }
+.payment-history-entry p { margin: 6px 0; font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.payment-history-entry small, .payment-history-empty { color: #657981; font-size: 12px; line-height: 1.5; }
+[data-payment-feedback] { font-size: 13px; line-height: 1.5; color: #277862; }
+[data-payment-feedback].is-error { color: #a51f25; }
+.payment-followup-dialog button:disabled { opacity: .55; cursor: wait; }
