@@ -156,8 +156,6 @@
         <div class="phase1-kpi-grid">
             {{ metric_card('Unique Participants', metrics.participants|number, 'users', 'participants', 'Curated participant people') }}
             {{ metric_card('Unique Volunteers', metrics.volunteers|number, 'person', 'volunteers', 'Curated volunteer people') }}
-            {{ metric_card('Unique Registrants', metrics.total_registrations|number, 'ticket', 'total', 'Unique Participants + Unique Volunteers') }}
-            {{ metric_card('Raw Registrations', metrics.raw_registrations|number, 'imports', 'raw', 'Valid source registration rows') }}
             {{ metric_card('Participant Target', (metrics.participant_target|number if metrics.participant_target is not none else '—'), 'chart', 'target', 'Event target') }}
         </div>
     </section>
