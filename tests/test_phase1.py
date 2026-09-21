@@ -23,6 +23,7 @@ from app.aggregation import (
     overview_metrics,
     overview_registrants,
     participant_profile_metrics,
+    registration_axis_ticks,
     registration_progress,
     satellite_curation_detail,
     satellite_metrics,
@@ -198,6 +199,13 @@ class ClassifierTests(unittest.TestCase):
 
 
 class DashboardNormalizationTests(unittest.TestCase):
+    def test_registration_axis_has_zero_and_readable_whole_number_steps(self):
+        self.assertEqual([0, 5, 10, 15, 20, 25, 30],
+                         [tick["value"] for tick in registration_axis_ticks(30)[1]])
+        self.assertEqual([0, 1], [tick["value"] for tick in registration_axis_ticks(1)[1]])
+        self.assertEqual([0, 5, 10, 15, 20],
+                         [tick["value"] for tick in registration_axis_ticks(17)[1]])
+
     def test_registration_progress_contract(self):
         configured = registration_progress(525, 700)
         self.assertEqual(75, configured["progress_percentage"])
@@ -486,6 +494,44 @@ class EventIntegrationTests(unittest.TestCase):
             summaries = {item["event"]["id"]: item for item in event_summaries(get_db())}
             self.assertEqual(5, summaries[self.event_a]["metrics"]["total_registrants"])
             self.assertEqual(2, summaries[self.event_b]["metrics"]["total_registrants"])
+
+    def test_weekly_registration_trend_uses_source_dates_and_fills_empty_weeks(self):
+        batch_id = self._process(self.event_a)
+        with self.app.app_context():
+            db = get_db()
+            rows = db.execute(
+                "SELECT id, source_data_json FROM registrants WHERE batch_id = ? ORDER BY id",
+                (batch_id,),
+            ).fetchall()
+            dates = ("August 08, 2025 8:08 AM", "2025-08-09T09:00:00", "August 25, 2025 1:00 PM")
+            for row, created_at in zip(rows, dates):
+                source = json.loads(row["source_data_json"])
+                source["Created At"] = created_at
+                db.execute(
+                    "UPDATE registrants SET source_data_json = ? WHERE id = ?",
+                    (json.dumps(source), row["id"]),
+                )
+            db.commit()
+            trend = event_dashboard_metrics(db, self.event_a)["registration_trend"]
+            self.assertEqual(["2025-08-04", "2025-08-11", "2025-08-18", "2025-08-25"],
+                             [point["start"] for point in trend["series"]["weekly"]["points"]])
+            self.assertEqual([2, 0, 0, 1], [point["count"] for point in trend["series"]["weekly"]["points"]])
+            self.assertEqual([1, 1, 0], [point["count"] for point in trend["series"]["daily"]["points"][:3]])
+            self.assertEqual([3], [point["count"] for point in trend["series"]["monthly"]["points"]])
+            self.assertEqual(2, trend["undated_total"])
+            self.assertEqual(0, trend["series"]["daily"]["ticks"][0]["value"])
+            self.assertEqual(200, trend["series"]["daily"]["ticks"][0]["y"])
+            self.assertEqual(56, trend["series"]["daily"]["points"][0]["x"])
+            self.assertEqual(982, trend["series"]["daily"]["points"][-1]["x"])
+
+        page = self.app.test_client().get("/events/{}".format(self.event_a))
+        self.assertIn(b"Registrations per day", page.data)
+        self.assertIn(b'data-trend-period="daily" aria-pressed="true"', page.data)
+        self.assertIn(b'data-trend-period="daily"', page.data)
+        self.assertIn(b'data-trend-period="monthly"', page.data)
+        self.assertIn(b'data-date="2025-08-25" data-count="1"', page.data)
+        self.assertIn(b'data-trend-grid', page.data)
+        self.assertIn(b'data-trend-line', page.data)
 
     def test_target_reconciliation_includes_participants_without_assignments(self):
         batch_id = self._process(self.event_a)

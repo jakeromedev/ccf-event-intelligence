@@ -1,6 +1,8 @@
 import json
+import math
 import re
 from collections import Counter, defaultdict
+from datetime import datetime, timedelta
 
 from .classifier import AFFILIATIONS
 from .normalization import (
@@ -1317,6 +1319,102 @@ def dashboard_operational_status_metrics(db, batch_id):
     }
 
 
+def registration_axis_ticks(maximum):
+    """Choose zero-based whole-number labels with a readable interval."""
+    raw_step = maximum / 6
+    magnitude = 10 ** math.floor(math.log10(raw_step))
+    step = next(value * magnitude for value in (1, 2, 5, 10) if value * magnitude >= raw_step)
+    step = max(1, int(step))
+    axis_max = math.ceil(maximum / step) * step
+    return axis_max, [
+        {"value": value, "y": round(200 - 176 * value / axis_max, 1)}
+        for value in range(0, axis_max + 1, step)
+    ]
+
+
+def registration_trend_metrics(db, batch_id):
+    """Count curated people by the day, week, and month of first registration."""
+    if batch_id is None:
+        return {"series": {}, "dated_total": 0, "undated_total": 0}
+
+    rows = db.execute(
+        """SELECT source.curated_registrant_id, registrant.source_data_json
+           FROM curated_registrant_sources source
+           JOIN registrants registrant ON registrant.id = source.registrant_id
+           WHERE source.batch_id = ?
+           ORDER BY source.curated_registrant_id""",
+        (batch_id,),
+    ).fetchall()
+    earliest = {}
+    people = set()
+    for row in rows:
+        person_id = row["curated_registrant_id"]
+        people.add(person_id)
+        try:
+            raw = json.loads(row["source_data_json"] or "{}")
+            value = str(raw.get("Created At") or "").strip()
+            if not value:
+                continue
+            try:
+                registered = datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+            except ValueError:
+                registered = datetime.strptime(value, "%B %d, %Y %I:%M %p").date()
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if person_id not in earliest or registered < earliest[person_id]:
+            earliest[person_id] = registered
+
+    if not earliest:
+        return {"series": {}, "dated_total": 0, "undated_total": len(people)}
+
+    series = {}
+    for period in ("daily", "weekly", "monthly"):
+        if period == "daily":
+            bucket = lambda day: day
+            advance = lambda day: day + timedelta(days=1)
+        elif period == "weekly":
+            bucket = lambda day: day - timedelta(days=day.weekday())
+            advance = lambda day: day + timedelta(weeks=1)
+        else:
+            bucket = lambda day: day.replace(day=1)
+            advance = lambda day: day.replace(year=day.year + 1, month=1) if day.month == 12 else day.replace(month=day.month + 1)
+        counts = Counter(bucket(day) for day in earliest.values())
+        starts = []
+        current = min(counts)
+        last = max(counts)
+        while current <= last:
+            starts.append(current)
+            current = advance(current)
+        width = 1000
+        maximum = max(counts.values())
+        axis_max, ticks = registration_axis_ticks(maximum)
+        points = []
+        for index, start in enumerate(starts):
+            x = width / 2 if len(starts) == 1 else 56 + index * (width - 74) / (len(starts) - 1)
+            count = counts[start]
+            points.append({
+                "start": start.isoformat(),
+                "label": start.strftime("%b %Y") if period == "monthly" else "{} {}".format(start.strftime("%b"), start.day),
+                "count": count,
+                "x": round(x, 1),
+                "y": round(200 - 176 * count / axis_max, 1),
+                "show_label": period != "daily" or index % 7 == 0 or index == len(starts) - 1,
+            })
+        series[period] = {
+            "points": points,
+            "width": width,
+            "line": " ".join("{},{}".format(point["x"], point["y"]) for point in points),
+            "max_count": maximum,
+            "axis_max": axis_max,
+            "ticks": ticks,
+        }
+    return {
+        "series": series,
+        "dated_total": len(earliest),
+        "undated_total": len(people) - len(earliest),
+    }
+
+
 def event_dashboard_metrics(db, event_id, satellite_query="", satellite_page=1):
     """Return the authoritative, event-scoped Phase 1 dashboard response."""
     event = db.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
@@ -1394,6 +1492,7 @@ def event_dashboard_metrics(db, event_id, satellite_query="", satellite_page=1):
             **progress,
         },
         "participant_profile": profile,
+        "registration_trend": registration_trend_metrics(db, batch["id"] if batch else None),
         "operational_status": operational_status,
         **participant_details,
         "transportation": transportation,

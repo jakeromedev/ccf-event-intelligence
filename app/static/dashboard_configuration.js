@@ -37,7 +37,7 @@
     if (!dialog) return;
 
     const form = dialog.querySelector("form");
-    const firstField = dialog.querySelector("[data-dashboard-config-first]");
+    const dialogTitle = dialog.querySelector("#dashboard-config-dialog-title");
     const password = dialog.querySelector("[data-dashboard-password]");
     const confirmation = dialog.querySelector("[data-dashboard-password-confirmation]");
     const disablePublic = dialog.querySelector("[data-dashboard-disable-public]");
@@ -46,7 +46,7 @@
     const openDialog = (trigger = null) => {
         returnFocus = trigger || document.activeElement;
         if (!dialog.open) dialog.showModal();
-        window.requestAnimationFrame(() => firstField?.focus());
+        window.requestAnimationFrame(() => dialogTitle?.focus());
     };
 
     const closeDialog = () => {

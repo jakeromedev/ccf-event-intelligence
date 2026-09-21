@@ -111,7 +111,7 @@
     <form class="dashboard-config-dialog-panel" id="event-settings-form" method="post" action="{{ url_for('dashboard.update_event_settings', event_id=event['id']) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <header>
-            <div><p class="eyebrow">Event Settings</p><h2 id="dashboard-config-dialog-title">Configure Dashboard</h2><p id="dashboard-config-dialog-description">Manage event details, targets, and presentation access.</p></div>
+            <div><p class="eyebrow">Event Settings</p><h2 id="dashboard-config-dialog-title" tabindex="-1">Configure Dashboard</h2><p id="dashboard-config-dialog-description">Manage event details, targets, and presentation access.</p></div>
             <button class="dashboard-config-close" type="button" aria-label="Close dashboard configuration" data-dashboard-config-close>{{ icon('close', 18) }}</button>
         </header>
         <div class="dashboard-config-dialog-body">
@@ -125,7 +125,7 @@
             </section>
             <section class="dashboard-config-dialog-section" aria-labelledby="dashboard-public-access-title">
                 <header><span>{{ icon('lock', 18) }}</span><div><h3 id="dashboard-public-access-title">Public sharing</h3><p>Share the presentation-only dashboard without an operator account.</p></div><span class="dashboard-config-status {{ 'enabled' if event['public_dashboard_password_hash'] else '' }}"><i aria-hidden="true"></i>{{ 'Enabled' if event['public_dashboard_password_hash'] else 'Off' }}</span></header>
-                {% if event['public_dashboard_password_hash'] %}<div class="dashboard-config-public-link"><div><strong>Presentation link</strong><small>Viewers enter the shared password once every seven days.</small></div><a href="{{ url_for('public_dashboard.event_dashboard', event_id=event['id'], _external=true) }}" target="_blank" rel="noopener">Open dashboard</a><button class="button secondary compact" type="button" data-dashboard-copy-link data-copy-value="{{ url_for('public_dashboard.event_dashboard', event_id=event['id'], _external=true) }}">Copy link</button></div>{% endif %}
+                {% if event['public_dashboard_password_hash'] %}<div class="dashboard-config-public-link"><div class="dashboard-config-public-link-copy"><strong>Presentation link</strong><small>Viewers enter the shared password once every seven days.</small></div><div class="dashboard-config-public-link-actions"><a href="{{ url_for('public_dashboard.event_dashboard', event_id=event['id'], _external=true) }}" target="_blank" rel="noopener">Open dashboard</a><button class="button secondary compact" type="button" data-dashboard-copy-link data-copy-value="{{ url_for('public_dashboard.event_dashboard', event_id=event['id'], _external=true) }}">Copy link</button></div></div>{% endif %}
                 <div class="dashboard-config-fields" data-dashboard-password-fields>
                     <label class="dashboard-config-field"><span>{{ 'New shared password' if event['public_dashboard_password_hash'] else 'Shared password' }}</span><span class="dashboard-config-password"><input type="password" name="public_dashboard_password" minlength="12" maxlength="128" autocomplete="new-password" placeholder="{{ 'Leave blank to keep current' if event['public_dashboard_password_hash'] else '12–128 characters' }}" data-dashboard-password><button type="button" data-password-toggle>Show</button></span><small>Use uppercase, lowercase, numbers, and symbols.</small></label>
                     <label class="dashboard-config-field"><span>Confirm password</span><span class="dashboard-config-password"><input type="password" name="public_dashboard_password_confirmation" maxlength="128" autocomplete="new-password" placeholder="Repeat the new password" data-dashboard-password-confirmation><button type="button" data-password-toggle>Show</button></span><small>Changing it revokes all existing viewer access.</small></label>
@@ -186,6 +186,44 @@
         {% endif %}
     </section>
 </div>
+
+<section class="phase1-weekly panel" id="weekly-registrations" aria-labelledby="weekly-registrations-title">
+    <header class="phase1-section-heading">
+        <span class="phase1-section-icon">{{ icon('chart', 20) }}</span>
+        <div><p class="eyebrow">Registration trend</p><h2 id="weekly-registrations-title" data-trend-title>Registrations per day</h2></div>
+    </header>
+    {% set trend = dashboard.registration_trend %}
+    {% if trend.series %}
+        <div class="phase1-trend-controls" role="group" aria-label="Registration chart interval" data-trend-controls>
+            {% for period in ('daily', 'weekly', 'monthly') %}
+                <button type="button" data-trend-period="{{ period }}" aria-pressed="{{ 'true' if period == 'daily' else 'false' }}">{{ period|capitalize }}</button>
+            {% endfor %}
+        </div>
+        <p class="phase1-weekly-description">Unique registrants by their first registration date · Weekly view starts Monday</p>
+        {% for period in ('daily', 'weekly', 'monthly') %}
+            {% set chart = trend.series[period] %}
+            <div class="phase1-weekly-scroll" role="region" aria-label="{{ period|capitalize }} registrations chart" data-trend-chart="{{ period }}" {% if period != 'daily' %}hidden{% endif %}>
+                <svg class="phase1-weekly-chart" width="{{ chart.width }}" height="250" viewBox="0 0 {{ chart.width }} 250" preserveAspectRatio="none" role="img" aria-label="Registrations per {{ {'daily': 'day', 'weekly': 'week', 'monthly': 'month'}[period] }} from {{ chart.points[0].start }} to {{ chart.points[-1].start }}">
+                    {% for tick in chart.ticks %}
+                        <line class="phase1-weekly-grid" x1="56" y1="{{ tick.y }}" x2="{{ chart.width - 18 }}" y2="{{ tick.y }}" data-trend-grid />
+                        <text class="phase1-weekly-axis" x="46" y="{{ tick.y }}">{{ tick.value }}</text>
+                    {% endfor %}
+                    <line class="phase1-weekly-y-axis" x1="56" y1="24" x2="56" y2="200" />
+                    <polyline class="phase1-weekly-line" points="{{ chart.line }}" data-trend-line />
+                    {% for point in chart.points %}
+                        <circle class="phase1-weekly-point" cx="{{ point.x }}" cy="{{ point.y }}" r="5" tabindex="0" data-trend-point data-period="{{ period }}" data-date="{{ point.start }}" data-count="{{ point.count }}" aria-label="{{ period|capitalize }} period starting {{ point.start }}: {{ point.count }} registrations"><title>{{ point.start }}: {{ point.count }} registrations</title></circle>
+                        {% if point.show_label %}<text class="phase1-weekly-label" x="{{ point.x }}" y="231" data-trend-label data-index="{{ loop.index0 }}">{{ point.label }}</text>{% endif %}
+                    {% endfor %}
+                </svg>
+            </div>
+        {% endfor %}
+        <div class="phase1-trend-tooltip" role="tooltip" hidden data-trend-tooltip></div>
+        <p class="phase1-weekly-summary">{{ trend.dated_total|number }} dated registrations{% if trend.undated_total %} · {{ trend.undated_total|number }} without a usable registration date excluded{% endif %}</p>
+    {% else %}
+        <div class="phase1-chart-empty">No dated registrations to display.</div>
+        {% if trend.undated_total %}<p class="phase1-weekly-summary">{{ trend.undated_total|number }} registrations have no usable registration date.</p>{% endif %}
+    {% endif %}
+</section>
 
 <section class="phase1-profile panel" id="participant-profile" aria-labelledby="participant-profile-title">
     <header class="phase1-section-heading profile-heading">
@@ -435,6 +473,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='registration_trend.js', v='20260921-tooltip-date') }}" defer></script>
 {% if public_dashboard|default(false) %}
 <script src="{{ url_for('static', filename='public_dashboard.js', v='20260905-section-navigation') }}" defer></script>
 {% elif event_settings_visible %}
