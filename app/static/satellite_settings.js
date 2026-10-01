@@ -425,6 +425,48 @@
         });
     };
     const bindExplorerContent = (state) => {
+        const deleteForm = explorerContent.querySelector("[data-bulk-delete-satellites]");
+        if (deleteForm) {
+            const checkboxes = [...deleteForm.querySelectorAll("[data-satellite-select]:not(:disabled)")];
+            const selectAll = deleteForm.querySelector("[data-satellite-select-all]");
+            const deleteButton = deleteForm.querySelector("[data-satellite-delete-button]");
+            const selected = () => checkboxes.filter((checkbox) => checkbox.checked);
+            const updateSelection = () => {
+                const count = selected().length;
+                deleteForm.querySelector("[data-satellite-selection-count]").textContent = `${count} selected`;
+                deleteButton.disabled = count === 0;
+                selectAll.disabled = checkboxes.length === 0;
+                selectAll.checked = count > 0 && count === checkboxes.length;
+                selectAll.indeterminate = count > 0 && count < checkboxes.length;
+            };
+            selectAll.addEventListener("change", () => {
+                checkboxes.forEach((checkbox) => { checkbox.checked = selectAll.checked; });
+                updateSelection();
+            });
+            checkboxes.forEach((checkbox) => checkbox.addEventListener("change", updateSelection));
+            let confirming = false;
+            deleteForm.addEventListener("submit", async (event) => {
+                event.preventDefault();
+                const selection = selected();
+                if (!selection.length || confirming) return;
+                confirming = true;
+                try {
+                    const result = await window.confirmAction({
+                        target: explorer,
+                        titleText: `Delete ${selection.length} ${selection.length === 1 ? "Satellite" : "Satellites"}?`,
+                        text: `Delete from the shared directory: ${selection.map((checkbox) => checkbox.dataset.satelliteName).join(", ")}. This cannot be undone. Imported records will be kept, but their directory links will be removed. Satellites with assigned registrants must be reassigned first.`,
+                        confirmButtonText: "Delete Selected",
+                    });
+                    if (result.isConfirmed) {
+                        setSubmitting(deleteForm);
+                        HTMLFormElement.prototype.submit.call(deleteForm);
+                    }
+                } finally {
+                    confirming = false;
+                }
+            });
+            updateSelection();
+        }
         explorerContent.querySelectorAll("[data-settings-record-open]").forEach((trigger) => trigger.addEventListener("click", () => openCreateDialog(trigger)));
         explorerContent.querySelectorAll("[data-settings-edit-open]").forEach((trigger) => trigger.addEventListener("click", () => openEditDrawer(trigger)));
         explorerContent.querySelectorAll("[data-modal-view-registrants]").forEach((trigger) => trigger.addEventListener("click", () => loadDrilldown(explorerContent, {

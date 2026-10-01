@@ -80,6 +80,7 @@ from .satellite_settings import (
     confirm_bulk_satellites,
     create_hub,
     create_satellite,
+    delete_bulk_satellites,
     export_directory_csv,
     import_directory_csv,
     review_bulk_hubs,
@@ -1631,6 +1632,27 @@ def review_bulk_satellite_entries():
     return _render_satellite_settings(
         request.form.get("event_id", type=int), review
     )
+
+
+@bp.post("/satellites/settings/hubs/<int:hub_id>/satellites/delete")
+@satellite_settings_management_required
+def delete_bulk_satellite_entries(hub_id):
+    db = get_db()
+    try:
+        deleted = delete_bulk_satellites(db, hub_id, request.form.getlist("satellite_ids"))
+        db.commit()
+    except SatelliteSettingsValidationError as exc:
+        db.rollback()
+        flash(str(exc), "error")
+    except IntegrityError:
+        db.rollback()
+        flash("No Satellites were deleted. The selection is in use or has changed. "
+              "Reopen the Hub and try again.", "error")
+    else:
+        flash("Deleted {} {}.".format(
+            deleted, "Satellite" if deleted == 1 else "Satellites"
+        ), "success")
+    return _satellite_settings_redirect("#hub-{}".format(hub_id))
 
 
 @bp.post("/satellites/settings/bulk/satellites/confirm")

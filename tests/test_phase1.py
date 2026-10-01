@@ -2441,6 +2441,70 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertIn(b"Showing 26\xe2\x80\x9331 of 31 registrants", page.data)
         self.assertNotIn(b"@example.com", page.data)
 
+    def test_satellite_settings_bulk_delete_is_atomic_and_hub_scoped(self):
+        with self.app.app_context():
+            db = get_db()
+            group_id = db.execute(
+                "INSERT INTO hub_groups (code, name, sort_order) "
+                "VALUES ('within_metro_manila', 'Metro Manila', 1)"
+            ).lastrowid
+            hub_ids = [db.execute(
+                "INSERT INTO satellite_hubs (hub_group_id, name, normalized_name) "
+                "VALUES (?, ?, ?)", (group_id, name, name.lower())
+            ).lastrowid for name in ("East", "West")]
+            satellite_ids = [db.execute(
+                "INSERT INTO satellite_directory (hub_id, name, normalized_name) "
+                "VALUES (?, ?, ?)", (hub_ids[owner], name, name.lower())
+            ).lastrowid for owner, name in ((0, "First"), (0, "Second"), (1, "Other"))]
+            participant_id = db.execute(
+                "INSERT INTO attestation_participants (event_id) VALUES (?)",
+                (self.event_b,),
+            ).lastrowid
+            db.execute(
+                "INSERT INTO event_registrant_satellites "
+                "(event_id, attestation_participant_id, directory_id, assignment_source) "
+                "VALUES (?, ?, ?, 'manual')",
+                (self.event_b, participant_id, satellite_ids[1]),
+            )
+            db.commit()
+        client = self.app.test_client()
+        url = "/satellites/settings/hubs/{}/satellites/delete".format(hub_ids[0])
+        page = client.get("/satellites/settings", query_string={"event_id": self.event_a})
+        self.assertIn(b"data-satellite-select-all", page.data)
+        self.assertIn(b"data-bulk-delete-satellites", page.data)
+        for selection, message in (
+            ([], b"Select at least one"),
+            (["invalid"], b"Select a valid Satellite"),
+            ([satellite_ids[0], satellite_ids[2]], b"selected Satellites have changed"),
+            ([satellite_ids[0], 99999999], b"selected Satellites have changed"),
+            (satellite_ids[:2], b"has assigned registrants"),
+        ):
+            response = client.post(url, data={
+                "event_id": self.event_a, "satellite_ids": selection,
+            }, follow_redirects=True)
+            self.assertEqual(200, response.status_code)
+            self.assertIn(message, response.data)
+            with self.app.app_context():
+                self.assertEqual(3, get_db().execute(
+                    "SELECT COUNT(*) total FROM satellite_directory"
+                ).fetchone()["total"])
+        with self.app.app_context():
+            db = get_db()
+            db.execute("DELETE FROM event_registrant_satellites")
+            db.commit()
+        response = client.post(url, data={
+            "event_id": self.event_a,
+            "satellite_ids": [satellite_ids[0], satellite_ids[0], satellite_ids[1]],
+        }, follow_redirects=True)
+        self.assertIn(b"Deleted 2 Satellites", response.data)
+        with self.app.app_context():
+            rows = get_db().execute("SELECT id FROM satellite_directory").fetchall()
+            self.assertEqual([satellite_ids[2]], [row["id"] for row in rows])
+        with patch("app.auth.can_manage_satellite_settings", return_value=False):
+            self.assertEqual(403, client.post(url, data={
+                "satellite_ids": [satellite_ids[2]],
+            }).status_code)
+
     def test_satellite_settings_individual_hub_and_satellite_management(self):
         self._process(self.event_a)
         with self.app.app_context():

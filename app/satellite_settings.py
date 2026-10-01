@@ -453,6 +453,36 @@ def update_satellite(db, satellite_id, hub_id, name):
     return name
 
 
+def delete_bulk_satellites(db, hub_id, values):
+    hub = _hub(db, hub_id)
+    satellite_ids = sorted({_identifier(value, "Satellite") for value in values})
+    if not satellite_ids:
+        raise SatelliteSettingsValidationError("Select at least one Satellite to delete.")
+    # Validate the entire selection before deleting anything.
+    for satellite_id in satellite_ids:
+        satellite = db.execute(
+            "SELECT name FROM satellite_directory WHERE id = ? AND hub_id = ?",
+            (satellite_id, hub["id"]),
+        ).fetchone()
+        if satellite is None:
+            raise SatelliteSettingsValidationError(
+                "The selected Satellites have changed. Reopen the Hub and try again."
+            )
+        if db.execute(
+            "SELECT id FROM event_registrant_satellites WHERE directory_id = ? LIMIT 1",
+            (satellite_id,),
+        ).fetchone():
+            raise SatelliteSettingsValidationError(
+                "No Satellites were deleted. ‘{}’ has assigned registrants. "
+                "Reassign them before deleting this Satellite.".format(satellite["name"])
+            )
+    db.executemany(
+        "DELETE FROM satellite_directory WHERE id = ? AND hub_id = ?",
+        [(satellite_id, hub["id"]) for satellite_id in satellite_ids],
+    )
+    return len(satellite_ids)
+
+
 def review_bulk_hubs(db, group_id, value):
     group = _hub_group(db, group_id)
     values = parse_bulk_names(value, "Hub Name", MAX_HUB_NAME_LENGTH)
