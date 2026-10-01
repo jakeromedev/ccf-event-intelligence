@@ -4463,6 +4463,8 @@ form[data-settings-form][aria-busy="true"] { opacity: .72; pointer-events: none;
 .satellite-explorer-heading h3,
 .satellite-explorer-heading p { margin: 0; }
 .satellite-explorer-heading h3 { font-size: 14px; }
+.satellite-explorer-heading { flex-wrap: wrap; }
+.satellite-explorer-add-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .satellite-bulk-delete-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 12px; }
 .satellite-bulk-delete-controls label { display: inline-flex; align-items: center; gap: 6px; }
 .satellite-bulk-delete-controls input, .satellite-selection-cell input { width: 16px; height: 16px; margin: 0; cursor: pointer; }
