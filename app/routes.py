@@ -6,7 +6,7 @@ from functools import wraps
 from pathlib import Path
 from time import perf_counter
 
-from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, session, url_for
+from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, send_file, session, url_for
 from flask_login import current_user
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -90,6 +90,8 @@ from .satellite_settings import (
     update_satellite,
 )
 from .satellite_settings_registrants import event_settings_registrants
+from .satellite_export import satellite_roster_rows, satellite_roster_workbook
+from .satellite_roster import satellite_participant_table
 from .satellite_target_categories import (
     SatelliteTargetCategoryValidationError,
     ensure_event_satellite_target_categories,
@@ -946,7 +948,32 @@ def event_satellites(event_id):
         metrics=metrics,
         query=query,
         satellite_return_url=request.full_path.rstrip("?") + "#satellite-ranking-table",
+        roster=satellite_participant_table(
+            db, event_id, batch["id"],
+            satellite=request.args.get("roster_satellite", ""),
+            query=request.args.get("roster_q", ""),
+            page=request.args.get("roster_page", default=1, type=int) or 1,
+            per_page=request.args.get("roster_per_page", default=10, type=int),
+            overview_filters=metrics["filters"], overview_query=query,
+        ) if batch else None,
     )
+
+
+@bp.get("/events/<int:event_id>/satellites/registrants/export.xlsx")
+def export_satellite_registrants(event_id):
+    db = get_db()
+    get_event_or_404(event_id)
+    batch = active_batch(db, event_id)
+    if batch is None:
+        abort(404)
+    response = send_file(
+        satellite_roster_workbook(satellite_roster_rows(db, event_id, batch["id"])),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name="event-{}-participants-by-satellite.xlsx".format(event_id),
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
 
 
 def _render_satellite_settings(

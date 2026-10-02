@@ -113,6 +113,7 @@ REGISTRATION_ENDPOINT_CAPABILITIES = {
     "dashboard.event_registrations_data": CAPABILITY_VIEW_REGISTRATIONS,
     "dashboard.event_satellites": CAPABILITY_VIEW_SATELLITES,
     "dashboard.event_satellite_registrants": CAPABILITY_VIEW_SATELLITES,
+    "dashboard.export_satellite_registrants": CAPABILITY_VIEW_SATELLITES,
     "dashboard.update_registration_attestation": CAPABILITY_EDIT_ATTESTATION,
     "dashboard.registration_remarks": CAPABILITY_VIEW_REGISTRATIONS,
     "dashboard.resolve_registration_remark": CAPABILITY_EDIT_REMARKS,

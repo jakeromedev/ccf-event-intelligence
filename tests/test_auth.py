@@ -409,6 +409,14 @@ class AuthenticationTests(unittest.TestCase):
         self.assertEqual(200, drilldown.status_code)
         self.assertIn(b"No active dataset for this event", drilldown.data)
 
+        # Authorized like the roster; this Event has no active batch to export.
+        self.assertEqual(
+            404,
+            self.client.get(
+                "/events/{}/satellites/registrants/export.xlsx".format(event_id)
+            ).status_code,
+        )
+
         self.assertEqual(
             403,
             self.client.get(

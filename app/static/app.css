@@ -4692,3 +4692,8 @@ form[data-settings-form][aria-busy="true"] { opacity: .72; pointer-events: none;
     .import-validation-dialog .cross-file-card dl { grid-template-columns: 1fr 1fr; }
     .import-validation-dialog .cross-file-card dl > div:last-child { grid-column: 1 / -1; }
 }
+.satellite-overview-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.satellite-participant-group th { background: var(--b1g-surface-muted); color: var(--b1g-burgundy); text-align: left; }
+.satellite-canonical-table .satellite-participant-unlinked td { background: #fee2e2; color: #991b1b; }
+.satellite-canonical-table .satellite-participant-unlinked:hover td { background: #fecaca; }
+#satellite-ranking-table .satellite-canonical-table { min-width: 1280px; }

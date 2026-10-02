@@ -580,9 +580,10 @@ class EventIntegrationTests(unittest.TestCase):
         for status in ('all', 'needs_mapping'):
             page = client.get('/events/{}/satellites'.format(self.event_a), query_string={'q': 'Vergel', 'link_status': status})
             self.assertEqual(200, page.status_code)
-            self.assertIn(b'Vergel Jairus Emas', page.data)
+            self.assertIn(b'Vergel Jairus', page.data)
+            self.assertIn(b'Emas', page.data)
             self.assertIn(b'ICP', page.data)
-            self.assertIn(b'Satellite not assigned', page.data)
+            self.assertIn(b'Unassigned', page.data)
         other = client.get('/events/{}/satellites'.format(self.event_b), query_string={'q': 'Vergel'})
         self.assertNotIn(b'Vergel Jairus Emas', other.data)
 
@@ -2284,7 +2285,8 @@ class EventIntegrationTests(unittest.TestCase):
             b"Associations by Hub",
             b"Satellite Ranking",
             b"Satellite Directory Distribution",
-            b"aria-sort=",
+            b'name="roster_satellite"',
+            b'name="roster_q"',
             b"data-satellite-hierarchy",
             b"View registrants",
             b"Within Metro Manila",
@@ -3104,8 +3106,8 @@ class EventIntegrationTests(unittest.TestCase):
         self.assertNotIn(b"Unique Checked In", ranking.data)
         self.assertNotIn(b"Attendance Rate", ranking.data)
         self.assertNotIn(b"Local Satellites", ranking.data)
-        self.assertIn(b"Registrants without a Satellite", ranking.data)
-        self.assertIn(b"Test Registrant", ranking.data)
+        self.assertIn(b"Unassigned", ranking.data)
+        self.assertIn(b"<td>Test</td><td>Registrant</td>", ranking.data)
         dashboard_page = client.get("/events/{}".format(self.event_a))
         self.assertNotIn(b"data-public-dashboard-nav", dashboard_page.data)
         self.assertNotIn(b"/static/public_dashboard.js", dashboard_page.data)

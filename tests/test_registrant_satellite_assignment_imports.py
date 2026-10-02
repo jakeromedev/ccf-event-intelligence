@@ -1,6 +1,9 @@
 import tempfile
 import unittest
+from io import BytesIO
 from pathlib import Path
+
+from openpyxl import load_workbook
 
 from app import create_app
 from app.aggregation import curated_registrant_detail, satellite_registrants
@@ -168,6 +171,138 @@ class RegistrantSatelliteAssignmentImportTests(unittest.TestCase):
                 (self.event_id, participant_id),
             ).fetchone()
             return tuple(row[key] for key in row.keys())
+
+    def test_satellite_export_uses_active_batch_and_manual_assignment(self):
+        self._process("B1G Tagum", "old-source")
+        batch_id = self._process("B1G Tagum", "new-source")
+        with self.app.app_context():
+            db = get_db()
+            participant_id = db.execute(
+                "SELECT attestation_participant_id FROM attestation_participant_registrants "
+                "WHERE event_id = ? AND batch_id = ?",
+                (self.event_id, batch_id),
+            ).fetchone()[0]
+            set_manual_satellite_assignment(
+                db, self.event_id, participant_id, self.directory_ids["B1G Davao"]
+            )
+            db.execute(
+                "UPDATE registrants SET first_name = '=1+1', registration_code = '000123' "
+                "WHERE batch_id = ?", (batch_id,),
+            )
+            db.commit()
+        client = self.app.test_client()
+        response = client.get(
+            "/events/{}/satellites/registrants/export.xlsx?q=missing&satellite=-1&page=99".format(
+                self.event_id
+            )
+        )
+        self.assertEqual(200, response.status_code)
+        self.assertIn("attachment;", response.headers["Content-Disposition"])
+        self.assertEqual("private, no-store", response.headers["Cache-Control"])
+        workbook = load_workbook(BytesIO(response.data))
+        self.assertEqual(["Participants by Satellite"], workbook.sheetnames)
+        sheet = workbook.active
+        self.assertEqual(2, sheet.max_row)
+        self.assertEqual("B1G Davao", sheet["A2"].value)
+        self.assertEqual("=1+1", sheet["D2"].value)
+        self.assertEqual("s", sheet["D2"].data_type)
+        self.assertEqual("Registrant", sheet["E2"].value)
+        self.assertTrue(sheet["F2"].value)
+        self.assertEqual("stable@example.com", sheet["G2"].value)
+        self.assertEqual("09000000000", sheet["H2"].value)
+        self.assertEqual("s", sheet["H2"].data_type)
+        self.assertEqual("A1:H2", sheet.auto_filter.ref)
+        self.assertEqual(
+            ["Satellite", "Hub", "Hub Group", "First Name", "Last Name", "Date of Birth", "Email", "Contact Number"],
+            [cell.value for cell in sheet[1]],
+        )
+        self.assertIsNone(sheet["A2"].fill.patternType)
+        page = client.get("/events/{}/satellites".format(self.event_id))
+        self.assertIn(b"Download all participants (.xlsx)", page.data)
+        self.assertNotIn(b'class="satellite-group-summary"', page.data)
+        key = "directory:{}".format(self.directory_ids["B1G Davao"])
+        page = client.get("/events/{}/satellites".format(self.event_id), query_string={
+            "roster_satellite": key, "roster_q": "000123",
+        })
+        self.assertEqual(200, page.status_code)
+        table = page.data.split(b'id="satellite-ranking-table"')[1].split(b'</section>')[0]
+        self.assertIn(b"<td>=1+1</td><td>Registrant</td>", table)
+        self.assertNotIn(b"<th>Registration ID</th>", table)
+        self.assertNotIn(b"<th>Link Status</th>", table)
+        self.assertIn(b"stable@example.com", table)
+        self.assertIn(b"09000000000", table)
+        self.assertIn(b"<th>Date of Birth</th>", table)
+        self.assertNotIn(b'class="satellite-participant-unlinked"', table)
+        self.assertIn(('value="{}" selected'.format(key)).encode(), table)
+        self.assertIn(b"Clear search", table)
+        page = client.get("/events/{}/satellites".format(self.event_id), query_string={
+            "roster_satellite": key, "roster_q": "no match",
+        })
+        self.assertIn(b"No participants match the selected filters and search.", page.data)
+
+    def test_satellite_export_includes_unmapped_and_unassigned_registrants(self):
+        batch_id = self._process("B1G Tagum", "source-1")
+        with self.app.app_context():
+            db = get_db()
+            db.execute("UPDATE satellites SET directory_id = NULL WHERE batch_id = ?", (batch_id,))
+            db.commit()
+        client = self.app.test_client()
+        url = "/events/{}/satellites/registrants/export.xlsx".format(self.event_id)
+        sheet = load_workbook(BytesIO(client.get(url).data)).active
+        self.assertEqual("B1G Tagum", sheet["A2"].value)
+        for cell in sheet[2]:
+            self.assertEqual("solid", cell.fill.patternType)
+            self.assertEqual("00FEE2E2", cell.fill.fgColor.rgb)
+        page = client.get("/events/{}/satellites".format(self.event_id))
+        self.assertIn(b'class="satellite-participant-unlinked"', page.data)
+        with self.app.app_context():
+            db = get_db()
+            db.execute("DELETE FROM curated_registrant_satellites WHERE batch_id = ?", (batch_id,))
+            db.commit()
+        sheet = load_workbook(BytesIO(client.get(url).data)).active
+        self.assertEqual(2, sheet.max_row)
+        self.assertEqual("Unassigned", sheet["A2"].value)
+        self.assertEqual("00FEE2E2", sheet["H2"].fill.fgColor.rgb)
+
+    def test_satellite_export_requires_event_batch_and_authentication(self):
+        client = self.app.test_client()
+        url = "/events/{}/satellites/registrants/export.xlsx".format(self.event_id)
+        self.assertEqual(404, client.get(url).status_code)
+        self.assertEqual(404, client.get("/events/999999/satellites/registrants/export.xlsx").status_code)
+        self.app.config["AUTHENTICATION_DISABLED"] = False
+        self.assertEqual(302, client.get(url).status_code)
+
+    def test_satellite_export_contains_entire_roster_grouped_by_satellite(self):
+        batch_id = self._process("B1G Tagum", "source-1")
+        with self.app.app_context():
+            db = get_db()
+            satellite_id = db.execute(
+                "SELECT id FROM satellites WHERE batch_id = ?", (batch_id,)
+            ).fetchone()[0]
+            for index in range(105):
+                curated_id = db.execute(
+                    "INSERT INTO curated_registrants "
+                    "(event_id, batch_id, last_name, dedupe_key, dedupe_status, registration_type) "
+                    "VALUES (?, ?, ?, ?, 'incomplete', 'participant')",
+                    (self.event_id, batch_id, "Person {:03}".format(index), "extra-{}".format(index)),
+                ).lastrowid
+                if index % 2:
+                    db.execute(
+                        "INSERT INTO curated_registrant_satellites "
+                        "(event_id, batch_id, curated_registrant_id, satellite_id) VALUES (?, ?, ?, ?)",
+                        (self.event_id, batch_id, curated_id, satellite_id),
+                    )
+            db.commit()
+        response = self.app.test_client().get(
+            "/events/{}/satellites/registrants/export.xlsx".format(self.event_id)
+        )
+        sheet = load_workbook(BytesIO(response.data)).active
+        rows = list(sheet.iter_rows(min_row=2, values_only=True))
+        self.assertEqual(106, len(rows))
+        satellites = [row[0] for row in rows]
+        self.assertEqual(sorted(satellites), satellites)
+        self.assertEqual(53, satellites.count("B1G Tagum"))
+        self.assertEqual(53, satellites.count("Unassigned"))
 
     def test_manual_assignment_survives_same_different_and_multiple_future_batches(self):
         first_batch_id = self._process("B1G Tagum", "source-1")
