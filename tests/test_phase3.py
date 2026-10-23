@@ -47,6 +47,13 @@ class AnalyticsNormalizationTests(unittest.TestCase):
         self.assertEqual("Unknown", classify_dgroup("", ""))
         self.assertEqual("Conflicting / multiple values", classify_dgroup("No", "Yes"))
 
+    def test_dgroup_status_takes_precedence_with_legacy_fallback(self):
+        self.assertEqual("Timothy / Dgroup member", classify_dgroup("Yes", "Yes", " Timothy / Dgroup member "))
+        self.assertEqual("D12 Leader", classify_dgroup("", "", "D12 Leader"))
+        self.assertEqual("Dgroup Leader", classify_dgroup("", "", "DGroup Leader"))
+        self.assertEqual("Dgroup Member", classify_dgroup("Yes", "No", ""))
+        self.assertEqual("Unknown", classify_dgroup("Yes", "Yes", "Unrecognized status"))
+
     def test_privacy_threshold_is_environment_driven_and_bounded(self):
         app = Flask(__name__)
         with patch.dict(

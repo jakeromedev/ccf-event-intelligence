@@ -9,6 +9,24 @@ import re
 from datetime import date, datetime
 
 
+DGROUP_STATUS_CATEGORIES = (
+    ("dgroup_leader", "Dgroup Leaders"),
+    ("d12_leader", "D12 Leaders"),
+    ("timothy_member", "Timothy / Dgroup member"),
+)
+
+
+def normalize_dgroup_status(value):
+    value = " ".join(str(value or "").split()).casefold()
+    if value == "timothy / dgroup member":
+        return "timothy_member"
+    if "d12" in value and "leader" in value:
+        return "d12_leader"
+    if ("dgroup" in value or "discipleship group" in value) and "leader" in value:
+        return "dgroup_leader"
+    return None
+
+
 GENDER_CATEGORIES = (
     ("male", "Male"),
     ("female", "Female"),

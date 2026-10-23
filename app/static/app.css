@@ -2873,7 +2873,7 @@ body:has(.facebook-status-dialog[open]) { overflow: hidden; }
 .satellite-target-empty p { margin: 3px 0 0; color: #71839a; font-size: 10px; }
 
 /* Event Dashboard — leadership and event logistics */
-.dashboard-leadership { --leadership-dgroup-leader: var(--b1g-red-dark); --leadership-d12-leader: #d49a34; margin-bottom: 20px; padding: 22px 24px 24px; }
+.dashboard-leadership { --leadership-dgroup-leader: var(--b1g-red-dark); --leadership-d12-leader: #d49a34; --leadership-timothy-member: #397c91; margin-bottom: 20px; padding: 22px 24px 24px; }
 .dashboard-transportation,
 .dashboard-shirt-sizes { margin-bottom: 20px; padding: 22px 24px 20px; }
 .dashboard-insight-heading { margin-bottom: 18px; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
@@ -2906,6 +2906,7 @@ body:has(.facebook-status-dialog[open]) { overflow: hidden; }
 .dashboard-leadership-legend > div:last-child { border-bottom: 0; }
 .dashboard-leadership-legend i { width: 9px; height: 9px; border-radius: 50%; background: var(--leadership-dgroup-leader); }
 .dashboard-leadership-legend i.is-d12_leader { background: var(--leadership-d12-leader); }
+.dashboard-leadership-legend i.is-timothy_member { background: var(--leadership-timothy-member); }
 .dashboard-leadership-legend span { color: var(--b1g-text); font-size: 9px; font-weight: 700; }
 .dashboard-leadership-legend strong { color: var(--b1g-red-dark); font-size: 16px; }
 .dashboard-leadership-legend small { grid-column: 2 / -1; margin-top: -11px; color: var(--b1g-text-muted); font-size: 8px; }

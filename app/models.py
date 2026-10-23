@@ -1125,6 +1125,74 @@ class EventRegistrantSatelliteAudit(Base):
     )
 
 
+class ParticipantTransportation(Base):
+    """Per-trip manual state, independent of replaceable import batches."""
+
+    __tablename__ = "participant_transportation"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["event_id", "attestation_participant_id"],
+            ["attestation_participants.event_id", "attestation_participants.id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("event_id", "attestation_participant_id", "direction",
+                         name="uq_transportation_participant_direction"),
+        CheckConstraint("direction IN ('to_mmrc','from_mmrc')", name="ck_transportation_direction"),
+        CheckConstraint("mode IS NULL OR mode IN ('bus','carpool','public_transportation','other','unreported')",
+                        name="ck_transportation_mode"),
+        CheckConstraint("revision > 0", name="ck_transportation_revision"),
+        MYSQL_TABLE_OPTIONS,
+    )
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    attestation_participant_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    direction: Mapped[str] = mapped_column(String(16), nullable=False)
+    mode: Mapped[Optional[str]] = mapped_column(String(32))
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ID_TYPE, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    updated_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+
+class ParticipantTransportationHistory(Base):
+    """Append-only application audit; snapshots survive import/user changes."""
+
+    __tablename__ = "participant_transportation_history"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["event_id", "attestation_participant_id"],
+            ["attestation_participants.event_id", "attestation_participants.id"],
+            ondelete="CASCADE",
+        ),
+        CheckConstraint("direction IN ('to_mmrc','from_mmrc')", name="ck_transport_history_direction"),
+        CheckConstraint("action IN ('set','reset')", name="ck_transport_history_action"),
+        UniqueConstraint("event_id", "attestation_participant_id", "direction", "revision",
+                         name="uq_transport_history_revision"),
+        CheckConstraint("revision > 0", name="ck_transport_history_revision"),
+        Index("idx_transport_history_person", "event_id", "attestation_participant_id", "id"),
+        MYSQL_TABLE_OPTIONS,
+    )
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    attestation_participant_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    direction: Mapped[str] = mapped_column(String(16), nullable=False)
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_value_json: Mapped[str] = mapped_column(Text, nullable=False)
+    new_value_json: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[Optional[str]] = mapped_column(String(2000))
+    changed_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ID_TYPE, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    changed_by_username: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+
 class Satellite(Base):
     __tablename__ = "satellites"
     __table_args__ = (

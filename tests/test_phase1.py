@@ -30,7 +30,7 @@ from app.aggregation import (
     satellite_registrants,
 )
 from app.satellite_analytics import HUB_CHART_COLORS, canonical_satellite_metrics
-from app.analytics import event_analytics
+from app.analytics import event_analytics, _participants
 from app.classifier import classify_affiliation
 from app.curation import (
     normalize_birth_month,
@@ -1093,6 +1093,8 @@ class EventIntegrationTests(unittest.TestCase):
             },
             "R-4": {
                 "How Many Are You Leading": "1",
+                "Dgroup Status": "Timothy / Dgroup member",
+                "Are You Leading A Discipleship Group": "Yes",
                 "Years Leading A Dgroup": "1-2 years",
                 "Shirt Size": "M (W: 19inch L: 26inch)",
                 "Transportation From Ccf To Mmrc": "Bus to MMRC",
@@ -1139,14 +1141,24 @@ class EventIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(3, dashboard["leadership_downlines"]["total"])
         self.assertEqual(1, years["under_1"])
-        self.assertEqual(1, years["1_2"])
+        self.assertEqual(0, years["1_2"])
         self.assertEqual(2, years["3_5"])
-        self.assertEqual(4, dashboard["years_leading"]["total"])
+        self.assertEqual(3, dashboard["years_leading"]["total"])
+        self.assertEqual(0, dashboard["years_leading"]["unreported"])
+        self.assertEqual(4, dashboard["dgroup_profile"]["total"])
+        self.assertEqual(1, dashboard["dgroup_profile"]["items"][2]["count"])
+        self.assertEqual(25, dashboard["dgroup_profile"]["items"][2]["percentage"])
+        with self.app.app_context():
+            people = _participants(get_db(), self.event_a, dashboard["active_batch_id"], None)
+        self.assertEqual(
+            ["D12 Leader", "D12 Leader", "Dgroup Leader", "Timothy / Dgroup member", "Unknown"],
+            sorted(person["dgroup"] for person in people),
+        )
         self.assertEqual(2, shirts["m"])
         self.assertEqual(1, shirts["s"])
         self.assertEqual(1, shirts["xl"])
         self.assertEqual(4, dashboard["shirt_sizes"]["total"])
-        self.assertEqual(0, dashboard["shirt_sizes"]["unreported"])
+        self.assertEqual(1, dashboard["shirt_sizes"]["unreported"])
         transportation = {
             direction["key"]: {
                 item["key"]: item["count"] for item in direction["items"]
@@ -1163,7 +1175,9 @@ class EventIntegrationTests(unittest.TestCase):
         )
 
         page = self.app.test_client().get("/events/{}".format(self.event_a))
-        self.assertIn(b"Dgroup Leadership", page.data)
+        self.assertIn(b"Dgroup Profile", page.data)
+        self.assertIn(b"Timothy / Dgroup member", page.data)
+        self.assertIn(b"3 reported leaders", page.data)
         self.assertIn(b"Dleaders by Downline Count", page.data)
         self.assertIn(b"dashboard-downlines-bars", page.data)
         self.assertIn(b"12 downlines: 1 Dleaders", page.data)

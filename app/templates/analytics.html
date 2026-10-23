@@ -60,7 +60,7 @@
         ('payment_status', 'Payment Status', 'Ticket status; Buyer status is used only when the Ticket value is blank.'),
         ('payment_method', 'Payment Method', 'Buyer export method, normalized only for casing and spacing.'),
         ('occupation', 'Occupation', 'Registrant occupation labels without inferred categories.'),
-        ('dgroup', 'Dgroup', 'Membership and leadership from explicit Registrant answers.'),
+        ('dgroup', 'Dgroup', 'Dgroup status, including Timothies / Dgroup members. Older exports use membership and leadership answers.'),
         ('home_area', 'Home Area', 'Structured Home Area field; full addresses are never used.')
     ) %}
     {% set distribution = analytics.distributions[key] %}

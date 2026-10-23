@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% from "_page_header.html" import render_application_header %}
+{% block title %}Manage Transportation · {{ app_name }}{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ url_for('static', filename='transportation.css', v='20261023') }}">{% endblock %}
+{% block application_header_page %}{{ render_application_header('Transportation', 'Manage outbound and return travel arrangements.') }}{% endblock %}
+{% block page_header %}{% endblock %}
+{% block content %}
+<section class="panel transportation-page" data-transportation-page>
+    <header class="transportation-heading">
+        <div><p class="eyebrow">Travel Logistics</p><h1>Manage Transportation</h1><p>Update each person’s travel arrangements. Manual changes are kept when new registrations are imported.</p></div>
+        <a class="button secondary" href="{{ url_for('dashboard.event_overview', event_id=event.id) }}#dashboard-transportation">Back to Dashboard</a>
+    </header>
+    <form method="get" class="transportation-filters" role="search">
+        <label class="transportation-search"><span>Search participants</span><input type="search" name="q" value="{{ query }}" maxlength="100" placeholder="Name, email, registration code or satellite"></label>
+        <label><span>Trip</span><select name="direction"><option value="all">Either trip</option>{% for key, label in trip_labels.items() %}<option value="{{ key }}" {{ 'selected' if direction == key else '' }}>{{ label }}</option>{% endfor %}</select></label>
+        <label><span>Mode</span><select name="mode"><option value="all">All modes</option>{% for key, label in mode_labels.items() %}<option value="{{ key }}" {{ 'selected' if mode == key else '' }}>{{ label }}</option>{% endfor %}</select></label>
+        <label><span>Source</span><select name="source"><option value="all">All sources</option><option value="manual" {{ 'selected' if source == 'manual' else '' }}>Manually updated</option><option value="imported" {{ 'selected' if source == 'imported' else '' }}>Imported</option></select></label>
+        <label><span>Rows</span><select name="per_page">{% for size in (25, 50, 100) %}<option value="{{ size }}" {{ 'selected' if per_page == size else '' }}>{{ size }}</option>{% endfor %}</select></label>
+        <button class="button primary" type="submit">Apply filters</button>
+        {% if filtered %}<a href="{{ url_for('transportation.manage', event_id=event.id) }}">Clear filters</a>{% endif %}
+    </form>
+    <div class="transportation-result-summary"><strong>{{ total|number }} {{ 'result' if total == 1 else 'results' }}</strong><span>{{ population|number }} people in the active import · Last update times in Manila</span></div>
+    {% if rows %}
+    <div class="transportation-table-wrap" role="region" aria-label="Participant transportation" tabindex="0">
+        <table class="transportation-table"><thead><tr><th scope="col">Participant</th><th scope="col">Satellite</th><th scope="col">CCF → MMRC</th><th scope="col">MMRC → CCF</th><th scope="col">Last update</th><th scope="col">Action</th></tr></thead><tbody>
+        {% for row in rows %}<tr>
+            <td><strong>{{ row.name }}</strong><small>{{ row.email or 'Email not reported' }}</small><small>{{ row.codes }}</small></td>
+            <td>{{ row.satellite }}</td>
+            {% for trip in ('to_mmrc', 'from_mmrc') %}<td><strong>{{ mode_labels[row.trips[trip].mode] }}</strong><span class="transportation-source {{ 'is-manual' if row.trips[trip].source == 'manual' else '' }}">{{ 'Manual override' if row.trips[trip].source == 'manual' else 'Imported' }}</span></td>{% endfor %}
+            <td>{% if row.updated_at %}<span>{{ row.updated_at }}</span><small>By {{ row.updated_by }}</small>{% else %}<span>No manual updates</span>{% endif %}</td>
+            <td><button type="button" class="button secondary" data-transportation-edit data-url="{{ url_for('transportation.participant', event_id=event.id, participant_id=row.participant_id) }}" aria-label="Edit transportation for {{ row.name }}">Edit</button> <a href="{{ url_for('transportation.history', event_id=event.id, participant_id=row.participant_id) }}" aria-label="Transportation history for {{ row.name }}">History</a></td>
+        </tr>{% endfor %}
+        </tbody></table>
+    </div>
+    {% else %}<div class="transportation-empty">
+        {{ icon('bus', 32) }}<h2>{{ 'No active import yet' if not active_batch else 'No matches found' if filtered else 'No participants in this import' }}</h2>
+        <p>{{ 'Activate a registration import to manage transportation.' if not active_batch else 'Try another search or clear your filters.' if filtered else 'Participants will appear here after registrations are imported.' }}</p>
+    </div>{% endif %}
+    <footer class="transportation-pagination"><span>Page {{ page }} of {{ pages }}</span><nav aria-label="Transportation pages">{% if previous_url %}<a class="button secondary" href="{{ previous_url }}">Previous</a>{% endif %}{% if next_url %}<a class="button secondary" href="{{ next_url }}">Next</a>{% endif %}</nav></footer>
+    <noscript><p>Enable JavaScript to edit transportation. Searching and filtering work without JavaScript.</p></noscript>
+</section>
+<dialog class="transportation-dialog" data-transportation-dialog aria-labelledby="transportation-dialog-title" aria-describedby="transportation-person">
+    <form data-transportation-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <header><div><p class="eyebrow">Travel arrangements</p><h2 id="transportation-dialog-title">Edit transportation</h2></div><button type="button" class="button secondary" data-transportation-close aria-label="Close transportation editor">Close</button></header>
+        <p id="transportation-person" data-transportation-person></p>
+        <p class="transportation-notice" data-transportation-status role="status" aria-live="polite"></p>
+        <p class="transportation-error" data-transportation-error role="alert" tabindex="-1" hidden></p>
+        <fieldset data-transportation-fields disabled>
+            <legend class="visually-hidden">Trip selections</legend>
+            <div class="transportation-trip-fields">
+            {% for key, label in trip_labels.items() %}<div class="transportation-trip">
+                <label for="transportation-{{ key }}">{{ label }}</label>
+                <p data-imported="{{ key }}"></p>
+                <select id="transportation-{{ key }}" data-trip="{{ key }}" aria-describedby="transportation-help-{{ key }}">
+                    <option value="keep">Keep current value</option>
+                    <option value="reset">Use imported value</option>
+                    {% for mode_key, mode_label in mode_labels.items() %}{% if mode_key != 'conflicting' %}<option value="{{ mode_key }}">{{ mode_label }}</option>{% endif %}{% endfor %}
+                </select>
+                <small id="transportation-help-{{ key }}">Use imported value removes this trip’s manual override.</small>
+            </div>{% endfor %}
+            </div>
+            <label class="transportation-reason" for="transportation-reason">Reason <span>(optional)</span><textarea id="transportation-reason" name="reason" rows="3" maxlength="2000" placeholder="Add context for this update"></textarea></label>
+        </fieldset>
+        <footer><button type="button" class="button secondary" data-transportation-reload hidden>Reload current values</button><button type="button" class="button secondary" data-transportation-close>Cancel</button><button type="submit" class="button primary" data-transportation-save disabled>Save changes</button></footer>
+    </form>
+</dialog>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='transportation.js', v='20261023') }}" defer></script>{% endblock %}

@@ -42,6 +42,8 @@ def create_app(test_config=None):
     app.register_blueprint(bp)
     from .failed_payments import bp as failed_payments_bp
     app.register_blueprint(failed_payments_bp)
+    from .transportation_pages import bp as transportation_bp
+    app.register_blueprint(transportation_bp)
 
     if app.config["REQUIRE_SCHEMA_CURRENT"]:
         from .db import check_database_readiness

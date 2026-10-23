@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% from "_page_header.html" import render_application_header %}
+{% block title %}Transportation History · {{ app_name }}{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ url_for('static', filename='transportation.css', v='20261023-3') }}">{% endblock %}
+{% block application_header_page %}{{ render_application_header('Transportation History', 'Review changes to travel arrangements.') }}{% endblock %}
+{% block page_header %}{% endblock %}
+{% block content %}
+<section class="panel transportation-page">
+    <header class="transportation-heading">
+        <div><p class="eyebrow">Travel Logistics</p><h1>Transportation History</h1>
+        {% if person %}<p>{{ person.name }} · {{ person.codes }}</p>{% else %}<p>Participant #{{ participant_id }} is not in the active import. Their saved history remains available.</p>{% endif %}
+        <p>Newest changes first · All times in Manila</p></div>
+        <a class="button secondary" href="{{ url_for('transportation.manage', event_id=event.id) }}">Back to Transportation</a>
+    </header>
+    {% for entry in entries %}
+    <article class="transportation-history-entry">
+        <h2>{{ trip_labels[entry.direction] }} · {{ 'Reset to imported value' if entry.action == 'reset' else 'Mode updated' }}</h2>
+        <p>{{ entry.display_time }} · By {{ entry.changed_by_username }}</p>
+        <div class="transportation-trip-fields">
+        {% for label, value in [('Before', entry.previous_value), ('After', entry.new_value)] %}
+            <div class="transportation-trip"><strong>{{ label }}: {{ mode_labels[value.mode] }}</strong>
+            <p>{{ 'Manual override' if value.source == 'manual' else 'Imported' }}</p>
+            <small>Imported answers at the time: {{ value.imported_values|join(' / ') or 'Not reported' }}</small></div>
+        {% endfor %}
+        </div>
+        <p class="transportation-history-reason"><strong>Reason:</strong> {{ entry.reason or 'No reason provided' }}</p>
+    </article>
+    {% else %}<div class="transportation-empty"><h2>No transportation updates yet</h2><p>Saved changes will appear here.</p></div>{% endfor %}
+    <nav class="transportation-pagination" aria-label="Transportation history pages">
+        {% if newest_url %}<a class="button secondary" href="{{ newest_url }}">Newest changes</a>{% endif %}
+        {% if older_url %}<a class="button secondary" href="{{ older_url }}">Older changes</a>{% endif %}
+    </nav>
+</section>
+{% endblock %}

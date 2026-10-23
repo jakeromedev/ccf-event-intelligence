@@ -5,10 +5,13 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
 from .classifier import AFFILIATIONS
+from .transportation import resolve_trip_values
 from .normalization import (
     AGE_BUCKETS,
     GENDER_CATEGORIES,
     LIFE_STAGE_CATEGORIES,
+    DGROUP_STATUS_CATEGORIES,
+    normalize_dgroup_status,
     calculate_age_at_event,
     get_age_bucket,
     normalize_gender,
@@ -459,18 +462,9 @@ def _clean_answer(value):
     return " ".join(str(value or "").strip().split())
 
 
-def _leadership_role(value):
-    value = _clean_answer(value).casefold()
-    if "d12" in value and "leader" in value:
-        return "d12_leader"
-    if ("dgroup" in value or "discipleship group" in value) and "leader" in value:
-        return "dgroup_leader"
-    return None
-
-
 def _years_leading_bucket(value):
     value = _clean_answer(value).casefold().replace("–", "-")
-    if not value:
+    if not value or value in {"n/a", "na", "not applicable"}:
         return None
     if value.startswith("<") or "less than 1" in value or "under 1" in value:
         return "under_1"
@@ -497,19 +491,6 @@ def _shirt_size(value):
         return aliases[value]
     match = re.match(r"^(3XL|2XL|XL|XS|S|M|L)(?:\b|\()", value)
     return match.group(1).casefold() if match else "other"
-
-
-def _transportation_mode(value):
-    value = _clean_answer(value).casefold()
-    if not value:
-        return None
-    if "carpool" in value:
-        return "carpool"
-    if "bus" in value:
-        return "bus"
-    if "public transportation" in value or "public transport" in value:
-        return "public_transportation"
-    return "other"
 
 
 def participant_ministry_and_shirt_metrics(db, batch_id):
@@ -547,8 +528,9 @@ def participant_ministry_and_shirt_metrics(db, batch_id):
     ).fetchall()
     people = defaultdict(lambda: {"roles": set(), "years": set(), "shirts": set(), "downlines": set()})
     for row in rows:
-        role = _leadership_role(row["leadership_status"])
-        if role is None and _clean_answer(row["legacy_leader"]).casefold() in {
+        person = people[row["curated_id"]]
+        role = normalize_dgroup_status(row["leadership_status"])
+        if not _clean_answer(row["leadership_status"]) and _clean_answer(row["legacy_leader"]).casefold() in {
             "yes", "y", "true", "1"
         }:
             role = "dgroup_leader"
@@ -556,17 +538,17 @@ def participant_ministry_and_shirt_metrics(db, batch_id):
         shirt_size = _shirt_size(row["shirt_size"])
         answer = _clean_answer(row["downlines"])
         if answer:
-            people[row["curated_id"]]["downlines"].add(
+            person["downlines"].add(
                 int(answer) if re.fullmatch(r"[0-9]+", answer) else "invalid"
             )
         if role:
-            people[row["curated_id"]]["roles"].add(role)
+            person["roles"].add(role)
         if years_bucket:
-            people[row["curated_id"]]["years"].add(years_bucket)
+            person["years"].add(years_bucket)
         if shirt_size:
-            people[row["curated_id"]]["shirts"].add(shirt_size)
+            person["shirts"].add(shirt_size)
 
-    role_counts = {key: 0 for key, _label in LEADERSHIP_CATEGORIES}
+    role_counts = {key: 0 for key, _label in DGROUP_STATUS_CATEGORIES}
     years_counts = {key: 0 for key, _label in LEADERSHIP_YEARS}
     years_counts["other"] = 0
     shirt_counts = {key: 0 for key, _label, _detail in SHIRT_SIZES}
@@ -577,8 +559,14 @@ def participant_ministry_and_shirt_metrics(db, batch_id):
     downline_counts = Counter()
     downline_exclusions = Counter()
     for person in people.values():
+        is_leader = len(person["roles"]) == 1 and next(iter(person["roles"])) in {
+            "dgroup_leader", "d12_leader"
+        }
         if len(person["roles"]) == 1:
             role_counts[next(iter(person["roles"]))] += 1
+        elif len(person["roles"]) > 1:
+            leadership_conflicts += 1
+        if is_leader:
             answers = person["downlines"]
             if not answers:
                 downline_exclusions["unreported"] += 1
@@ -592,18 +580,24 @@ def participant_ministry_and_shirt_metrics(db, batch_id):
                     downline_exclusions["zero"] += 1
                 else:
                     downline_counts[count] += 1
-        elif len(person["roles"]) > 1:
-            leadership_conflicts += 1
-        if len(person["years"]) == 1:
+        if is_leader and len(person["years"]) == 1:
             years_counts[next(iter(person["years"]))] += 1
-        elif len(person["years"]) > 1:
+        elif is_leader and len(person["years"]) > 1:
             years_conflicts += 1
         if len(person["shirts"]) == 1:
             shirt_counts[next(iter(person["shirts"]))] += 1
         elif len(person["shirts"]) > 1:
             shirt_conflicts += 1
 
-    leadership_total = sum(role_counts.values())
+    profile_total = sum(role_counts.values())
+    leadership_total = sum(role_counts[key] for key, _label in LEADERSHIP_CATEGORIES)
+    dgroup_profile = _distribution(
+        DGROUP_STATUS_CATEGORIES, role_counts, profile_total, include_segments=True
+    )
+    dgroup_profile.update(
+        unreported=len(people) - profile_total - leadership_conflicts,
+        conflicts=leadership_conflicts,
+    )
     years_total = sum(years_counts.values())
     shirt_total = sum(shirt_counts.values())
     leadership = _distribution(
@@ -611,7 +605,7 @@ def participant_ministry_and_shirt_metrics(db, batch_id):
     )
     leadership.update(
         {
-            "unreported": len(people) - leadership_total - leadership_conflicts,
+            "unreported": dgroup_profile["unreported"],
             "conflicts": leadership_conflicts,
         }
     )
@@ -654,6 +648,7 @@ def participant_ministry_and_shirt_metrics(db, batch_id):
             }
         )
     return {
+        "dgroup_profile": dgroup_profile,
         "leadership": leadership,
         "leadership_downlines": {
             **_distribution(
@@ -667,7 +662,7 @@ def participant_ministry_and_shirt_metrics(db, batch_id):
         "years_leading": {
             "total": years_total,
             "items": years_items,
-            "unreported": len(people) - years_total - years_conflicts,
+            "unreported": leadership_total - years_total - years_conflicts,
             "conflicts": years_conflicts,
         },
         "shirt_sizes": {
@@ -681,6 +676,11 @@ def participant_ministry_and_shirt_metrics(db, batch_id):
 
 def participant_ministry_and_shirt_metrics_empty():
     return {
+        "dgroup_profile": {
+            **_distribution(DGROUP_STATUS_CATEGORIES, Counter(), 0, include_segments=True),
+            "unreported": 0,
+            "conflicts": 0,
+        },
         "leadership_downlines": {
             **_distribution((), Counter(), 0),
             "max_count": 0,
@@ -724,39 +724,27 @@ def participant_ministry_and_shirt_metrics_empty():
 
 
 def participant_transportation_metrics(db, batch_id):
-    """Aggregate each travel direction once per curated registrant."""
+    """Aggregate effective travel modes once per durable participant."""
     if batch_id is None:
         return participant_transportation_metrics_empty()
-    to_mmrc = _source_answers_expression(
-        db,
-        "r",
-        ("Transportation From Ccf To Mmrc", "Transportation To MMRC"),
-    )
-    from_mmrc = _source_answers_expression(
-        db,
-        "r",
-        ("Transportation From Mmrc To Ccf", "Transportation From MMRC"),
-    )
     rows = db.execute(
-        """
-        SELECT cr.id curated_id, {to_mmrc} to_mmrc, {from_mmrc} from_mmrc
-        FROM curated_registrants cr
-        JOIN curated_registrant_sources source
-          ON source.event_id = cr.event_id AND source.batch_id = cr.batch_id
-         AND source.curated_registrant_id = cr.id
-        JOIN registrants r
-          ON r.batch_id = source.batch_id AND r.id = source.registrant_id
-        WHERE cr.batch_id = ?
-        ORDER BY cr.id, source.id
-        """.format(to_mmrc=to_mmrc, from_mmrc=from_mmrc),
-        (batch_id,),
+        """SELECT link.attestation_participant_id participant_id, r.source_data_json
+           FROM attestation_participant_registrants link
+           JOIN registrants r ON r.id = link.registrant_id AND r.batch_id = link.batch_id
+           WHERE link.batch_id = ? ORDER BY r.id""", (batch_id,),
     ).fetchall()
-    people = defaultdict(lambda: {"to_mmrc": set(), "from_mmrc": set()})
+    sources = defaultdict(list)
     for row in rows:
-        for direction in ("to_mmrc", "from_mmrc"):
-            mode = _transportation_mode(row[direction])
-            if mode:
-                people[row["curated_id"]][direction].add(mode)
+        sources[row["participant_id"]].append(row)
+    overrides = defaultdict(list)
+    for row in db.execute(
+        """SELECT state.* FROM participant_transportation state
+           JOIN import_batches batch ON batch.event_id = state.event_id
+           WHERE batch.id = ?""", (batch_id,),
+    ).fetchall():
+        overrides[row["attestation_participant_id"]].append(row)
+    people = {person_id: resolve_trip_values(values, overrides[person_id])
+              for person_id, values in sources.items()}
 
     direction_definitions = (
         ("to_mmrc", "CCF to MMRC", "Outbound trip", "Bus to MMRC"),
@@ -769,17 +757,15 @@ def participant_transportation_metrics(db, batch_id):
         conflicts = 0
         unreported = 0
         for person in people.values():
-            answers = person[key]
-            if not answers:
+            mode = person[key]["mode"]
+            if mode == "unreported":
                 unreported += 1
-            elif len(answers) > 1:
+            elif mode == "conflicting":
                 conflicts += 1
+            elif mode in counts:
+                counts[mode] += 1
             else:
-                mode = next(iter(answers))
-                if mode in counts:
-                    counts[mode] += 1
-                else:
-                    other += 1
+                other += 1
         total = sum(counts.values())
         directions.append(
             {

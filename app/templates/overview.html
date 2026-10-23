@@ -401,15 +401,15 @@
 
 <section class="dashboard-leadership panel" id="dashboard-leadership" aria-labelledby="dashboard-leadership-title">
     <header class="dashboard-insight-heading">
-        <div class="phase1-section-heading"><span class="phase1-section-icon">{{ icon('users', 20) }}</span><div><p class="eyebrow">Dgroup Information</p><h2 id="dashboard-leadership-title">Dgroup Leadership</h2></div></div>
+        <div class="phase1-section-heading"><span class="phase1-section-icon">{{ icon('users', 20) }}</span><div><p class="eyebrow">Dgroup Information</p><h2 id="dashboard-leadership-title">Dgroup Profile</h2></div></div>
         <span>{{ dashboard.leadership.total|number }} reported leaders</span>
     </header>
-    {% if dashboard.leadership.total or dashboard.years_leading.total %}<div class="dashboard-leadership-grid">
+    {% if dashboard.dgroup_profile.total %}<div class="dashboard-leadership-grid">
         <div class="dashboard-leadership-roles">
-            <div class="dashboard-leadership-donut" role="img" aria-label="{{ dashboard.leadership['items'][0].count|number }} Dgroup Leaders and {{ dashboard.leadership['items'][1].count|number }} D12 Leaders" style="background: conic-gradient({% for item in dashboard.leadership['items'] %}var(--leadership-{{ item.key|replace('_', '-') }}) {{ item.start }}% {{ item.end }}%{% if not loop.last %}, {% endif %}{% endfor %})"><span><strong>{{ dashboard.leadership.total|number }}</strong><small>Leaders</small></span></div>
-            <div class="dashboard-leadership-legend">{% for item in dashboard.leadership['items'] %}<div><i class="is-{{ item.key }}"></i><span>{{ item.label }}</span><strong>{{ item.count|number }}</strong><small>{{ item.percentage|percent }}</small></div>{% endfor %}</div>
+            <div class="dashboard-leadership-donut" role="img" aria-label="{% for item in dashboard.dgroup_profile['items'] %}{{ item.count|number }} {{ item.label }}{% if not loop.last %}, {% endif %}{% endfor %}" style="background: conic-gradient({% for item in dashboard.dgroup_profile['items'] %}var(--leadership-{{ item.key|replace('_', '-') }}) {{ item.start }}% {{ item.end }}%{% if not loop.last %}, {% endif %}{% endfor %})"><span><strong>{{ dashboard.dgroup_profile.total|number }}</strong><small>Registrants</small></span></div>
+            <div class="dashboard-leadership-legend">{% for item in dashboard.dgroup_profile['items'] %}<div><i class="is-{{ item.key }}"></i><span>{{ item.label }}</span><strong>{{ item.count|number }}</strong><small>{{ item.percentage|percent }}</small></div>{% endfor %}</div>
         </div>
-        <div class="dashboard-years-chart"><header><div><h3>Years Leading</h3><p>All reported leaders, whether Dgroup or D12.</p></div><strong>{{ dashboard.years_leading.total|number }} responses</strong></header><div>{% for item in dashboard.years_leading['items'] %}<div class="dashboard-horizontal-bar"><span>{{ item.label }}</span><div><i style="width: {{ item.percentage }}%"></i></div><strong>{{ item.count|number }}</strong><small>{{ item.percentage|percent }}</small></div>{% endfor %}</div>{% if dashboard.years_leading.unreported %}<footer>{{ dashboard.years_leading.unreported|number }} {{ 'registrant has' if dashboard.years_leading.unreported == 1 else 'registrants have' }} no years-leading response.</footer>{% endif %}</div>
+        <div class="dashboard-years-chart"><header><div><h3>Years Leading</h3><p>All reported leaders, whether Dgroup or D12.</p></div><strong>{{ dashboard.years_leading.total|number }} responses</strong></header><div>{% for item in dashboard.years_leading['items'] %}<div class="dashboard-horizontal-bar"><span>{{ item.label }}</span><div><i style="width: {{ item.percentage }}%"></i></div><strong>{{ item.count|number }}</strong><small>{{ item.percentage|percent }}</small></div>{% endfor %}</div>{% if dashboard.years_leading.unreported %}<footer>{{ dashboard.years_leading.unreported|number }} {{ 'leader has' if dashboard.years_leading.unreported == 1 else 'leaders have' }} no years-leading response.</footer>{% endif %}</div>
         <div class="dashboard-years-chart dashboard-downlines-chart">
             <header><div><h3>Dleaders by Downline Count</h3><p>Dgroup and D12 leaders, based on “How Many Are You Leading”. Each bar shows an exact downline count.</p></div><strong>{{ dashboard.leadership_downlines.total|number }} leaders</strong></header>
             {% if dashboard.leadership_downlines.total %}
@@ -431,14 +431,16 @@
             {% set downlines = dashboard.leadership_downlines %}
             {% if downlines.zero or downlines.unreported or downlines.invalid or downlines.conflicts %}<footer>Not included: {{ downlines.zero|number }} with zero downlines · {{ downlines.unreported|number }} without a response · {{ (downlines.invalid + downlines.conflicts)|number }} with invalid or conflicting responses.</footer>{% endif %}
         </div>
-    </div>{% else %}<div class="dashboard-insight-empty">No Dgroup leadership information was reported in the active registration batch.</div>{% endif %}
+    </div>{% else %}<div class="dashboard-insight-empty">No Dgroup status information was reported in the active registration batch.</div>{% endif %}
 </section>
 
 <section class="dashboard-transportation panel" id="dashboard-transportation" aria-labelledby="dashboard-transportation-title">
     <header class="dashboard-insight-heading">
         <div class="phase1-section-heading"><span class="phase1-section-icon">{{ icon('bus', 20) }}</span><div><p class="eyebrow">Travel Logistics</p><h2 id="dashboard-transportation-title">Transportation Plan</h2></div></div>
         <span>{{ dashboard.transportation.registrants|number }} unique registrants</span>
+        {% if transportation_allowed and not public_dashboard|default(false) %}<a class="button secondary" href="{{ url_for('transportation.manage', event_id=event.id) }}">Manage Transportation</a>{% endif %}
     </header>
+    <p>Current travel arrangements, including manual updates. Each participant is counted once per trip.</p>
     {% if dashboard.transportation.registrants %}<div class="dashboard-transportation-grid">
         {% for direction in dashboard.transportation.directions %}<article class="dashboard-transport-direction is-{{ direction.key }}">
             <header><div><small>{{ direction.trip_label }}</small><h3>{{ direction.label }}</h3></div><strong>{{ direction.total|number }}<small>categorized</small></strong></header>
@@ -450,9 +452,9 @@
                     <strong>{{ item.count|number }}</strong>
                 </div>{% endfor %}
             </div>
-            {% if direction.unreported or direction.other or direction.conflicts %}<footer>{% if direction.unreported %}<span>{{ direction.unreported|number }} without a response</span>{% endif %}{% if direction.other %}<span>{{ direction.other|number }} other {{ 'response' if direction.other == 1 else 'responses' }}</span>{% endif %}{% if direction.conflicts %}<span>{{ direction.conflicts|number }} conflicting duplicate {{ 'response' if direction.conflicts == 1 else 'responses' }}</span>{% endif %}</footer>{% endif %}
+            {% if direction.unreported or direction.other or direction.conflicts %}<footer>{% if direction.unreported %}<span>{{ direction.unreported|number }} not reported</span>{% endif %}{% if direction.other %}<span>{{ direction.other|number }} other {{ 'response' if direction.other == 1 else 'responses' }}</span>{% endif %}{% if direction.conflicts %}<span>{{ direction.conflicts|number }} conflicting {{ 'response' if direction.conflicts == 1 else 'responses' }}</span>{% endif %}</footer>{% endif %}
         </article>{% endfor %}
-    </div>{% else %}<div class="dashboard-insight-empty">No transportation information was reported in the active registration batch.</div>{% endif %}
+    </div>{% else %}<div class="dashboard-insight-empty">No participants are available in the active registration batch.</div>{% endif %}
 </section>
 
 <section class="dashboard-shirt-sizes panel" id="dashboard-shirt-sizes" aria-labelledby="dashboard-shirt-sizes-title">

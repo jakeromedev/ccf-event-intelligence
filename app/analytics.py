@@ -10,7 +10,13 @@ from __future__ import annotations
 import re
 from collections import Counter, defaultdict
 
-from .normalization import calculate_age_at_event, get_age_bucket, normalize_gender, normalize_life_stage
+from .normalization import (
+    calculate_age_at_event,
+    get_age_bucket,
+    normalize_gender,
+    normalize_life_stage,
+    normalize_dgroup_status,
+)
 
 
 UNKNOWN = "Unknown"
@@ -90,7 +96,13 @@ def normalize_yes_no(value):
     return "unknown"
 
 
-def classify_dgroup(member_value, leader_value):
+def classify_dgroup(member_value, leader_value, status_value=None):
+    if _clean(status_value):
+        return {
+            "dgroup_leader": "Dgroup Leader",
+            "d12_leader": "D12 Leader",
+            "timothy_member": "Timothy / Dgroup member",
+        }.get(normalize_dgroup_status(status_value), UNKNOWN)
     member = normalize_yes_no(member_value)
     leader = normalize_yes_no(leader_value)
     if member == "yes" and leader == "yes":
@@ -123,6 +135,7 @@ def _participants(db, event_id, batch_id, event_date):
     occupation = _json_expression(db, "r", "Occupation")
     home_area = _json_expression(db, "r", "Home Area")
     dgroup_member = _json_expression(db, "r", "Are You Part Of A Discipleship Group")
+    dgroup_status = _json_expression(db, "r", "Dgroup Status")
     dgroup_leader = _json_expression(db, "r", "Are You Leading A Discipleship Group")
     payment_method = _json_expression(db, "b", "Payment Method")
     rows = db.execute(
@@ -135,6 +148,7 @@ def _participants(db, event_id, batch_id, event_date):
                {occupation} occupation,
                {home_area} home_area,
                {dgroup_member} dgroup_member,
+               {dgroup_status} dgroup_status,
                {dgroup_leader} dgroup_leader
         FROM curated_registrants cr
         JOIN curated_registrant_sources source
@@ -154,6 +168,7 @@ def _participants(db, event_id, batch_id, event_date):
             occupation=occupation,
             home_area=home_area,
             dgroup_member=dgroup_member,
+            dgroup_status=dgroup_status,
             dgroup_leader=dgroup_leader,
         ),
         (event_id, batch_id),
@@ -205,7 +220,7 @@ def _participants(db, event_id, batch_id, event_date):
             [item["home_area"] for item in source_rows], normalize_profile_value
         )
         dgroups = {
-            classify_dgroup(item["dgroup_member"], item["dgroup_leader"])
+            classify_dgroup(item["dgroup_member"], item["dgroup_leader"], item["dgroup_status"])
             for item in source_rows
         }
         dgroup_value = dgroups.pop() if len(dgroups) == 1 else CONFLICTING

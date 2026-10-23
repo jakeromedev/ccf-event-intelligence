@@ -53,6 +53,7 @@ CAPABILITY_VIEW_DATA_QUALITY = "data_quality.view"
 CAPABILITY_VIEW_IMPORTS = "imports.view"
 CAPABILITY_MANAGE_IMPORTS = "imports.manage"
 CAPABILITY_VIEW_FAILED_PAYMENTS = "failed_payments.view"
+CAPABILITY_MANAGE_TRANSPORTATION = "transportation.manage"
 CAPABILITY_CREATE_EVENTS = "events.create"
 CAPABILITY_VIEW_EVENT_SETTINGS = "events.settings.view"
 CAPABILITY_VIEW_ADMIN_TABLES = "admin_tables.view"
@@ -81,6 +82,7 @@ STANDARD_USER_CAPABILITIES = frozenset(
         CAPABILITY_VIEW_IMPORTS,
         CAPABILITY_MANAGE_IMPORTS,
         CAPABILITY_VIEW_FAILED_PAYMENTS,
+        CAPABILITY_MANAGE_TRANSPORTATION,
     }
 )
 
@@ -229,6 +231,15 @@ def has_capability(capability: str) -> bool:
 
 def can_view_dashboard() -> bool:
     return has_capability(CAPABILITY_VIEW_DASHBOARD)
+
+
+def can_manage_transportation() -> bool:
+    return bool(
+        current_user.is_authenticated
+        and current_user.status == "approved"
+        and current_user.role in {"admin", "user"}
+        and has_capability(CAPABILITY_MANAGE_TRANSPORTATION)
+    )
 
 
 def can_view_registrations() -> bool:
@@ -682,6 +693,7 @@ def init_app(app) -> None:
             "data_quality_allowed": can_view_data_quality(),
             "imports_allowed": can_view_imports(),
             "failed_payments_allowed": has_capability(CAPABILITY_VIEW_FAILED_PAYMENTS),
+            "transportation_allowed": can_manage_transportation(),
             "import_mutations_allowed": import_mutations_allowed(),
             "event_creation_allowed": can_create_events(),
             "event_settings_visible": can_view_event_settings(),

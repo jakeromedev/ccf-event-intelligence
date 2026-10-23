@@ -1,0 +1,53 @@
+.transportation-page { padding: 24px; margin-bottom: 24px; }
+.transportation-history-entry { padding: 20px 0; border-top: 1px solid var(--b1g-border); overflow-wrap: anywhere; }
+.transportation-history-entry h2 { font-size: 18px; }
+.transportation-history-reason { white-space: pre-wrap; }
+.transportation-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+.transportation-heading h1 { margin: 5px 0 10px; font-size: 26px; color: var(--b1g-red-dark); }
+.transportation-heading p { max-width: 660px; }
+.transportation-heading > a { flex-shrink: 0; }
+.transportation-filters { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px; padding: 20px 0; margin-top: 14px; border-top: 1px solid var(--b1g-border); }
+.transportation-filters label { display: grid; gap: 6px; font-size: 12px; font-weight: 600; }
+.transportation-filters .transportation-search { flex: 1 1 280px; }
+.transportation-filters input, .transportation-filters select, .transportation-dialog select, .transportation-dialog textarea { width: 100%; min-height: 42px; padding: 10px; border: 1px solid #c9c9c9; border-radius: 7px; background: #fff; font: inherit; color: #242424; }
+.transportation-result-summary { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin: 10px 0 16px; font-size: 13px; }
+.transportation-result-summary span, .transportation-table small, .transportation-trip small { color: #666; }
+.transportation-table-wrap { overflow-x: auto; }
+.transportation-table { width: 100%; border-collapse: collapse; min-width: 850px; }
+.transportation-table th { text-align: left; padding: 12px; background: #f5f2ee; font-size: 12px; }
+.transportation-table td { padding: 16px 12px; border-bottom: 1px solid var(--b1g-border); font-size: 13px; vertical-align: top; max-width: 300px; overflow-wrap: anywhere; }
+.transportation-table strong, .transportation-table small { display: block; margin-bottom: 5px; }
+.transportation-source { display: inline-block; border-radius: 5px; background: #f1f1f1; padding: 4px 7px; font-size: 11px; }
+.transportation-source.is-manual { color: #7e271d; background: #fcece5; }
+.transportation-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; }
+.transportation-pagination nav { display: flex; gap: 8px; }
+.transportation-empty { text-align: center; padding: 45px 16px; }
+.transportation-empty h2 { font-size: 20px; }
+.transportation-dialog { width: min(720px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); padding: 24px; border: 1px solid var(--b1g-border); border-radius: 14px; color: #242424; overflow-y: auto; box-shadow: 0 20px 80px #0004; }
+.transportation-dialog::backdrop { background: #0007; }
+.transportation-dialog [hidden] { display: none !important; }
+.transportation-dialog header, .transportation-dialog footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.transportation-dialog h2 { margin: 6px 0; font-size: 23px; }
+.transportation-dialog footer { justify-content: flex-end; flex-wrap: wrap; margin-top: 24px; }
+.transportation-dialog fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.transportation-trip-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.transportation-trip { background: #f8f6f3; border: 1px solid var(--b1g-border); padding: 16px; border-radius: 8px; }
+.transportation-trip label { font-weight: 700; }
+.transportation-trip p { font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; min-height: 36px; }
+.transportation-trip small { display: block; margin-top: 8px; line-height: 1.5; }
+.transportation-reason { display: block; margin-top: 20px; font-weight: 600; }
+.transportation-reason span { font-weight: 400; color: #666; }
+.transportation-dialog textarea { display: block; margin-top: 8px; resize: vertical; }
+.transportation-error { background: #fff0ec; color: #8d231a; padding: 12px; border-radius: 7px; }
+.transportation-notice { color: #555; font-size: 13px; }
+.transportation-dialog button:disabled { opacity: .55; cursor: not-allowed; }
+.transportation-dialog :focus-visible, .transportation-page :focus-visible { outline: 3px solid #397c91; outline-offset: 3px; }
+@media (max-width: 700px) {
+    .transportation-page { padding: 16px; }
+    .transportation-heading { flex-direction: column; }
+    .transportation-filters label { flex: 1 1 140px; }
+    .transportation-trip-fields { grid-template-columns: 1fr; }
+    .transportation-dialog { padding: 18px; }
+    .transportation-dialog footer { justify-content: stretch; }
+    .transportation-dialog footer button { flex: 1 1 auto; }
+}
